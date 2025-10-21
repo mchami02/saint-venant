@@ -1,0 +1,46 @@
+{
+  "comment": "Rusanov flux - Dam break into wet domain (Riemann problem)",
+  
+  "save_final_time_only": false,
+  "save_frequency": 100,
+  
+  "probes": [],
+  
+  "is_test_case": true,
+  "test_case": "DamBreakWet",
+  
+  "initial_condition": "DamBreakWet",
+  "initial_height": 2.0,
+  "initial_discharge": 0.0,
+  "init_file": "",
+  
+  "xmin": 0.0,
+  "xmax": 25.0,
+  "dx": 0.25,
+  
+  "numerical_flux": "Rusanov",
+  "scheme_order": 2,
+  "time_scheme": "ExplicitEuler",
+  
+  "initial_time": 0.0,
+  "final_time": 50.0,
+  "time_step": 0.01,
+  "CFL": 0.9,
+  
+  "gravity": 9.81,
+  
+  "left_BC": "Neumann",
+  "left_BC_imposed_height": 0.0,
+  "left_BC_imposed_discharge": 0.0,
+  "left_BC_data_file": "",
+  
+  "right_BC": "Neumann",
+  "right_BC_imposed_height": 0.0,
+  "right_BC_imposed_discharge": 0.0,
+  "right_BC_data_file": "",
+  
+  "is_topography": true,
+  "topography_type": "FlatBottom",
+  "topography_file": ""
+}
+

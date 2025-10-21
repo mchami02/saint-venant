@@ -1,0 +1,4 @@
+__pycache__/
+results/
+saint_venant.egg-info/
+numerical_solver/temp/
