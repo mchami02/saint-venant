@@ -56,21 +56,45 @@ class FiniteVolume(ABC):
     def num_flux(self, sol_g: np.ndarray, sol_d: np.ndarray) -> np.ndarray:
         """Compute numerical flux at an interface.
         
+        Calculates the numerical flux F̂(U_L, U_R) at a cell interface given the 
+        left and right states. This is the key component of a finite volume scheme.
+        
         Args:
-            sol_g: Left state [h, q]
-            sol_d: Right state [h, q]
+            sol_g: Left (gauche) state vector of shape (2,) containing [h, q] where:
+                  - h: water height (m)
+                  - q: discharge = h*u (m²/s)
+            sol_d: Right (droite) state vector of shape (2,) containing [h, q]
             
         Returns:
-            Numerical flux vector
+            np.ndarray: Numerical flux vector of shape (2,) representing [F_h, F_q]
+                       where F_h is mass flux and F_q is momentum flux.
         """
         pass
     
     def build_flux_vector(self, t: float, sol: np.ndarray):
         """Build flux vector using reconstruction and numerical flux.
         
+        Constructs the discrete flux contribution for the finite volume method:
+            dU_i/dt = -(F̂_{i+1/2} - F̂_{i-1/2})/dx + S_i
+        
+        This function computes the term (F̂_{i+1/2} - F̂_{i-1/2}) for each cell i.
+        
+        For first-order schemes (scheme_order=1):
+            - Uses piecewise constant reconstruction (cell-centered values)
+            - U_{i-1/2}^L = U_{i-1}, U_{i-1/2}^R = U_i
+        
+        For second-order schemes (scheme_order=2):
+            - Uses MUSCL reconstruction with minmod slope limiter
+            - U_{i+1/2}^L = U_i + 0.5*dx*σ_i
+            - U_{i+1/2}^R = U_{i+1} - 0.5*dx*σ_{i+1}
+            - where σ_i = minmod((U_i - U_{i-1})/dx, (U_{i+1} - U_i)/dx)
+        
         Args:
-            t: Current time
-            sol: Current solution array (n_cells x 2)
+            t: Current simulation time (s), used for time-dependent boundary conditions
+            sol: Current solution array of shape (n_cells, 2) containing [h, q] at each cell
+            
+        Returns:
+            None. Updates self.flux_vector in place with shape (n_cells, 2).
         """
         # Reset flux
         self.flux_vector.fill(0.0)
@@ -144,14 +168,22 @@ class FiniteVolume(ABC):
         self.flux_vector[n_cells - 1, :] -= self.num_flux(sol_g[n_cells, :], sol_d[n_cells, :])
     
     def minmod(self, a: float, b: float) -> float:
-        """Minmod slope limiter.
+        """Minmod slope limiter for TVD (Total Variation Diminishing) schemes.
+        
+        The minmod limiter is defined as:
+            minmod(a, b) = { 0           if a*b <= 0  (different signs)
+                           { a           if |a| < |b|
+                           { b           otherwise
+        
+        This limiter prevents spurious oscillations near discontinuities while
+        maintaining second-order accuracy in smooth regions.
         
         Args:
-            a: First slope
-            b: Second slope
+            a: First slope estimate (typically upwind slope)
+            b: Second slope estimate (typically downwind slope)
             
         Returns:
-            Limited slope
+            float: Limited slope value. Returns 0 at extrema, preserving monotonicity.
         """
         if a * b < 0:
             return 0.0
@@ -170,15 +202,24 @@ class FiniteVolume(ABC):
 
 
 class LaxFriedrichs(FiniteVolume):
-    """Lax-Friedrichs numerical flux scheme."""
+    """Lax-Friedrichs numerical flux scheme.
+    
+    A simple and robust monotone numerical flux based on central differencing
+    with artificial viscosity. The Lax-Friedrichs flux is defined as:
+    
+        F̂(U_L, U_R) = 1/2 * [F(U_L) + F(U_R) - α(U_R - U_L)]
+    
+    where α = dx/dt is the artificial viscosity coefficient and F(U) is the
+    physical flux. This scheme is highly dissipative but very stable.
+    """
     
     def __init__(self, data_file: DataFile = None, mesh: Mesh = None, physics: Physics = None):
         """Initialize Lax-Friedrichs flux.
         
         Args:
-            data_file: DataFile with parameters
-            mesh: Mesh object
-            physics: Physics object
+            data_file: DataFile with simulation parameters (dt, dx, g)
+            mesh: Mesh object for spatial discretization
+            physics: Physics object for physical flux computation
         """
         super().__init__(data_file, mesh, physics)
         self.flux_name = "LF"
@@ -186,12 +227,20 @@ class LaxFriedrichs(FiniteVolume):
     def num_flux(self, sol_g: np.ndarray, sol_d: np.ndarray) -> np.ndarray:
         """Compute Lax-Friedrichs numerical flux (Numba-accelerated).
         
+        Implements: F̂ = 1/2 * [F(U_L) + F(U_R) - (dx/dt)(U_R - U_L)]
+        
+        Mathematical formulation:
+            For shallow water equations with U = [h, q]:
+            F̂_h = 1/2 * [q_L + q_R - (dx/dt)(h_R - h_L)]
+            F̂_q = 1/2 * [F_q(U_L) + F_q(U_R) - (dx/dt)(q_R - q_L)]
+            where F_q = q²/h + 0.5*g*h²
+        
         Args:
-            sol_g: Left state [h, q]
+            sol_g: Left state [h, q] where h > 0 (m) and q (m²/s)
             sol_d: Right state [h, q]
             
         Returns:
-            Numerical flux vector
+            np.ndarray: Numerical flux [F̂_h, F̂_q] of shape (2,)
         """
         dt = self._DF.time_step
         dx = self._DF.dx
@@ -201,15 +250,25 @@ class LaxFriedrichs(FiniteVolume):
 
 
 class Rusanov(FiniteVolume):
-    """Rusanov (local Lax-Friedrichs) numerical flux scheme."""
+    """Rusanov (local Lax-Friedrichs) numerical flux scheme.
+    
+    An improved version of Lax-Friedrichs that uses local wave speed estimates
+    instead of a global artificial viscosity. The Rusanov flux is:
+    
+        F̂(U_L, U_R) = 1/2 * [F(U_L) + F(U_R) - α(U_R - U_L)]
+    
+    where α = max(|λ_L|, |λ_R|) with λ = u ± √(gh) being the eigenvalues of
+    the flux Jacobian. This provides less dissipation than Lax-Friedrichs while
+    maintaining robustness.
+    """
     
     def __init__(self, data_file: DataFile = None, mesh: Mesh = None, physics: Physics = None):
         """Initialize Rusanov flux.
         
         Args:
-            data_file: DataFile with parameters
-            mesh: Mesh object
-            physics: Physics object
+            data_file: DataFile with simulation parameters (gravity constant g)
+            mesh: Mesh object for spatial discretization
+            physics: Physics object for flux and wave speed computation
         """
         super().__init__(data_file, mesh, physics)
         self.flux_name = "Rusanov"
@@ -217,27 +276,51 @@ class Rusanov(FiniteVolume):
     def num_flux(self, sol_g: np.ndarray, sol_d: np.ndarray) -> np.ndarray:
         """Compute Rusanov numerical flux (Numba-accelerated).
         
+        Implements: F̂ = 1/2 * [F(U_L) + F(U_R) - α(U_R - U_L)]
+        where α = max(|u_L - √(gh_L)|, |u_L + √(gh_L)|, 
+                      |u_R - √(gh_R)|, |u_R + √(gh_R)|)
+        
+        The wave speeds λ = u ± √(gh) are the eigenvalues of the shallow water
+        flux Jacobian, corresponding to the left-going and right-going gravity waves.
+        
+        Special handling for dry states (h ≈ 0):
+            - If h_L ≈ 0: uses only right state contribution
+            - If h_R ≈ 0: uses only left state contribution
+            - If both ≈ 0: returns zero flux
+        
         Args:
-            sol_g: Left state [h, q]
+            sol_g: Left state [h, q] with h in meters, q in m²/s
             sol_d: Right state [h, q]
             
         Returns:
-            Numerical flux vector
+            np.ndarray: Numerical flux vector [F̂_h, F̂_q] of shape (2,)
         """
         g = self._DF.g
         return rusanov_flux_kernel(sol_g, sol_d, g)
 
 
 class HLL(FiniteVolume):
-    """HLL (Harten-Lax-van Leer) numerical flux scheme."""
+    """HLL (Harten-Lax-van Leer) numerical flux scheme.
+    
+    A three-wave approximate Riemann solver that assumes a simplified wave structure
+    with two waves separating three constant states. The HLL flux is:
+    
+        F̂(U_L, U_R) = { F(U_L)                                    if 0 ≤ λ_1
+                      { (λ_2*F(U_L) - λ_1*F(U_R) + λ_1*λ_2*(U_R - U_L))/(λ_2 - λ_1)  if λ_1 < 0 < λ_2
+                      { F(U_R)                                    if λ_2 ≤ 0
+    
+    where λ_1 and λ_2 are estimates of the minimum and maximum wave speeds.
+    This scheme resolves isolated shocks and rarefactions better than Rusanov
+    while maintaining positivity of water height.
+    """
     
     def __init__(self, data_file: DataFile = None, mesh: Mesh = None, physics: Physics = None):
         """Initialize HLL flux.
         
         Args:
-            data_file: DataFile with parameters
-            mesh: Mesh object
-            physics: Physics object
+            data_file: DataFile with simulation parameters (gravity constant g)
+            mesh: Mesh object for spatial discretization
+            physics: Physics object for flux and wave speed computation
         """
         super().__init__(data_file, mesh, physics)
         self.flux_name = "HLL"
@@ -245,12 +328,27 @@ class HLL(FiniteVolume):
     def num_flux(self, sol_g: np.ndarray, sol_d: np.ndarray) -> np.ndarray:
         """Compute HLL numerical flux (Numba-accelerated).
         
+        Mathematical formulation:
+            λ_1 = min(u_L - √(gh_L), u_R - √(gh_R))  [slowest wave]
+            λ_2 = max(u_L + √(gh_L), u_R + √(gh_R))  [fastest wave]
+        
+        Then:
+            - If λ_1 ≥ 0: supersonic from left, use F(U_L)
+            - If λ_2 ≤ 0: supersonic from right, use F(U_R)
+            - If λ_1 < 0 < λ_2: subsonic, use weighted average
+        
+        For shallow water, this correctly captures:
+            - Hydraulic jumps (shocks)
+            - Rarefaction waves
+            - Transcritical flows
+            - Wet/dry interfaces
+        
         Args:
-            sol_g: Left state [h, q]
+            sol_g: Left state [h, q] with h ≥ 0 (m), q (m²/s), u = q/h (m/s)
             sol_d: Right state [h, q]
             
         Returns:
-            Numerical flux vector
+            np.ndarray: Numerical flux vector [F̂_h, F̂_q] of shape (2,)
         """
         g = self._DF.g
         return hll_flux_kernel(sol_g, sol_d, g)

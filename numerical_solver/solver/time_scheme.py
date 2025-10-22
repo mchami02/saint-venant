@@ -90,7 +90,18 @@ class TimeScheme(ABC):
         self.probes_indices = [0] * self.n_probes
     
     def build_probes_cell_indices(self):
-        """Find cell indices corresponding to probe positions."""
+        """Find cell indices corresponding to probe positions.
+        
+        For each probe at position x_probe, finds the nearest cell center by
+        computing:
+            index = argmin_i |x_i - x_probe|
+        
+        where x_i are the cell centers. This allows time series extraction
+        at specified spatial locations during simulation.
+        
+        Returns:
+            None. Updates self.probes_indices in place.
+        """
         nb_cells = self._mesh.get_number_of_cells()
         cell_centers = self._mesh.get_cell_centers()
         
@@ -109,11 +120,24 @@ class TimeScheme(ABC):
             self.probes_indices[i] = index
     
     def save_current_solution(self, file_name: str, verbosity: int = 1):
-        """Save current solution to file.
+        """Save current solution to ASCII file with derived quantities.
+        
+        Writes solution data in column format:
+            x, H, h, u, q, Fr
+        where:
+            - x: cell center position (m)
+            - H = h + z: total water surface elevation (m)
+            - h: water height (m)
+            - u = q/h: velocity (m/s)
+            - q: discharge (m²/s)
+            - Fr = |u|/√(gh): Froude number (dimensionless)
         
         Args:
             file_name: Output file path
-            verbosity: Output verbosity level
+            verbosity: Output verbosity level (0=silent, 1=normal)
+            
+        Returns:
+            None. Creates/overwrites the specified file.
         """
         if verbosity > 0:
             print(f"Saving solution at t = {self.current_time}")
@@ -133,7 +157,20 @@ class TimeScheme(ABC):
                 f.write(f"{cell_centers[i]} {h + topography[i]} {h} {u} {q} {Fr}\n")
     
     def save_probes(self):
-        """Save probe data at current time."""
+        """Save probe data at current time step.
+        
+        Appends current state at each probe location to corresponding file.
+        Each line contains: time, H, h, u, q, Fr
+        
+        This allows monitoring of temporal evolution at fixed spatial locations,
+        useful for:
+            - Validating against experimental data
+            - Analyzing wave propagation
+            - Studying flow transitions (subcritical/supercritical)
+        
+        Returns:
+            None. Appends data to probe files in results directory.
+        """
         nb_probes = self._DF.n_probes
         g = self._DF.g
         topography = self._physics.get_topography()
@@ -266,10 +303,21 @@ class TimeScheme(ABC):
         print(f"Results saved to: {h5_filename}")
     
     def compute_L2_error(self) -> np.ndarray:
-        """Compute L2 error compared to exact solution.
+        """Compute L2 (root mean square) error compared to exact solution.
+        
+        The discrete L2 norm is defined as:
+            ||e||_2 = √(Δx * Σ_i |u_i - u_exact,i|²)
+        
+        This provides a global measure of solution accuracy. For test cases
+        with known analytical solutions, convergence studies plot:
+            log(||e||_2) vs log(Δx)
+        
+        The slope gives the order of accuracy.
         
         Returns:
-            Array of [h_error, q_error]
+            np.ndarray: Error vector of shape (2,) containing:
+                       [0] = L2 error in water height h
+                       [1] = L2 error in discharge q
         """
         error = np.zeros(2)
         exact_sol = self._physics.get_exact_solution()
@@ -281,10 +329,20 @@ class TimeScheme(ABC):
         return error
     
     def compute_L1_error(self) -> np.ndarray:
-        """Compute L1 error compared to exact solution.
+        """Compute L1 (mean absolute) error compared to exact solution.
+        
+        The discrete L1 norm is defined as:
+            ||e||_1 = Δx * Σ_i |u_i - u_exact,i|
+        
+        The L1 norm is:
+            - Less sensitive to isolated large errors than L2
+            - More robust for discontinuous solutions (shocks)
+            - Useful for verifying TVD property preservation
         
         Returns:
-            Array of [h_error, q_error]
+            np.ndarray: Error vector of shape (2,) containing:
+                       [0] = L1 error in water height h
+                       [1] = L1 error in discharge q
         """
         error = np.zeros(2)
         exact_sol = self._physics.get_exact_solution()
@@ -336,8 +394,22 @@ class ExplicitEuler(TimeScheme):
     def one_step(self):
         """Perform one Explicit Euler time step (Numba-accelerated).
         
-        Updates solution: Sol^{n+1} = Sol^n + dt * (F/dx + S)
-        where F is the numerical flux and S is the source term.
+        Mathematical formulation:
+            U_i^{n+1} = U_i^n + Δt * [-(F̂_{i+1/2} - F̂_{i-1/2})/Δx + S_i]
+        
+        where:
+            - U_i = [h, q]ᵀ: conserved variables at cell i
+            - F̂_{i+1/2}: numerical flux at interface between cells i and i+1
+            - S_i: source term (bed slope, friction, etc.)
+            - Δt: time step, Δx: spatial step
+        
+        This first-order method is:
+            - Simple and robust
+            - Requires CFL ≤ 1 for stability
+            - Dissipative (introduces numerical diffusion)
+        
+        Returns:
+            None. Updates self.sol in place.
         """
         dt = self.time_step
         dx = self._mesh.get_space_step()
@@ -370,12 +442,28 @@ class RK2(TimeScheme):
         super().__init__(data_file, mesh, physics, fin_vol)
     
     def one_step(self):
-        """Perform one RK2 time step (Numba-accelerated).
+        """Perform one RK2 (Heun's method) time step (Numba-accelerated).
         
-        Updates solution using Heun's method:
-        k1 = F(Sol^n)
-        k2 = F(Sol^n + dt*k1)
-        Sol^{n+1} = Sol^n + 0.5*dt*(k1 + k2)
+        Mathematical formulation of the two-stage Runge-Kutta method:
+        
+        Stage 1:
+            k₁ = -(F̂_{i+1/2}^n - F̂_{i-1/2}^n)/Δx + S_i^n
+        
+        Stage 2:
+            U_i* = U_i^n + Δt*k₁
+            k₂ = -(F̂_{i+1/2}* - F̂_{i-1/2}*)/Δx + S_i*
+        
+        Final update:
+            U_i^{n+1} = U_i^n + (Δt/2)*(k₁ + k₂)
+        
+        This second-order method:
+            - Provides better accuracy than Euler for same CFL
+            - Requires two flux evaluations (2x cost per step)
+            - Reduces temporal discretization error
+            - Still requires CFL ≤ 1 for stability
+        
+        Returns:
+            None. Updates self.sol in place.
         """
         dt = self.time_step
         dx = self._mesh.get_space_step()

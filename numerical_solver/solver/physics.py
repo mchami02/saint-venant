@@ -98,10 +98,26 @@ class Physics:
             print()
     
     def build_topography(self, verbosity: int = 1):
-        """Build the topography/bathymetry profile.
+        """Build the bed topography/bathymetry profile z(x).
+        
+        Supported topography types:
+            - "FlatBottom": z(x) = 0 (horizontal bed)
+            - "Bump": Parabolic bump for subcritical flow test
+                      z(x) = 0.2 - 0.05*(x-10)² for 8 < x < 12
+            - "Thacker": Parabolic bowl for oscillating water test
+                        z(x) = h₀*[(x-L/2)²/a² - 1]
+            - "File": Read from file with linear interpolation to mesh
+        
+        The topography affects:
+            - Initial condition (h = H - z where H is total surface elevation)
+            - Source term (S = -g*h*dz/dx in momentum equation)
+            - Well-balanced property (stationary solutions with ∂h/∂x = -∂z/∂x)
         
         Args:
-            verbosity: Output verbosity level
+            verbosity: Output verbosity level (0=silent, 1=normal)
+            
+        Returns:
+            None. Initializes self.topography array of shape (n_cells,)
         """
         self.topography = np.zeros(self.n_cells)
         cell_centers = self._mesh.get_cell_centers()
@@ -183,10 +199,29 @@ class Physics:
             print("\033[92mSUCCESS::TOPOGRAPHY : Topography was successfully built.\033[0m")
     
     def build_initial_condition(self, verbosity: int = 1):
-        """Build the initial condition.
+        """Build the initial condition U(x, t=0) = [h(x,0), q(x,0)]ᵀ.
+        
+        Supported initial condition types:
+            - "UniformHeightAndDischarge": Constant h and q everywhere
+            - "DamBreakWet": Piecewise constant with h_L ≠ h_R, q = 0
+                            Classic Riemann problem (discontinuous IC)
+            - "DamBreakDry": Dam break into dry bed (h_R = 0)
+                            Tests wet/dry interface handling
+            - "Thacker": Analytical solution for parabolic bowl
+                        Tests well-balanced property and C-property
+            - "SinePerturbation": Smooth cosine perturbation
+                                 Tests dispersion and dissipation
+            - "File": Read from file (for restarting simulations)
+        
+        Important: Water height h is measured from bed, so:
+            h(x) = H(x) - z(x)
+        where H is the total surface elevation and z is bed elevation.
         
         Args:
-            verbosity: Output verbosity level
+            verbosity: Output verbosity level (0=silent, 1=normal)
+            
+        Returns:
+            None. Initializes self.sol0 array of shape (n_cells, 2)
         """
         self.sol0 = np.zeros((self.n_cells, 2))
         cell_centers = self._mesh.get_cell_centers()
@@ -266,10 +301,25 @@ class Physics:
             print("\033[92mSUCCESS::INITIALCONDITION : Initial Condition was successfully built.\033[0m")
     
     def build_exp_boundary_data(self, verbosity: int = 1):
-        """Build experimental boundary data from file.
+        """Build experimental/measured boundary condition data from file.
+        
+        Reads time series data for boundary conditions from an ASCII file.
+        Format: [time, water_height] pairs
+        
+        The data is used with "DataFile" boundary condition type to impose
+        measured water surface elevations. Linear interpolation is used
+        between data points during simulation.
+        
+        Typical use cases:
+            - Validation against laboratory experiments
+            - Real-world river flow with measured stage
+            - Tide-driven flows with water level recordings
         
         Args:
-            verbosity: Output verbosity level
+            verbosity: Output verbosity level (0=silent, 1=normal)
+            
+        Returns:
+            None. Initializes self.exp_boundary_data array of shape (n_points, 2)
         """
         exp_data_file = self._DF.left_BC_data_file
         
@@ -301,10 +351,25 @@ class Physics:
             exit(-1)
     
     def build_source_term(self, sol: np.ndarray):
-        """Build source term based on topography (Numba-accelerated).
+        """Build source term vector based on bed topography (Numba-accelerated).
+        
+        For shallow water with variable topography z(x), the source term arises
+        from the bed slope in the momentum equation:
+        
+            S = [0, -g*h*dz/dx]ᵀ
+        
+        The derivative dz/dx is computed using:
+            - Analytical formulas for Bump and Thacker test cases
+            - Finite differences (2nd-order) for arbitrary topography from file
+        
+        This is called at each time step to update the source term based on
+        the current water height h.
         
         Args:
-            sol: Current solution array (n_cells x 2)
+            sol: Current solution array of shape (n_cells, 2) containing [h, q]
+            
+        Returns:
+            None. Updates self.source in place.
         """
         topo_type = self._DF.topography_type
         cell_centers = self._mesh.get_cell_centers()
@@ -332,13 +397,30 @@ class Physics:
             exit(-1)
     
     def physical_flux(self, sol: np.ndarray) -> np.ndarray:
-        """Compute physical flux for shallow water equations.
+        """Compute physical flux for 1D shallow water equations.
+        
+        The shallow water (Saint-Venant) system in conservative form:
+            ∂U/∂t + ∂F(U)/∂x = S
+        
+        where U = [h, q]ᵀ and the physical flux is:
+            F(U) = [q, q²/h + 0.5*g*h²]ᵀ
+        
+        Components:
+            F₁ = q: mass flux (continuity)
+            F₂ = q²/h + 0.5*g*h²: momentum flux
+                 = h*u² + 0.5*g*h²  (pressure + advection)
         
         Args:
-            sol: Solution vector [h, q]
+            sol: Solution vector of shape (2,) containing:
+                - sol[0] = h: water height (m)
+                - sol[1] = q = h*u: discharge (m²/s)
             
         Returns:
-            Flux vector [q, q²/h + 0.5*g*h²]
+            np.ndarray: Physical flux vector of shape (2,):
+                       [q, q²/h + 0.5*g*h²]
+                       
+        Note:
+            Sets q = 0 if h ≤ 0 to handle dry states safely.
         """
         flux = np.zeros(2)
         h, qx = sol[0], sol[1]
@@ -352,14 +434,32 @@ class Physics:
         return flux
     
     def compute_wave_speed(self, sol_g: np.ndarray, sol_d: np.ndarray) -> Tuple[float, float]:
-        """Compute the eigenvalues of the flux Jacobian (wave speeds).
+        """Compute eigenvalues of the shallow water flux Jacobian (characteristic wave speeds).
+        
+        For the shallow water system, the flux Jacobian ∂F/∂U has eigenvalues:
+            λ₁ = u - c  (left-going characteristic)
+            λ₂ = u + c  (right-going characteristic)
+        
+        where c = √(gh) is the gravity wave celerity.
+        
+        Physical interpretation:
+            - λ₁, λ₂ are the speeds at which information propagates
+            - |λ| > c: supercritical flow (Fr > 1)
+            - |λ| < c: subcritical flow (Fr < 1)
+            - λ₁ < 0 < λ₂: subsonic regime (both characteristics present)
+        
+        For numerical methods, we need:
+            λ_min = min(u_L - c_L, u_R - c_R)
+            λ_max = max(u_L + c_L, u_R + c_R)
         
         Args:
-            sol_g: Left state [h, q]
-            sol_d: Right state [h, q]
+            sol_g: Left state vector [h, q] of shape (2,)
+            sol_d: Right state vector [h, q] of shape (2,)
             
         Returns:
-            Tuple of (lambda1, lambda2) - minimum and maximum wave speeds
+            Tuple[float, float]: (lambda1, lambda2) where:
+                - lambda1: minimum wave speed (can be negative)
+                - lambda2: maximum wave speed (≥ lambda1)
         """
         h_g, h_d = sol_g[0], sol_d[0]
         u_g = sol_g[1] / h_g if h_g >= 1e-6 else 0.0
@@ -371,14 +471,32 @@ class Physics:
         return lambda1, lambda2
     
     def left_boundary_function(self, t: float, sol: np.ndarray) -> np.ndarray:
-        """Compute left boundary condition.
+        """Compute left boundary condition (ghost cell state).
+        
+        Implements various boundary condition types based on flow regime (Froude number):
+        
+        Supported BC types:
+            - "Neumann": Zero-gradient (∂U/∂x = 0) - natural outflow
+            - "Wall": Reflective wall (u = 0) - solid boundary
+            - "ImposedConstantDischarge": Prescribed flow rate
+            - "ImposedConstantHeight": Prescribed water surface elevation
+            - "PeriodicWaves": Time-periodic height variation
+            - "DataFile": Experimental time series from file
+        
+        For characteristic BCs, the implementation uses Riemann invariants:
+            β⁻ = u - 2√(gh)  (left-going characteristic)
+            β⁺ = u + 2√(gh)  (right-going characteristic)
+        
+        The number of boundary conditions needed depends on Froude number:
+            - Subcritical (Fr < 1): 1 BC needed (one characteristic leaves domain)
+            - Supercritical (Fr > 1): 2 BCs needed (both characteristics leave domain)
         
         Args:
-            t: Current time
-            sol: Current solution array
+            t: Current simulation time (s)
+            sol: Current solution array of shape (n_cells, 2)
             
         Returns:
-            Boundary state vector [h, q]
+            np.ndarray: Ghost cell state [h, q] of shape (2,) used for flux calculation
         """
         sol_g = np.zeros(2)
         
@@ -463,14 +581,26 @@ class Physics:
         return sol_g
     
     def right_boundary_function(self, t: float, sol: np.ndarray) -> np.ndarray:
-        """Compute right boundary condition.
+        """Compute right boundary condition (ghost cell state).
+        
+        Implements various boundary condition types at the right (downstream) boundary.
+        See left_boundary_function for detailed description of BC types.
+        
+        Key difference from left boundary:
+            - Uses β⁺ = u + 2√(gh) characteristic for subcritical outflow
+            - Flow direction matters for determining supercritical vs subcritical
+        
+        Typical configurations:
+            - River outflow: "Neumann" or "ImposedConstantHeight" (subcritical)
+            - Channel exit: "ImposedConstantDischarge" (if known)
+            - Reservoir: "ImposedConstantHeight" (water level control)
         
         Args:
-            t: Current time
-            sol: Current solution array
+            t: Current simulation time (s)
+            sol: Current solution array of shape (n_cells, 2)
             
         Returns:
-            Boundary state vector [h, q]
+            np.ndarray: Ghost cell state [h, q] of shape (2,) for flux calculation
         """
         sol_d = np.zeros(2)
         
@@ -540,13 +670,24 @@ class Physics:
         return sol_d
     
     def find_root(self, a: float, b: float, c: float) -> float:
-        """Find root of quadratic equation ax² + bx + c = 0.
+        """Solve quadratic equation ax² + bx + c = 0 using discriminant method.
+        
+        Uses the quadratic formula:
+            x = [-b ± √(b² - 4ac)] / (2a)
+        
+        This is used in characteristic boundary condition calculations where
+        we need to find the foot of the characteristic curve.
         
         Args:
-            a, b, c: Quadratic coefficients
+            a: Coefficient of x² term
+            b: Coefficient of x term
+            c: Constant term
             
         Returns:
-            The larger root
+            float: The larger root r₂ = [-b + √(b² - 4ac)] / (2a)
+            
+        Raises:
+            SystemExit: If discriminant < 0 (no real roots)
         """
         delta = b * b - 4 * a * c
         
@@ -561,13 +702,19 @@ class Physics:
             return r2
     
     def find_source_x(self, x: float) -> float:
-        """Find source term at position x by interpolation.
+        """Interpolate source term value at arbitrary position x.
+        
+        Uses linear interpolation between cell centers:
+            S(x) = S_i + (x - x_i) * (S_{i+1} - S_i) / Δx
+        
+        where x_i ≤ x ≤ x_{i+1}. This is needed for characteristic boundary
+        conditions where we evaluate the source along characteristic curves.
         
         Args:
-            x: Position
+            x: Position at which to evaluate source term (m)
             
         Returns:
-            Interpolated source term value
+            float: Interpolated momentum source term S(x)
         """
         i = 0
         dx = self._DF.dx
@@ -585,23 +732,47 @@ class Physics:
         return source
     
     def get_initial_condition(self) -> np.ndarray:
-        """Get initial condition array."""
+        """Get initial condition array.
+        
+        Returns:
+            np.ndarray: Initial solution of shape (n_cells, 2) with [h, q]
+        """
         return self.sol0
     
     def get_topography(self) -> np.ndarray:
-        """Get topography array."""
+        """Get bed topography/bathymetry array.
+        
+        Returns:
+            np.ndarray: Bed elevation z(x) of shape (n_cells,) in meters
+        """
         return self.topography
     
     def get_source_term(self) -> np.ndarray:
-        """Get source term array."""
+        """Get current source term array.
+        
+        Returns:
+            np.ndarray: Source term of shape (n_cells, 2):
+                       S[:, 0] = 0 (no mass source)
+                       S[:, 1] = -g*h*dz/dx (bed slope + other sources)
+        """
         return self.source
     
     def get_exact_solution(self) -> np.ndarray:
-        """Get exact solution array."""
+        """Get exact analytical solution (for test cases).
+        
+        Returns:
+            np.ndarray: Exact solution of shape (n_cells, 2) with [h, q],
+                       or None if not a test case.
+        """
         return self.exact_sol
     
     def get_experimental_boundary_data(self) -> np.ndarray:
-        """Get experimental boundary data."""
+        """Get experimental boundary condition data from file.
+        
+        Returns:
+            np.ndarray: Boundary data of shape (n_points, 2) with [time, height],
+                       or None if not using experimental BC.
+        """
         return self.exp_boundary_data
     
     def build_exact_solution(self, t: float):

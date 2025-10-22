@@ -58,16 +58,15 @@ def animate_surface_evolution(h5_file: str, output_file: str = None, fps: int = 
     # Compute derived quantities
     H = h + topography  # Free surface elevation
     u = np.divide(q, h, out=np.zeros_like(q), where=h>1e-10)  # Velocity
-    Fr = np.abs(u) / np.sqrt(g * h + 1e-10)  # Froude number
     
     print(f"Creating animation with {len(time)} frames...")
     
     # Setup figure
-    fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8))
     fig.patch.set_facecolor('white')
     
     # Initialize plots
-    ax1, ax2, ax3 = axes
+    ax1, ax2 = axes
     
     # Plot 1: Water surface and topography
     ax1.set_xlim(x[0], x[-1])
@@ -110,26 +109,6 @@ def animate_surface_evolution(h5_file: str, output_file: str = None, fps: int = 
     ax2.legend(loc='upper right', fontsize=10)
     ax2.set_title('Velocity Profile', fontsize=13, fontweight='bold')
     
-    # Plot 3: Froude number
-    ax3.set_xlim(x[0], x[-1])
-    ax3.set_ylim(0, min(Fr.max() + 0.2, 3.0))
-    ax3.set_xlabel('Position x [m]', fontsize=11)
-    ax3.set_ylabel('Froude Number [-]', fontsize=11)
-    ax3.grid(True, alpha=0.3, linestyle='--')
-    ax3.axhline(y=1, color='r', linestyle='--', linewidth=1.5, 
-                label='Critical (Fr=1)', alpha=0.7)
-    
-    line_froude, = ax3.plot([], [], 'g-', linewidth=2, label='Froude number')
-    
-    # Shade subcritical/supercritical regions
-    ax3.fill_between([x[0], x[-1]], [0, 0], [1, 1], alpha=0.1, 
-                     color='blue', label='Subcritical (Fr<1)')
-    ax3.fill_between([x[0], x[-1]], [1, 1], [3, 3], alpha=0.1, 
-                     color='red', label='Supercritical (Fr>1)')
-    
-    ax3.legend(loc='upper right', fontsize=9, ncol=2)
-    ax3.set_title('Froude Number', fontsize=13, fontweight='bold')
-    
     # Add metadata
     metadata_text = f'Scheme: {flux_scheme} + {time_scheme}\n'
     metadata_text += f'Grid: {len(x)} cells, Domain: [{x[0]:.1f}, {x[-1]:.1f}] m'
@@ -161,13 +140,10 @@ def animate_surface_evolution(h5_file: str, output_file: str = None, fps: int = 
         # Update velocity
         line_velocity.set_data(x, u[frame, :])
         
-        # Update Froude number
-        line_froude.set_data(x, Fr[frame, :])
-        
         # Update time text
         time_text.set_text(f't = {time[frame]:.2f} s')
         
-        return line_surface, line_velocity, line_froude, time_text
+        return line_surface, line_velocity, time_text
     
     # Create animation
     anim = animation.FuncAnimation(fig, update, frames=len(time), 

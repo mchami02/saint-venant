@@ -12,6 +12,9 @@ dependencies = [
     "numba>=0.57.0",
     "tqdm>=4.65.0",
     "h5py>=3.8.0",
+    "ipykernel>=6.29.5",
+    "torch>=2.5.1",
+    "joblib>=1.4.2",
 ]
 
 [project.scripts]
