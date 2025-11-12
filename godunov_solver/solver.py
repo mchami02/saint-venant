@@ -56,3 +56,4 @@ class Solver():
                 u[i, n] = q_new / (h[i, n] + 1e-6)
                 
         return h, u
+

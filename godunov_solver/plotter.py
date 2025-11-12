@@ -102,3 +102,20 @@ class Plotter():
         else:
             plt.show()
             return anim
+
+def plot_grid_density(grid, nx, nt, dx, dt):
+    plt.figure(figsize=(10, 6))
+
+    plt.imshow(
+        grid, 
+        extent=[0, nx * dx, 0, nt * dt],
+        aspect='auto',
+        origin='lower',
+        cmap='jet'  # 'jet' goes from blue (low) through green/yellow/orange to red (high)
+    )
+
+    plt.colorbar(label='Density ρ(x,t)')
+    plt.xlabel('Space x')
+    plt.ylabel('Time t')
+    plt.title('Space–Time Density Heatmap')
+    plt.show()
