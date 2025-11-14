@@ -20,26 +20,22 @@ from .initial_cond import (
     get_ic
 )
 
-# Solvers and Fluxes (from solve_class.py - for LWR/traffic flow)
+# Solvers and Fluxes
 from .solve_class import (
-    Solver as LWRSolver,
-    Flux,
-    GreenshieldsFlux,
-    TriangularFlux,
-    GodunovLWR
+    Solver,
+    Godunov,
+    SVESolver
 )
-
-# Solver for Saint-Venant (from solver.py)
-from .solver import (
-    Solver as SVESolver,
-    flux,
-    rusanov_flux
+from .flux import (
+    Flux,
+    Greenshields,
+    Triangular
 )
 
 # Plotting utilities
 from .plotter import (
-    Plotter,
-    plot_grid_density
+    plot_grid_density,
+    animate_density
 )
 
 __all__ = [
@@ -60,18 +56,12 @@ __all__ = [
     'get_ic',
     
     # LWR Solvers and Fluxes
-    'LWRSolver',
+    'Solver',
     'Flux',
-    'GreenshieldsFlux',
-    'TriangularFlux',
-    'GodunovLWR',
-    
-    # Saint-Venant solver
+    'Greenshields',
+    'Triangular',
+    'Godunov',
     'SVESolver',
-    'flux',
-    'rusanov_flux',
     
-    # Plotting
-    'Plotter',
-    'plot_grid_density',
+    
 ]

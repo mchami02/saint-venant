@@ -1,55 +1,19 @@
-from abc import ABC, abstractmethod
-from .grid import Grid
 import numpy as np
+from .flux import Flux
 
-class Solver(ABC):
+class Solver():
     def __init__(self):
         pass
 
-    @abstractmethod
-    def flux(self, grid, i: int, n: int, val: str):
-        pass
+    def update(self, grid, i: int, n: int):
+        raise NotImplementedError("Subclasses must implement this method")
 
     def solve(self, grid):
         for i in range(1, grid.nt):
             for n in range(grid.nx):
-                new_h = grid.get(i-1, n, "h") - (grid.dt / grid.dx) * (self.flux(grid, i-1, n+1, "h") - self.flux(grid, i-1, n, "h"))
-                grid.set(i, n, "h", new_h)
+                self.update(grid, i, n)
 
-class Flux(ABC):
-    @abstractmethod
-    def __call__(self, rho: float) -> float:
-        pass
-
-    @abstractmethod
-    def rho_crit(self) -> float:
-        pass
-
-class GreenshieldsFlux(Flux):
-    def __init__(self, vmax: float, rho_max: float):
-        self.vmax = vmax
-        self.rho_max = rho_max
-
-    def __call__(self, rho: float) -> float:
-        rho = np.clip(rho, 0, self.rho_max)
-        return self.vmax * rho * (1 - rho / self.rho_max) if rho < self.rho_max else 0
-
-    def rho_crit(self) -> float:
-        return 0.5
-
-class TriangularFlux(Flux):
-    def __init__(self, vf: float, w: float):
-        self.vf = vf
-        self.w = w
-
-    def __call__(self, rho: float) -> float:
-        rho = np.clip(rho, 0, 1)
-        return np.minimum(self.vf * rho, self.w * (1 - rho))
-
-    def rho_crit(self) -> float:
-        return self.w / (self.vf + self.w)
-
-class GodunovLWR(Solver):
+class Godunov(Solver):
     def __init__(self, flux: Flux):
         super().__init__()
         self.flux_fn = flux
@@ -73,3 +37,51 @@ class GodunovLWR(Solver):
                 return fL
             else:  # Critical density is between rhoL and rhoR
                 return self.flux_fn(rho_crit)
+    
+    def update(self, grid, i: int, n: int):
+        for val in grid.values():
+            new_val = grid.get(i-1, n, val) - (grid.dt / grid.dx) * (self.flux(grid, i-1, n+1, val) - self.flux(grid, i-1, n, val))
+            grid.set(i, n, val, new_val)
+
+class SVESolver(Solver):
+    def __init__(self, g: float = 9.81):
+        super().__init__()
+        self.g = g
+
+    def rusanov_flux(self, grid, i: int, n: int, val: str):
+        uL = grid.get(i, n-1, "u")
+        uR = grid.get(i, n, "u")
+        hL = grid.get(i, n-1, "h")
+        hR = grid.get(i, n, "h")
+        
+        UL = np.array([hL, hL*uL])
+        UR = np.array([hR, hR*uR])
+        FL = np.array([hL*uL, hL*uL*uL + 0.5*self.g*hL*hL])
+        FR = np.array([hR*uR, hR*uR*uR + 0.5*self.g*hR*hR])
+        
+        smax = max(abs(uL) + np.sqrt(self.g*hL), abs(uR) + np.sqrt(self.g*hR))
+        return 0.5*(FL + FR) - 0.5*smax*(UR - UL)
+    
+    def solve(self, grid):
+        for i in range(1, grid.nt):
+            # compute fluxes at interfaces
+            Fh = np.zeros(grid.nx+1)
+            Fq = np.zeros(grid.nx+1)
+            for n in range(grid.nx+1):
+                F = self.rusanov_flux(grid, i-1, n, "h")
+                Fh[n] = F[0]
+                Fq[n] = F[1]
+    
+            for n in range(grid.nx):
+                # --- continuity --- (FIXED: correct flux difference)
+                h_new = grid.get(i-1, n, "h") - (grid.dt / grid.dx) * (Fh[n+1] - Fh[n])
+                # Positivity preservation
+                # h_new = max(h_new, 1e-10)
+                grid.set(i, n, "h", h_new)
+                
+                # --- momentum ---
+                q_old = grid.get(i-1, n, "h") * grid.get(i-1, n, "u")
+                q_new = q_old - (grid.dt / grid.dx) * (Fq[n+1] - Fq[n])
+                u_new = q_new / (h_new + 1e-10)
+                
+                grid.set(i, n, "u", u_new)

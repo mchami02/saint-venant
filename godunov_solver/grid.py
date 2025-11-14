@@ -22,3 +22,5 @@ class Grid:
     def set(self, i: int, n: int, val: str, value: float):
         self.grid[val][i, n] = value
 
+    def values(self) -> list[str]:
+        return list(self.grid.keys())

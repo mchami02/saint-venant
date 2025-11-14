@@ -6,6 +6,8 @@ class InitialCondition(ABC):
         self.grid = {
             v : np.zeros((nt, nx)) for v in vals
         }
+        self.nx = nx
+        self.nt = nt
 
     def get_grid(self) -> np.ndarray:
         return self.grid
@@ -36,6 +38,16 @@ class PiecewiseConstant(InitialCondition):
             else:
                 self.grid["h"][0, steps[i]:steps[i+1]] = value
 
+class SVERiemannProblem(InitialCondition):
+    def __init__(self, nx: int, nt: int, hL: float = np.random.rand(), hR: float = np.random.rand(), uL: float = 0, uR: float = 0, step: int = None):
+        if step is None:
+            step = nx//2
+        assert step < nx, "Step must be less than the number of cells"
+        super().__init__(nx, nt, ["h", "u"])
+        self.grid["h"][0, :step] = hL
+        self.grid["h"][0, step:] = hR
+        self.grid["u"][0, :step] = uL
+        self.grid["u"][0, step:] = uR
 
 def get_ic(ic_type: str, nx, nt, **kwargs) -> InitialCondition:
     if ic_type == "Constant":
@@ -44,5 +56,7 @@ def get_ic(ic_type: str, nx, nt, **kwargs) -> InitialCondition:
         return RiemannProblem(nx, nt, kwargs['uL'], kwargs['uR'], kwargs['step'])
     elif ic_type == "PiecewiseConstant":
         return PiecewiseConstant(nx, nt, kwargs['values'], kwargs['steps'])
+    elif ic_type == "SVERiemannProblem":
+        return SVERiemannProblem(nx, nt, **kwargs)
     else:
         raise ValueError(f"Invalid initial condition type: {ic_type}")
