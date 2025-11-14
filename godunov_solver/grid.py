@@ -1,6 +1,6 @@
 from .boundary_cond import get_bc
 from .initial_cond import get_ic
-
+import numpy as np
 
 class Grid:
     def __init__(self, nx: int, nt: int, dx: float, dt: float, initial_condition: str, boundary_condition: str, **kwargs):
@@ -18,6 +18,9 @@ class Grid:
             return self.boundary_condition.get_right(i=i, grid=self.grid[val])
         else:
             return self.grid[val][i, n]
+
+    def get_array(self, val: str) -> np.ndarray:
+        return self.grid[val]
 
     def set(self, i: int, n: int, val: str, value: float):
         self.grid[val][i, n] = value

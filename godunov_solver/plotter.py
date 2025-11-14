@@ -9,7 +9,7 @@ try:
 except (ImportError, NameError):    
     IN_NOTEBOOK = False
 
-def plot_grid_density(grid, nx, nt, dx, dt):
+def plot_grid_density(grid, nx, nt, dx, dt, save_as=''):
     plt.figure(figsize=(10, 6))
 
     plt.imshow(
@@ -24,7 +24,16 @@ def plot_grid_density(grid, nx, nt, dx, dt):
     plt.xlabel('Space x')
     plt.ylabel('Time t')
     plt.title('Space–Time Density Heatmap')
-    plt.show()
+    
+    if save_as:
+        # Add .png extension if not already present
+        if not save_as.endswith('.png'):
+            save_as = save_as + '.png'
+        plt.savefig(save_as)
+        print(f"Saved plot to {save_as}")
+        plt.close()
+    else:
+        plt.show()
 
 def animate_density(arr, nx, nt, dx, dt, output_name='', skip_frames=10, fps=30):
     ''' Create an animation showing h(x) evolving through time.
@@ -80,3 +89,69 @@ def animate_density(arr, nx, nt, dx, dt, output_name='', skip_frames=10, fps=30)
     else:
         plt.show()
         return anim
+
+def plot_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
+    '''
+    Create a three-panel comparison plot showing ground truth, prediction, and their difference.
+    
+    Args:
+        ground_truth: Ground truth grid (2D array)
+        prediction: Prediction grid (2D array)
+        nx: Number of spatial points
+        nt: Number of time steps
+        dx: Spatial step size
+        dt: Time step size
+        save_as: If not empty, save the plot to this filename (automatically adds .png extension)
+    '''
+    # Calculate the difference
+    difference = prediction - ground_truth
+    
+    # Create figure with three subplots
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    
+    # Common imshow parameters
+    extent = [0, nx * dx, 0, nt * dt]
+    imshow_kwargs = {
+        'extent': extent,
+        'aspect': 'auto',
+        'origin': 'lower',
+        'cmap': 'jet'
+    }
+    
+    # Plot 1: Ground Truth
+    im1 = axes[0].imshow(ground_truth, **imshow_kwargs)
+    axes[0].set_xlabel('Space x')
+    axes[0].set_ylabel('Time t')
+    axes[0].set_title('Ground Truth')
+    plt.colorbar(im1, ax=axes[0], label='Value')
+    
+    # Plot 2: Prediction
+    im2 = axes[1].imshow(prediction, **imshow_kwargs)
+    axes[1].set_xlabel('Space x')
+    axes[1].set_ylabel('Time t')
+    axes[1].set_title('Prediction')
+    plt.colorbar(im2, ax=axes[1], label='Value')
+    
+    # Plot 3: Difference (use diverging colormap for difference)
+    imshow_kwargs_diff = imshow_kwargs.copy()
+    imshow_kwargs_diff['cmap'] = 'RdBu_r'  # Red-Blue diverging colormap
+    
+    # Center colormap on zero for difference plot
+    vmax = np.abs(difference).max()
+    im3 = axes[2].imshow(difference, vmin=-vmax, vmax=vmax, **imshow_kwargs_diff)
+    axes[2].set_xlabel('Space x')
+    axes[2].set_ylabel('Time t')
+    axes[2].set_title('Difference (Prediction - Ground Truth)')
+    plt.colorbar(im3, ax=axes[2], label='Error')
+    
+    plt.tight_layout()
+    
+    if save_as:
+        # Add .png extension if not already present
+        if not save_as.endswith('.png'):
+            save_as = save_as + '.png'
+        plt.savefig(save_as, dpi=150, bbox_inches='tight')
+        print(f"Saved comparison plot to {save_as}")
+        plt.close()
+    else:
+        plt.show()

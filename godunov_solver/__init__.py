@@ -2,6 +2,7 @@
 
 # Grid
 from .grid import Grid
+from .grid_generator import GridGenerator
 
 # Boundary conditions
 from .boundary_cond import (
@@ -41,6 +42,7 @@ from .plotter import (
 __all__ = [
     # Grid
     'Grid',
+    'GridGenerator',
     
     # Boundary conditions
     'BoundaryCondition',
