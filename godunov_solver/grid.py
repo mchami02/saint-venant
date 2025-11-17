@@ -10,6 +10,7 @@ class Grid:
         self.dt = dt
         self.grid = get_ic(initial_condition, nx, nt, **kwargs).get_grid()
         self.boundary_condition = get_bc(boundary_condition, **kwargs)
+        self.kwargs = kwargs
 
     def get(self, i: int, n: int, val: str = "h") -> float:
         if n < 0:

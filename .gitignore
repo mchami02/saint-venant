@@ -5,3 +5,6 @@ numerical_solver/temp/
 *.gif
 *.png
 *.pt
+*.pth
+.venv/
+.cache/

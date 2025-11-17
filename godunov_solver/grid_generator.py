@@ -21,13 +21,15 @@ class GridGenerator:
         Time step size
     """
     
-    def __init__(self, solver: Solver, nx: int, nt: int, dx: float, dt: float):
+    def __init__(self, solver: Solver, nx: int, nt: int, dx: float, dt: float, randomize=True, CFL=0.2):
         self.solver = solver
         self.nx = nx
         self.nt = nt
         self.dx = dx
         self.dt = dt
-    
+        self.randomize = randomize
+        self.CFL = CFL
+
     def __call__(self, initial_condition=None, boundary_condition=None, ic_kwargs=None, bc_kwargs=None):
         """
         Generate a grid and solve it using the stored solver.
@@ -65,12 +67,20 @@ class GridGenerator:
         if boundary_condition is None:
             boundary_condition = "GhostCell"
         
+        nx = self.nx
+        nt = self.nt
+        if self.randomize:
+            dx = np.random.uniform(self.dx / 2, self.dx * 2)
+            dt = np.random.uniform(self.dt / 2, min(self.dt * 2, self.CFL * dx))
+        else:
+            dx = self.dx
+            dt = self.dt
         # Create grid
         grid = Grid(
-            nx=self.nx,
-            nt=self.nt,
-            dx=self.dx,
-            dt=self.dt,
+            nx=nx,
+            nt=nt,
+            dx=dx,
+            dt=dt,
             initial_condition=initial_condition,
             boundary_condition=boundary_condition,
             **{**ic_kwargs, **bc_kwargs}
@@ -90,7 +100,7 @@ class GridGenerator:
             ic_types = ["SVERiemannProblem"]
         elif isinstance(self.solver, Godunov):
             # Godunov (LWR) needs ICs with only density/height
-            ic_types = ["RiemannProblem", "Constant", "PiecewiseConstant"]
+            ic_types = ["PiecewiseConstant"]
         else:
             # Default fallback
             ic_types = ["Constant"]
@@ -119,11 +129,11 @@ class GridGenerator:
             }
         elif ic_type == "PiecewiseConstant":
             num_pieces = np.random.randint(2, 5)
-            steps = sorted(np.random.choice(range(1, self.nx), num_pieces-1, replace=False).tolist())
+            steps = sorted(np.random.choice(range(self.nx), num_pieces - 1, replace=False).tolist())
             values = np.random.rand(num_pieces).tolist()
             return {
                 'values': values,
-                'steps': [0] + steps
+                'steps': steps
             }
         else:
             return {}

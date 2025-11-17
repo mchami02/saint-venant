@@ -27,18 +27,18 @@ def get_solver(args):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_samples", type=int, default=1000)
-    parser.add_argument("--nx", type=int, default=100)
-    parser.add_argument("--nt", type=int, default=100)
+    parser.add_argument("--nx", type=int, default=50)
+    parser.add_argument("--nt", type=int, default=250)
     parser.add_argument("--dx", type=float, default=0.25)
     parser.add_argument("--dt", type=float, default=0.05)
     parser.add_argument("--bc", type=str, default="GhostCell")
     parser.add_argument("--solver", type=str, default="Godunov")
     parser.add_argument("--flux", type=str, default="Greenshields")
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--model", type=str, default="FNO")
-    parser.add_argument("--n_modes", type=int, default=64)
+    parser.add_argument("--n_modes", type=int, default=128)
     parser.add_argument("--hidden_channels", type=int, default=64)
     parser.add_argument("--in_channels", type=int, default=3)
     parser.add_argument("--out_channels", type=int, default=1)
@@ -51,7 +51,7 @@ def parse_args():
 def create_model(args):
     if args.model == "FNO":
         model = FNO(
-        n_modes=(args.n_modes, 16),        # modes in (time, space) dimensions
+        n_modes=(args.n_modes, 64),        # modes in (time, space) dimensions
         hidden_channels=args.hidden_channels,       # network width
         in_channels=args.in_channels,           # density + time + space
         out_channels=args.out_channels,          # predicted density
@@ -114,7 +114,6 @@ def train_model(model, train_loader, val_loader, args):
     Train one-shot FNO for multiple epochs with learning rate scheduling and early stopping.
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
     criterion = nn.MSELoss()
     best_loss = float('inf')
     epochs_without_improvement = 0
@@ -122,15 +121,23 @@ def train_model(model, train_loader, val_loader, args):
     bar = tqdm(range(args.epochs), desc="Training")
     for epoch in bar:
         train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion)
-        scheduler.step()
-        current_lr = optimizer.param_groups[0]['lr']
-
-        bar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "LR": current_lr})
-
-        # Save best model and check for improvement
+        
+        # Check for improvement
         if val_loss < best_loss:
             best_loss = val_loss
+            epochs_without_improvement = 0
             torch.save(model.state_dict(), args.save_path)
+        else:
+            epochs_without_improvement += 1
+            
+        # Reduce learning rate if no improvement for 10 epochs
+        if epochs_without_improvement >= 10:
+            epochs_without_improvement = 0
+            for param_group in optimizer.param_groups:
+                param_group['lr'] /= 10
+        
+        current_lr = optimizer.param_groups[0]['lr']
+        bar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "LR": current_lr})
     
     print(f"\nTraining completed! Final best loss: {best_loss:.6f}")
     model.load_state_dict(torch.load(args.save_path, weights_only=False))
@@ -170,8 +177,8 @@ def test_model(model, test_loader, args):
 def main():
     args = parse_args()
     solver = get_solver(args)
-    train_samples = int(args.n_samples * 0.7)
-    val_samples = int(args.n_samples * 0.2)
+    train_samples = int(args.n_samples * 0.8)
+    val_samples = int(args.n_samples * 0.15)
     test_samples = args.n_samples - train_samples - val_samples
     train_dataset = GridDataset(solver, train_samples, args.nx, args.nt, args.dx, args.dt)
     val_dataset = GridDataset(solver, val_samples, args.nx, args.nt, args.dx, args.dt)

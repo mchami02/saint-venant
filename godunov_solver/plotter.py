@@ -104,7 +104,7 @@ def plot_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
         save_as: If not empty, save the plot to this filename (automatically adds .png extension)
     '''
     # Calculate the difference
-    difference = prediction - ground_truth
+    difference = np.abs(prediction - ground_truth)
     
     # Create figure with three subplots
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -115,7 +115,9 @@ def plot_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
         'extent': extent,
         'aspect': 'auto',
         'origin': 'lower',
-        'cmap': 'jet'
+        'cmap': 'jet',
+        'vmin': 0,  # Fixed minimum value
+        'vmax': 1   # Fixed maximum value
     }
     
     # Plot 1: Ground Truth
@@ -137,8 +139,7 @@ def plot_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
     imshow_kwargs_diff['cmap'] = 'RdBu_r'  # Red-Blue diverging colormap
     
     # Center colormap on zero for difference plot
-    vmax = np.abs(difference).max()
-    im3 = axes[2].imshow(difference, vmin=-vmax, vmax=vmax, **imshow_kwargs_diff)
+    im3 = axes[2].imshow(difference, **imshow_kwargs_diff)
     axes[2].set_xlabel('Space x')
     axes[2].set_ylabel('Time t')
     axes[2].set_title('Difference (Prediction - Ground Truth)')

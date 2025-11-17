@@ -26,17 +26,14 @@ class RiemannProblem(InitialCondition):
 
 class PiecewiseConstant(InitialCondition):
     def __init__(self, nx: int, nt: int, values: list[float], steps: list[int]):
-        assert len(values) == len(steps), "Values and steps must have the same length"
+        assert len(values) == len(steps) + 1, "Values and steps must have the same length + 1"
         assert all(step < nx for step in steps), "Steps must be less than the number of cells"
         assert all(step >= 0 for step in steps), "Steps must be non-negative"
         assert sorted(steps) == steps, "Steps must be sorted in ascending order"
         super().__init__(nx, nt, ["h"])
-
-        for i, value in enumerate(values):
-            if i == len(values) - 1:
-                self.grid["h"][0, steps[i]:] = value
-            else:
-                self.grid["h"][0, steps[i]:steps[i+1]] = value
+        steps = [0] + steps + [nx]
+        for i in range(len(steps) - 1):
+            self.grid["h"][0, steps[i]:steps[i+1]] = values[i]
 
 class SVERiemannProblem(InitialCondition):
     def __init__(self, nx: int, nt: int, hL: float = np.random.rand(), hR: float = np.random.rand(), uL: float = 0, uR: float = 0, step: int = None):
