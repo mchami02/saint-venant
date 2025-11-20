@@ -8,3 +8,4 @@ numerical_solver/temp/
 *.pth
 .venv/
 .cache/
+.DS_Store
