@@ -1,6 +1,4 @@
-from godunov_solver.grid_generator import GridGenerator
-from godunov_solver.solve_class import *
-from godunov_solver.flux import *
+from numerical_methods import GridGenerator, Godunov, Greenshields, Triangular, LWRRiemannSolver
 from joblib import Memory
 from tqdm import tqdm
 from torch.utils.data import Dataset

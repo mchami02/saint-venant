@@ -1,26 +1,26 @@
 import argparse
-from godunov_solver.solve_class import *
-from godunov_solver.flux import *
+from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver, plot_comparison
 from operator_data_pipeline import GridDataset
 from torch.utils.data import DataLoader
 from neuralop.models import FNO
 import torch
 from tqdm import tqdm
 import torch.nn as nn
-from godunov_solver.plotter import plot_comparison
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
 def get_solver(args):
     if args.solver == "Godunov":
         if args.flux == "Greenshields":
-            return Godunov(flux=Greenshields(vmax=1.0, rho_max=1.0))
+            flux = Greenshields(vmax=1.0, rho_max=1.0)
+            return Godunov(riemann_solver=LWRRiemannSolver(flux))
         elif args.flux == "Triangular":
-            return Godunov(flux=Triangular(vmax=1.0, rho_max=1.0))
+            flux = Triangular(vmax=1.0, rho_max=1.0)
+            return Godunov(riemann_solver=LWRRiemannSolver(flux))
         else:
             raise ValueError(f"Flux {args.flux} not supported")
     elif args.solver == "SVESolver":
-        return SVESolver()
+        return Godunov(riemann_solver=SVERiemannSolver())
     else:
         raise ValueError(f"Solver {args.solver} not supported")
 
