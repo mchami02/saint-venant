@@ -2,10 +2,13 @@ import argparse
 from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver, plot_comparison
 from operator_data_pipeline import GridDataset
 from torch.utils.data import DataLoader
-from neuralop.models import FNO
 import torch
+import numpy as np
 from tqdm import tqdm
 import torch.nn as nn
+import os
+from model import create_model
+from torchinfo import summary
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -46,20 +49,10 @@ def parse_args():
     parser.add_argument("--step_size", type=int, default=5)
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--save_path", type=str, default="operator.pth")
+    parser.add_argument("--n_datasets", type=int, default=1)
+    
     return parser.parse_args()
 
-def create_model(args):
-    if args.model == "FNO":
-        model = FNO(
-        n_modes=(args.n_modes, 64),        # modes in (time, space) dimensions
-        hidden_channels=args.hidden_channels,       # network width
-        in_channels=args.in_channels,           # density + time + space
-        out_channels=args.out_channels,          # predicted density
-        n_layers=args.n_layers               # number of FNO layers
-        )
-    else:
-        raise ValueError(f"Model {args.model} not supported")
-    return model
 
 def train_epoch(model, train_loader, val_loader, optimizer, criterion):
     """
@@ -173,13 +166,13 @@ def test_model(model, test_loader, args):
         plot_comparison(gt, pred, args.nx, args.nt, args.dx, args.dt, save_as=f"results/test_comparison_{i}.png")
     print(f"Saved {i} comparisons")
 
-
 def main():
     args = parse_args()
     solver = get_solver(args)
     train_samples = int(args.n_samples * 0.8)
     val_samples = int(args.n_samples * 0.15)
     test_samples = args.n_samples - train_samples - val_samples
+
     train_dataset = GridDataset(solver, train_samples, args.nx, args.nt, args.dx, args.dt)
     val_dataset = GridDataset(solver, val_samples, args.nx, args.nt, args.dx, args.dt)
     test_dataset = GridDataset(solver, test_samples, args.nx, args.nt, args.dx, args.dt)
@@ -189,7 +182,7 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
     model = create_model(args).to(device)
-
+    summary(model)
     model = train_model(model, train_loader, val_loader, args)
     test_model(model, test_loader, args)
 

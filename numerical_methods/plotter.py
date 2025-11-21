@@ -17,7 +17,9 @@ def plot_grid_density(grid, nx, nt, dx, dt, save_as=''):
         extent=[0, nx * dx, 0, nt * dt],
         aspect='auto',
         origin='lower',
-        cmap='jet'  # 'jet' goes from blue (low) through green/yellow/orange to red (high)
+        cmap='jet',  # 'jet' goes from blue (low) through green/yellow/orange to red (high),
+        vmin=0,
+        vmax=1
     )
 
     plt.colorbar(label='Density ρ(x,t)')
