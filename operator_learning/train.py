@@ -50,7 +50,8 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--save_path", type=str, default="operator.pth")
     parser.add_argument("--n_datasets", type=int, default=1)
-    
+    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--lr_decay", type=float, default=0.1)
     return parser.parse_args()
 
 
@@ -124,10 +125,14 @@ def train_model(model, train_loader, val_loader, args):
             epochs_without_improvement += 1
             
         # Reduce learning rate if no improvement for 10 epochs
-        if epochs_without_improvement >= 10:
+        if epochs_without_improvement >= args.patience // 2:
             epochs_without_improvement = 0
             for param_group in optimizer.param_groups:
-                param_group['lr'] /= 10
+                param_group['lr'] /= args.lr_decay
+
+        if epochs_without_improvement >= args.patience:
+            print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
+            break
         
         current_lr = optimizer.param_groups[0]['lr']
         bar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "LR": current_lr})
