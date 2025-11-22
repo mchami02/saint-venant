@@ -133,7 +133,7 @@ def train_model(model, train_loader, val_loader, args):
         if epochs_without_improvement >= args.patience:
             print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
             break
-        
+
         current_lr = optimizer.param_groups[0]['lr']
         bar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "LR": current_lr})
     
@@ -168,6 +168,7 @@ def test_model(model, test_loader, args):
         if i > 10:
             break
         i += 1
+        os.makedirs("results", exist_ok=True)
         plot_comparison(gt, pred, args.nx, args.nt, args.dx, args.dt, save_as=f"results/test_comparison_{i}.png")
     print(f"Saved {i} comparisons")
 
