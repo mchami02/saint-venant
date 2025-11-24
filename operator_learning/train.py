@@ -98,7 +98,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion):
     running_loss = 0.0
     n_batches = 0
     
-    for full_input, targets in train_loader:
+    for full_input, targets in tqdm(train_loader, desc="Train epoch", leave=False):
         # full_input: (B, nt, nx, 3)
         # targets: (B, nt, nx)
         
@@ -123,7 +123,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion):
     model.eval()
     running_loss = 0.0
     n_batches = 0
-    for full_input, targets in val_loader:
+    for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
         full_input = full_input.to(device)
         targets = targets.to(device)
 
