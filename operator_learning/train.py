@@ -230,10 +230,9 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
+    model = create_model(args).to(device)
     if args.model_path is not None:
-        model = torch.load(args.model_path).to(device)
-    else:
-        model = create_model(args).to(device)
+        model.load_state_dict(torch.load(args.model_path, weights_only=False))
     summary(model)
     model = train_model(model, train_loader, val_loader, args)
     test_model(model, test_loader, args)
