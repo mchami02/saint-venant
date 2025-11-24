@@ -1,4 +1,5 @@
 import argparse
+from typing import Any
 from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver, plot_comparison
 from operator_data_pipeline import GridDataset
 from torch.utils.data import DataLoader
@@ -210,13 +211,9 @@ def test_model(model, test_loader, args):
     test_loss = running_loss / max(1, n_batches)
     print(f"Test Loss: {test_loss:.6f}")
     i = 0
-    for gt, pred in zip(gts, preds):
-        if i >= args.num_plots:
-            break
-        i += 1
-        os.makedirs("results", exist_ok=True)
-        plot_comparison(gt, pred, args.nx, args.nt, args.dx, args.dt, save_as=f"results/test_comparison_{i}.png")
-    print(f"Saved {i} comparisons")
+    gts = np.array(gts)[:args.num_plots]
+    preds = np.array(preds)[:args.num_plots]
+    plot_comparison(gts, preds, args.nx, args.nt, args.dx, args.dt, save_as=f"results/test_comparison.png")
 
 def main():
     args = parse_args()

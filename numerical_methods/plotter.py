@@ -97,14 +97,31 @@ def plot_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
     Create a three-panel comparison plot showing ground truth, prediction, and their difference.
     
     Args:
-        ground_truth: Ground truth grid (2D array)
-        prediction: Prediction grid (2D array)
+        ground_truth: Ground truth grid (2D array (nx, nt) or 3D array (B, nx, nt))
+        prediction: Prediction grid (2D array (nx, nt) or 3D array (B, nx, nt))
         nx: Number of spatial points
         nt: Number of time steps
         dx: Spatial step size
         dt: Time step size
         save_as: If not empty, save the plot to this filename (automatically adds .png extension)
     '''
+    # Check input shape
+    ground_truth = np.asarray(ground_truth)
+    prediction = np.asarray(prediction)
+    
+    if ground_truth.ndim == 2 and prediction.ndim == 2:
+        # Original behavior for (nx, nt) inputs
+        _plot_single_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as)
+    elif ground_truth.ndim == 3 and prediction.ndim == 3:
+        # New behavior for (B, nx, nt) inputs - plot grid
+        B = ground_truth.shape[0]
+        _plot_batch_comparison(ground_truth, prediction, B, nx, nt, dx, dt, save_as)
+    else:
+        raise ValueError(f"Unexpected input shapes: ground_truth {ground_truth.shape}, prediction {prediction.shape}. "
+                        "Expected (nx, nt) or (B, nx, nt)")
+
+def _plot_single_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
+    '''Helper function to plot a single comparison (original behavior)'''
     # Calculate the difference
     difference = np.abs(prediction - ground_truth)
     
@@ -146,6 +163,67 @@ def plot_comparison(ground_truth, prediction, nx, nt, dx, dt, save_as=''):
     axes[2].set_ylabel('Time t')
     axes[2].set_title('Difference (Prediction - Ground Truth)')
     plt.colorbar(im3, ax=axes[2], label='Error')
+    
+    plt.tight_layout()
+    
+    if save_as:
+        # Add .png extension if not already present
+        if not save_as.endswith('.png'):
+            save_as = save_as + '.png'
+        plt.savefig(save_as, dpi=150, bbox_inches='tight')
+        print(f"Saved comparison plot to {save_as}")
+        plt.close()
+    else:
+        plt.show()
+
+def _plot_batch_comparison(ground_truth, prediction, B, nx, nt, dx, dt, save_as=''):
+    '''Helper function to plot batch comparisons in a grid'''
+    # Calculate the difference for all samples
+    difference = np.abs(prediction - ground_truth)
+    
+    # Create figure with B rows and 3 columns
+    fig, axes = plt.subplots(B, 3, figsize=(18, 5 * B))
+    
+    # Handle the case when B=1 (axes won't be 2D)
+    if B == 1:
+        axes = axes.reshape(1, -1)
+    
+    # Common imshow parameters
+    extent = [0, nx * dx, 0, nt * dt]
+    imshow_kwargs = {
+        'extent': extent,
+        'aspect': 'auto',
+        'origin': 'lower',
+        'cmap': 'jet',
+        'vmin': 0,  # Fixed minimum value
+        'vmax': 1   # Fixed maximum value
+    }
+    
+    # Plot each sample in the batch
+    for b in range(B):
+        # Plot 1: Ground Truth
+        im1 = axes[b, 0].imshow(ground_truth[b], **imshow_kwargs)
+        axes[b, 0].set_xlabel('Space x')
+        axes[b, 0].set_ylabel('Time t')
+        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
+        plt.colorbar(im1, ax=axes[b, 0], label='Value')
+        
+        # Plot 2: Prediction
+        im2 = axes[b, 1].imshow(prediction[b], **imshow_kwargs)
+        axes[b, 1].set_xlabel('Space x')
+        axes[b, 1].set_ylabel('Time t')
+        axes[b, 1].set_title(f'Prediction (Sample {b+1})')
+        plt.colorbar(im2, ax=axes[b, 1], label='Value')
+        
+        # Plot 3: Difference
+        imshow_kwargs_diff = imshow_kwargs.copy()
+        imshow_kwargs_diff['cmap'] = 'RdBu_r'  # Red-Blue diverging colormap
+        
+        im3 = axes[b, 2].imshow(difference[b], **imshow_kwargs_diff)
+        axes[b, 2].set_xlabel('Space x')
+        axes[b, 2].set_ylabel('Time t')
+        axes[b, 2].set_title(f'Difference (Sample {b+1})')
+        plt.colorbar(im3, ax=axes[b, 2], label='Error')
     
     plt.tight_layout()
     
