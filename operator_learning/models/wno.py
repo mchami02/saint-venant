@@ -172,7 +172,7 @@ class WNO2d(nn.Module):
         self.fc2 = nn.Linear(128, 1)
 
     def forward(self, x):
-        x = x.permute(0, 2, 3, 1)
+        x = x[:, 0:1].permute(0, 2, 3, 1)
         grid = self.get_grid(x.shape, x.device)
         x = torch.cat((x, grid), dim=-1)    
         x = self.fc0(x)                      # Shape: Batch * x * y * Channel

@@ -23,8 +23,9 @@ def generate_data(solver, n_samples, nx, nt, dx, dt, initial_condition = None, b
 class PiecewiseRandom(PiecewiseConstant):
     def __init__(self, ks, x_noise=False):
         super().__init__(ks, x_noise)
-        self.xs = np.random.rand(len(ks) + 1)
+        self.xs = np.random.rand(len(ks) - 1)
         self.xs = np.sort(self.xs)
+        self.xs = np.concatenate([[0], self.xs, [1]])
 
 @mem.cache
 def get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps = 3):
