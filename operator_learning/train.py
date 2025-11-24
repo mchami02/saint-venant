@@ -146,7 +146,7 @@ def train_model(model, train_loader, val_loader, args):
     best_loss = float('inf')
     epochs_without_improvement = 0
     current_lr = optimizer.param_groups[0]['lr']
-    
+    tolerance = 1e-2
     # Track training history
     train_losses = []
     val_losses = []
@@ -161,7 +161,7 @@ def train_model(model, train_loader, val_loader, args):
         current_lr = optimizer.param_groups[0]['lr']
         
         # Check for improvement
-        if val_loss < best_loss:
+        if val_loss < best_loss * (1 - tolerance):
             best_loss = val_loss
             epochs_without_improvement = 0
             torch.save(model.state_dict(), args.save_path)
