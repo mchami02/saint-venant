@@ -54,6 +54,7 @@ def parse_args():
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--lr_decay", type=float, default=0.1)
     parser.add_argument("--num_plots", type=int, default=5)
+    parser.add_argument("--model_path", type=str, default=None)
     return parser.parse_args()
 
 
@@ -232,7 +233,10 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
-    model = create_model(args).to(device)
+    if args.model_path is not None:
+        model = torch.load(args.model_path).to(device)
+    else:
+        model = create_model(args).to(device)
     summary(model)
     model = train_model(model, train_loader, val_loader, args)
     test_model(model, test_loader, args)
