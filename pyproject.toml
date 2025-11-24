@@ -21,6 +21,8 @@ dependencies = [
     "modal>=0.65.66",
     "torchinfo>=1.8.0",
     "nfv",
+    "pytorch-wavelets",
+    "ptwt>=0.1.9",
 ]
 
 [project.scripts]
@@ -38,3 +40,4 @@ dev-dependencies = []
 
 [tool.uv.sources]
 nfv = { git = "https://github.com/mchami02/nfv.git" }
+pytorch-wavelets = { git = "https://github.com/fbcotter/pytorch_wavelets.git" }

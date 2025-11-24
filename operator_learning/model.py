@@ -1,6 +1,7 @@
 from neuralop.models import FNO
 from deepxde.nn.pytorch import DeepONetCartesianProd
-
+from models.fno_wrapper import fno_custom_freqs
+from models.wno import WNO2d
 # DeepXDE sets torch default device to cuda, but this breaks DataLoader with num_workers > 0
 # Reset it to None/cpu to avoid generator device mismatch
 import torch
@@ -90,11 +91,19 @@ class DeepONetWrapper(DeepONetCartesianProd):
 def create_model(args):
     if args.model == "FNO":
         model = FNO(
-        n_modes=(8, 16),        # modes in (time, space) dimensions
-        hidden_channels=16,       # network width
-        in_channels=args.in_channels - 2,           # density
+        n_modes=(128, 64),        # modes in (time, space) dimensions
+        hidden_channels=64,       # network width
+        in_channels=args.in_channels - 2,           # density + time + space
         out_channels=args.out_channels,          # predicted density
-        n_layers=8               # number of FNO layers
+        n_layers=4               # number of FNO layers
+        )
+    elif args.model == "FNOPersonalized":
+        model = fno_custom_freqs(
+            n_modes=(8, 16),
+            hidden_channels=16,
+            in_channels=args.in_channels - 2,
+            out_channels=args.out_channels,
+            n_layers=4
         )
     elif args.model == "DeepONet":
         # Calculate proper branch network input size
@@ -113,6 +122,16 @@ def create_model(args):
         activation = "relu",
         kernel_initializer = "Glorot normal",
         num_outputs = args.out_channels
+        )
+    elif args.model == "WNO":
+        model = WNO2d(
+            width=8,
+            level=3,
+            layers=2,
+            size=[args.nt, args.nx],
+            wavelet='db4',
+            in_channel=3,
+            grid_range=[0.0, 1.0],
         )
     else:
         raise ValueError(f"Model {args.model} not supported")
