@@ -53,6 +53,7 @@ def parse_args():
     parser.add_argument("--n_datasets", type=int, default=1)
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--lr_decay", type=float, default=0.1)
+    parser.add_argument("--num_plots", type=int, default=5)
     return parser.parse_args()
 
 
@@ -209,7 +210,7 @@ def test_model(model, test_loader, args):
     print(f"Test Loss: {test_loss:.6f}")
     i = 0
     for gt, pred in zip(gts, preds):
-        if i > 10:
+        if i >= args.num_plots:
             break
         i += 1
         os.makedirs("results", exist_ok=True)
