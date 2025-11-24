@@ -169,12 +169,11 @@ def train_model(model, train_loader, val_loader, args):
             epochs_without_improvement += 1
             
         # Reduce learning rate if no improvement for 10 epochs
-        if epochs_without_improvement >= args.patience // 2:
-            epochs_without_improvement = 0
+        if epochs_without_improvement == args.patience // 2:
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= args.lr_decay
 
-        if epochs_without_improvement >= args.patience:
+        if epochs_without_improvement == args.patience:
             print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
             break
 
