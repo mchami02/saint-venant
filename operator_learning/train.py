@@ -9,6 +9,7 @@ import torch.nn as nn
 import os
 from model import create_model
 from torchinfo import summary
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -53,6 +54,36 @@ def parse_args():
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--lr_decay", type=float, default=0.1)
     return parser.parse_args()
+
+
+def plot_training_history(train_losses, val_losses, save_path="results/training_history.png"):
+    """
+    Plot training and validation losses.
+    
+    Args:
+        train_losses: List of training losses per epoch
+        val_losses: List of validation losses per epoch
+        save_path: Path to save the plot
+    """
+    epochs = range(1, len(train_losses) + 1)
+    
+    plt.figure(figsize=(10, 6))
+    
+    # Plot losses
+    plt.plot(epochs, train_losses, 'b-', label='Train Loss', linewidth=2)
+    plt.plot(epochs, val_losses, 'r-', label='Val Loss', linewidth=2)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Loss', fontsize=12)
+    plt.title('Training and Validation Loss', fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+    plt.yscale('log')
+    
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Training history plot saved to {save_path}")
 
 
 def train_epoch(model, train_loader, val_loader, optimizer, criterion):
@@ -112,9 +143,19 @@ def train_model(model, train_loader, val_loader, args):
     best_loss = float('inf')
     epochs_without_improvement = 0
     current_lr = optimizer.param_groups[0]['lr']
+    
+    # Track training history
+    train_losses = []
+    val_losses = []
+    
     bar = tqdm(range(args.epochs), desc="Training")
     for epoch in bar:
         train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion)
+        
+        # Record history
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
         
         # Check for improvement
         if val_loss < best_loss:
@@ -134,10 +175,13 @@ def train_model(model, train_loader, val_loader, args):
             print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
             break
 
-        current_lr = optimizer.param_groups[0]['lr']
         bar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "LR": current_lr})
     
     print(f"\nTraining completed! Final best loss: {best_loss:.6f}")
+    
+    # Plot training history
+    plot_training_history(train_losses, val_losses)
+    
     model.load_state_dict(torch.load(args.save_path, weights_only=False))
     return model
 
