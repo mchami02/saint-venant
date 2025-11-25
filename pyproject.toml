@@ -23,6 +23,7 @@ dependencies = [
     "nfv",
     "pytorch-wavelets",
     "ptwt>=0.1.9",
+    "einops>=0.8.1",
 ]
 
 [project.scripts]
