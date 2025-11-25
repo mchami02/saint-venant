@@ -4,205 +4,237 @@ from typing import Optional, Tuple
 from neuralop.models import FNO
 from neuralop.layers.spectral_convolution import SpectralConv
 from neuralop.layers.fno_block import FNOBlocks
-class SpectralConvWithManualFreqs(nn.Module):
+
+class SpectralConvSparse(SpectralConv):
     """
-    Wrapper around SpectralConv that, instead of taking the lowest n_modes
-    (i.e. contiguous from 0), selects n_modes *manually chosen* frequencies
-    in the forward pass.
-
-    Assumptions for simplicity:
-      - Supports 1D and 2D convolutions
-      - real-valued spatial data (complex_data=False)
-      - non-separable convolution (separable=False)
+    Modified SpectralConv that selects non-contiguous frequency modes
+    to capture both smooth (low-freq) and non-smooth (high-freq) features.
     """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        n_modes: int,
-        **kwargs,
-    ):
-        super().__init__()
-        # Instantiate the original SpectralConv with the same arguments
-        self.spectral_conv = SpectralConv(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            n_modes=n_modes,
-            **kwargs,
-        )
-
-        if self.spectral_conv.complex_data:
-            raise NotImplementedError("Wrapper currently assumes complex_data=False.")
-        if self.spectral_conv.separable:
-            raise NotImplementedError("Wrapper currently assumes separable=False.")
-        if self.spectral_conv.order > 2:
-            raise NotImplementedError("Wrapper currently implemented for 1D and 2D only.")
-
-    # ---- Helper: choose manual frequency indices (default) -----------------
-    def _default_frequency_indices_1d(self, fft_size: int, n_modes_used: int, device) -> torch.LongTensor:
+    
+    def __init__(self, *args, frequency_sampling='logarithmic', **kwargs):
         """
-        Choose which frequency bins to keep for a single dimension.
-
-        Uses the Fibonacci sequence to select frequencies, which provides
-        a naturally growing spacing that captures both low and mid frequencies.
-        If we need more modes than Fibonacci provides, fill with remaining
-        lowest frequencies.
+        Parameters
+        ----------
+        frequency_sampling : str or callable
+            Strategy for selecting which frequencies to keep:
+            - 'contiguous': original behavior (low-pass filter)
+            - 'logarithmic': log-spaced frequencies [1, 2, 4, 8, 16, ...]
+            - 'fibonacci': Fibonacci spacing [0, 1, 2, 3, 5, 8, 13, ...]
+            - 'mixed': half low-freq, half high-freq
+            - callable: custom function(fft_size, n_modes) -> indices
         """
-        if n_modes_used >= fft_size:
-            # If we ask for more modes than available, just keep everything
-            return torch.arange(fft_size, device=device)
-
-        # Generate Fibonacci sequence up to fft_size
-        fib_indices = []
-        a, b = 0, 1
-        while a < fft_size:
-            if a not in fib_indices:  # Avoid duplicates (e.g., 0, 1, 1)
-                fib_indices.append(a)
-            a, b = b, a + b
+        super().__init__(*args, **kwargs)
+        self.frequency_sampling = frequency_sampling
+    
+    def _get_frequency_indices(self, fft_size, n_modes, device):
+        """
+        Generate non-contiguous frequency indices based on sampling strategy.
         
-        base = torch.tensor(fib_indices, device=device)
-
-        # If we already have enough, truncate
-        if base.numel() >= n_modes_used:
-            return base[:n_modes_used]
-
-        # Otherwise, fill with the remaining lowest frequencies not in `base`
-        used = set(base.tolist())
-        extra = [i for i in range(fft_size) if i not in used]
-        extra = torch.tensor(extra, device=device)
-
-        idx = torch.cat([base, extra])[:n_modes_used]
-        return idx
-
-    # ----------------------------------------------------------------------
-    def forward(self, x: torch.Tensor, output_shape: Optional[Tuple[int]] = None):
+        Returns
+        -------
+        indices : torch.LongTensor
+            Indices of frequencies to keep (in fftshift-ed coordinates)
         """
-        Forward pass where we:
-          1) Go to Fourier domain.
-          2) Select *manual* frequency indices.
-          3) Contract only on those indices.
-          4) Scatter the result back into the full spectrum.
-          5) Inverse FFT to spatial domain.
+        center = fft_size // 2
         
-        Supports both 1D and 2D inputs.
-        """
-        sc = self.spectral_conv  # shorthand
-        order = sc.order  # 1 for 1D, 2 for 2D
-
-        # Precision handling (same as original)
-        if sc.fno_block_precision == "half":
-            x = x.half()
-
-        # Determine spatial dimensions based on order
-        if order == 1:
-            batchsize, in_channels, L = x.shape
-            assert in_channels == sc.in_channels
-            fft_dims = [-1]
-            spatial_shape = (L,)
-        elif order == 2:
-            batchsize, in_channels, H, W = x.shape
-            assert in_channels == sc.in_channels
-            fft_dims = [-2, -1]
-            spatial_shape = (H, W)
+        if self.frequency_sampling == 'contiguous':
+            # Original behavior: contiguous around DC
+            negative_freqs = n_modes // 2
+            positive_freqs = n_modes // 2 + n_modes % 2
+            return torch.arange(
+                center - negative_freqs, 
+                center + positive_freqs, 
+                device=device
+            )
+        
+        elif self.frequency_sampling == 'logarithmic':
+            # Logarithmic spacing: captures multiple scales
+            # Takes: [0, 1, 2, 4, 8, 16, ...] around DC
+            indices = []
+            # Positive frequencies
+            pos_indices = [0]  # DC
+            k = 1
+            while len(pos_indices) < n_modes // 2 + 1 and center + k < fft_size:
+                pos_indices.append(k)
+                k = min(k * 2, k + 1)  # Exponential, but cap growth
+            
+            # Negative frequencies (mirror)
+            neg_indices = [-i for i in pos_indices[1:]][::-1]
+            
+            # Combine and convert to absolute indices
+            freq_offsets = neg_indices + pos_indices
+            freq_offsets = freq_offsets[:n_modes]  # Truncate to n_modes
+            indices = torch.tensor([center + offset for offset in freq_offsets], 
+                                  device=device)
+            return indices
+        
+        elif self.frequency_sampling == 'fibonacci':
+            # Fibonacci spacing: natural growth rate
+            # Similar to your wrapper implementation
+            fib_offsets = []
+            a, b = 0, 1
+            while a < fft_size // 2:
+                fib_offsets.append(a)
+                a, b = b, a + b
+            
+            # Take positive and negative
+            indices = [center]  # DC
+            for offset in fib_offsets[1:]:
+                if len(indices) >= n_modes:
+                    break
+                if center + offset < fft_size:
+                    indices.append(center + offset)
+                if len(indices) >= n_modes:
+                    break
+                if center - offset >= 0:
+                    indices.append(center - offset)
+            
+            return torch.tensor(sorted(indices[:n_modes]), device=device)
+        
+        elif self.frequency_sampling == 'mixed':
+            # Half low-frequency (smooth), half high-frequency (non-smooth)
+            low_modes = n_modes // 2
+            high_modes = n_modes - low_modes
+            
+            # Low frequencies: contiguous around DC
+            low_indices = torch.arange(
+                center - low_modes // 2,
+                center + (low_modes - low_modes // 2),
+                device=device
+            )
+            
+            # High frequencies: from the edges
+            high_indices = []
+            # Take from positive high frequencies
+            for i in range(high_modes):
+                idx = center + (low_modes // 2) + i * (fft_size // high_modes)
+                if idx < fft_size:
+                    high_indices.append(idx)
+            
+            high_indices = torch.tensor(high_indices, device=device)
+            return torch.cat([low_indices, high_indices]).sort()[0]
+        
+        elif callable(self.frequency_sampling):
+            # Custom user-defined function
+            offsets = self.frequency_sampling(fft_size, n_modes)
+            return torch.tensor([center + o for o in offsets], device=device)
+        
         else:
-            raise ValueError(f"Unsupported order: {order}")
-
-        # Real FFT along spatial dims
-        x_fft = torch.fft.rfftn(x, dim=fft_dims, norm=sc.fft_norm)
+            raise ValueError(f"Unknown frequency_sampling: {self.frequency_sampling}")
+    
+    def forward(self, x: torch.Tensor, output_shape=None):
+        """Modified forward pass with sparse frequency selection."""
+        batchsize, channels, *mode_sizes = x.shape
         
-        # Get FFT sizes for each dimension
-        fft_sizes = list(x_fft.shape[-order:])
-
-        # Precision switch after FFT if "mixed"
-        if sc.fno_block_precision == "mixed":
-            x_fft = x_fft.chalf()
-
-        # Decide output dtype in Fourier domain
-        if sc.fno_block_precision in ["half", "mixed"]:
+        fft_size = list(mode_sizes)
+        if not self.complex_data:
+            fft_size[-1] = fft_size[-1] // 2 + 1
+        fft_dims = list(range(-self.order, 0))
+        
+        if self.fno_block_precision == "half":
+            x = x.half()
+        
+        # FFT Transform
+        if self.complex_data:
+            x = torch.fft.fftn(x, norm=self.fft_norm, dim=fft_dims)
+            dims_to_fft_shift = fft_dims
+        else:
+            x = torch.fft.rfftn(x, norm=self.fft_norm, dim=fft_dims)
+            dims_to_fft_shift = fft_dims[:-1]
+        
+        if self.order > 1:
+            x = torch.fft.fftshift(x, dim=dims_to_fft_shift)
+        
+        if self.fno_block_precision == "mixed":
+            x = x.chalf()
+        
+        if self.fno_block_precision in ["half", "mixed"]:
             out_dtype = torch.chalf
         else:
             out_dtype = torch.cfloat
-
-        # ---- MANUAL FREQUENCY SELECTION -----------------------------------
-        # Choose which bins to keep for each dimension
-        indices = []
-        n_kept_list = []
         
-        for dim_idx in range(order):
-            n_modes_used = sc.n_modes[dim_idx]
-            fft_size = fft_sizes[dim_idx]
-            
-            idx = self._default_frequency_indices_1d(fft_size, n_modes_used, x_fft.device)
-            n_kept = idx.numel()
-            
-            # Make sure it does not exceed what the weight tensor can support
-            max_modes = sc.max_n_modes[dim_idx] if sc.max_n_modes is not None else n_kept
-            n_kept = min(n_kept, max_modes)
-            idx = idx[:n_kept]
-            
-            indices.append(idx)
-            n_kept_list.append(n_kept)
-
-        # Select frequencies from x_fft based on indices
-        x_sel = x_fft
-        for dim_idx in range(order):
-            fft_dim = -(order - dim_idx)  # -1 for last, -2 for second to last
-            x_sel = torch.index_select(x_sel, dim=fft_dim, index=indices[dim_idx])
-
-        # Restrict the weight tensor to selected modes
-        if order == 1:
-            weight = sc.weight[:, :, :n_kept_list[0]]
-        elif order == 2:
-            weight = sc.weight[:, :, :n_kept_list[0], :n_kept_list[1]]
-
-        # Contract along channels and modes using the original contract function
-        out_sel = sc._contract(x_sel, weight, separable=sc.separable)
-
-        # Allocate full Fourier tensor and scatter the selected frequencies back
-        if order == 1:
-            out_fft = torch.zeros(
-                (batchsize, sc.out_channels, fft_sizes[0]),
-                device=x_fft.device,
-                dtype=out_dtype,
-            )
-            out_fft.index_copy_(dim=-1, index=indices[0], source=out_sel)
-        elif order == 2:
-            out_fft = torch.zeros(
-                (batchsize, sc.out_channels, fft_sizes[0], fft_sizes[1]),
-                device=x_fft.device,
-                dtype=out_dtype,
-            )
-            # Scatter back for 2D: need to handle both dimensions
-            # First, create a grid of indices
-            for i, idx_h in enumerate(indices[0]):
-                for j, idx_w in enumerate(indices[1]):
-                    out_fft[:, :, idx_h, idx_w] = out_sel[:, :, i, j]
-
-        # ---- Handle possible resolution scaling / output_shape ------------
-        if sc.resolution_scaling_factor is not None and output_shape is None:
-            if order == 1:
-                mode_sizes = (round(spatial_shape[0] * sc.resolution_scaling_factor[0][0]),)
-            elif order == 2:
-                mode_sizes = (
-                    round(spatial_shape[0] * sc.resolution_scaling_factor[0][0]),
-                    round(spatial_shape[1] * sc.resolution_scaling_factor[0][1])
-                )
-        elif output_shape is not None:
-            mode_sizes = output_shape
-        else:
-            mode_sizes = spatial_shape
-
-        # Inverse real FFT to go back to spatial domain
-        x_out = torch.fft.irfftn(
-            out_fft, s=mode_sizes, dim=fft_dims, norm=sc.fft_norm
+        out_fft = torch.zeros(
+            [batchsize, self.out_channels, *fft_size], 
+            device=x.device, 
+            dtype=out_dtype
         )
-
-        # Add bias if present
-        if sc.bias is not None:
-            x_out = x_out + sc.bias
-
-        return x_out
+        
+        # ====== KEY MODIFICATION: Non-contiguous frequency selection ======
+        
+        # Get sparse frequency indices for each dimension
+        freq_indices = []
+        for dim_idx in range(self.order):
+            indices = self._get_frequency_indices(
+                fft_size[dim_idx], 
+                self.n_modes[dim_idx],
+                x.device
+            )
+            freq_indices.append(indices)
+        
+        # Select frequencies from input FFT using advanced indexing
+        x_selected = x
+        for dim_idx, indices in enumerate(freq_indices):
+            # Select along spatial dimensions (skip batch and channel dims)
+            dim = 2 + dim_idx
+            x_selected = torch.index_select(x_selected, dim=dim, index=indices)
+        
+        # Get corresponding weight slice
+        # Weight tensor shape: [in_channels, out_channels, modes_1, modes_2, ...]
+        if self.separable:
+            weight_slice = [slice(None)]
+        else:
+            weight_slice = [slice(None), slice(None)]
+        
+        # For each spatial dimension, take only the modes we're using
+        for dim_idx in range(self.order):
+            n_kept = len(freq_indices[dim_idx])
+            weight_slice.append(slice(None, n_kept))
+        
+        weight = self.weight[tuple(weight_slice)]
+        
+        # Contract (multiply in frequency domain)
+        out_selected = self._contract(x_selected, weight, separable=self.separable)
+        
+        # Scatter back to full spectrum at the selected frequencies
+        # This is the tricky part - we need to place values at specific indices
+        if self.order == 1:
+            # 1D case
+            out_fft[:, :, freq_indices[0]] = out_selected
+        elif self.order == 2:
+            # 2D case - need meshgrid
+            idx_h, idx_w = freq_indices[0], freq_indices[1]
+            for i, h in enumerate(idx_h):
+                for j, w in enumerate(idx_w):
+                    out_fft[:, :, h, w] = out_selected[:, :, i, j]
+        elif self.order == 3:
+            # 3D case
+            for i, h in enumerate(freq_indices[0]):
+                for j, w in enumerate(freq_indices[1]):
+                    for k, d in enumerate(freq_indices[2]):
+                        out_fft[:, :, h, w, d] = out_selected[:, :, i, j, k]
+        
+        # ====== End of modification ======
+        
+        # Resolution scaling
+        if self.resolution_scaling_factor is not None and output_shape is None:
+            mode_sizes = tuple([round(s * r) for (s, r) in 
+                               zip(mode_sizes, self.resolution_scaling_factor)])
+        if output_shape is not None:
+            mode_sizes = output_shape
+        
+        # Inverse FFT
+        if self.order > 1:
+            out_fft = torch.fft.ifftshift(out_fft, dim=dims_to_fft_shift)
+        
+        if self.complex_data:
+            x = torch.fft.ifftn(out_fft, s=mode_sizes, dim=fft_dims, norm=self.fft_norm)
+        else:
+            x = torch.fft.irfftn(out_fft, s=mode_sizes, dim=fft_dims, norm=self.fft_norm)
+        
+        if self.bias is not None:
+            x = x + self.bias
+        
+        return x
 
 def fno_custom_freqs(n_modes, hidden_channels, in_channels, out_channels, n_layers, **kwargs):
     return FNO(
@@ -211,6 +243,6 @@ def fno_custom_freqs(n_modes, hidden_channels, in_channels, out_channels, n_laye
         n_modes=n_modes,
         hidden_channels=hidden_channels,
         n_layers=n_layers,
-        conv_module=SpectralConvWithManualFreqs,
+        conv_module=SpectralConvSparse,
         **kwargs
     )
