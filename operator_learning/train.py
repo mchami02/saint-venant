@@ -182,7 +182,7 @@ def train_autoregressive_epoch(model, train_loader, val_loader, optimizer, crite
                 model_input = targets[:, :, t]
             else:
                 # Use predictions for interior points
-                model_input = model_pred[:, :, t, 1:-1]
+                model_input = model_pred[:, :, t]
         loss = criterion(model_pred, targets)
         loss.backward()
         optimizer.step()

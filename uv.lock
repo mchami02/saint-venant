@@ -1901,7 +1901,7 @@ wheels = [
 [[package]]
 name = "nfv"
 version = "0.1.0"
-source = { git = "https://github.com/mchami02/nfv.git#b2d3c5f250f46d9a27f0dc61740fbb99849c0342" }
+source = { git = "https://github.com/mchami02/nfv.git#0d68ea7203dd7bf041f5489d0b2fd915e078b8e3" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
