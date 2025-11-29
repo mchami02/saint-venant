@@ -13,10 +13,18 @@ torch.set_default_device(None)
 def create_model(args):
     if args.model == "FNO":
         model = FNO(
-        n_modes=(128, 64),        # modes in (time, space) dimensions
-        hidden_channels=64,       # network width
+        n_modes=(16, 4),        # modes in (time, space) dimensions
+        hidden_channels=16,       # network width
         in_channels=args.in_channels - 2,           # density + time + space
         out_channels=args.out_channels,          # predicted density
+        n_layers=4               # number of FNO layers
+        )
+    elif args.model == "FNO1d":
+        model = FNO(
+        n_modes=(16,),        # modes in (time) dimension
+        hidden_channels=16,       # network width
+        in_channels=1,           # density + time
+        out_channels=1,          # predicted density
         n_layers=4               # number of FNO layers
         )
     elif args.model == "FNOPersonalized":

@@ -173,26 +173,17 @@ def train_autoregressive_epoch(model, train_loader, val_loader, optimizer, crite
         B, n_vals, nt, nx = targets.shape
         
         optimizer.zero_grad()
-        
-        # First pass: get initial predictions from the masked input (no gradient)
-        with torch.no_grad():
-            initial_pred = model(full_input)
-        
-        # Build mixed input using scheduled sampling
-        # For each timestep, decide whether to use ground truth or prediction
-        mixed_input = full_input.clone()
-        
+        model_input = full_input[:, :, 0]
+        model_pred = full_input.clone()
         for t in range(1, nt):
+            model_pred[:, :, t, 1:-1] = model(model_input)[:, :, 1:-1]
             if random.random() < teacher_forcing_ratio:
                 # Use ground truth for interior points (boundaries stay from full_input)
-                mixed_input[:, :, t, 1:-1] = targets[:, :, t, 1:-1]
+                model_input = targets[:, :, t]
             else:
                 # Use predictions for interior points
-                mixed_input[:, :, t, 1:-1] = initial_pred[:, :, t, 1:-1]
-        
-        # Second pass: train with mixed input
-        pred = model(mixed_input)
-        loss = criterion(pred, targets)
+                model_input = model_pred[:, :, t, 1:-1]
+        loss = criterion(model_pred, targets)
         loss.backward()
         optimizer.step()
         
@@ -214,17 +205,16 @@ def train_autoregressive_epoch(model, train_loader, val_loader, optimizer, crite
             B, n_vals, nt, nx = targets.shape
             
             # True autoregressive: predict one timestep at a time using previous predictions
-            current_input = full_input.clone()
-            
+            current_input = full_input[:, :, 0]
+            model_pred = full_input.clone()
             for t in range(1, nt):
                 # Run model with current known inputs
-                pred = model(current_input)
+                model_pred[:, :, t, 1:-1] = model(current_input)[:, :, 1:-1]
                 # Use prediction for timestep t as input for next iteration
-                current_input[:, :, t, 1:-1] = pred[:, :, t, 1:-1]
+                current_input = model_pred[:, :, t]
             
             # Final prediction after filling all timesteps
-            final_pred = model(current_input)
-            loss = criterion(final_pred, targets)
+            loss = criterion(model_pred, targets)
             running_loss += loss.item()
             n_batches += 1
     
