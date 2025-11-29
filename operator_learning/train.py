@@ -1,4 +1,5 @@
 import argparse
+import random
 from typing import Any
 from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver, plot_comparison
 from operator_data_pipeline import GridDataset
@@ -56,6 +57,7 @@ def parse_args():
     parser.add_argument("--lr_decay", type=float, default=0.1)
     parser.add_argument("--num_plots", type=int, default=5)
     parser.add_argument("--model_path", type=str, default=None)
+    parser.add_argument("--autoregressive", action="store_true", help="Train autoregressively with scheduled sampling")
     return parser.parse_args()
 
 
@@ -137,9 +139,106 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion):
     
     return train_loss, val_loss
 
+
+def train_autoregressive_epoch(model, train_loader, val_loader, optimizer, criterion, teacher_forcing_ratio):
+    """
+    Autoregressive training with scheduled sampling.
+    
+    Instead of predicting the whole grid in one shot, this trains the model to predict
+    timestep by timestep. Uses scheduled sampling where:
+    - teacher_forcing_ratio = 1.0: always use ground truth as input
+    - teacher_forcing_ratio = 0.0: always use model predictions as input
+    
+    The teacher forcing ratio should decay from 1.0 to 0.0 over training epochs.
+    
+    Args:
+        model: The neural operator model
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        optimizer: Optimizer
+        criterion: Loss function
+        teacher_forcing_ratio: Probability of using ground truth (1.0 = all GT, 0.0 = all predictions)
+    """
+    model.train()
+    running_loss = 0.0
+    n_batches = 0
+    
+    for full_input, targets in tqdm(train_loader, desc=f"Train AR (tf={teacher_forcing_ratio:.2f})", leave=False):
+        # full_input: (B, n_vals, nt, nx) - has IC and boundaries, rest masked with -1
+        # targets: (B, n_vals, nt, nx) - full ground truth
+        
+        full_input = full_input.to(device)
+        targets = targets.to(device)
+        
+        B, n_vals, nt, nx = targets.shape
+        
+        optimizer.zero_grad()
+        
+        # First pass: get initial predictions from the masked input (no gradient)
+        with torch.no_grad():
+            initial_pred = model(full_input)
+        
+        # Build mixed input using scheduled sampling
+        # For each timestep, decide whether to use ground truth or prediction
+        mixed_input = full_input.clone()
+        
+        for t in range(1, nt):
+            if random.random() < teacher_forcing_ratio:
+                # Use ground truth for interior points (boundaries stay from full_input)
+                mixed_input[:, :, t, 1:-1] = targets[:, :, t, 1:-1]
+            else:
+                # Use predictions for interior points
+                mixed_input[:, :, t, 1:-1] = initial_pred[:, :, t, 1:-1]
+        
+        # Second pass: train with mixed input
+        pred = model(mixed_input)
+        loss = criterion(pred, targets)
+        loss.backward()
+        optimizer.step()
+        
+        running_loss += loss.item()
+        n_batches += 1
+    
+    train_loss = running_loss / max(1, n_batches)
+    
+    # Validation: use pure autoregressive (no teacher forcing)
+    model.eval()
+    running_loss = 0.0
+    n_batches = 0
+    
+    with torch.no_grad():
+        for full_input, targets in tqdm(val_loader, desc="Val AR", leave=False):
+            full_input = full_input.to(device)
+            targets = targets.to(device)
+            
+            B, n_vals, nt, nx = targets.shape
+            
+            # True autoregressive: predict one timestep at a time using previous predictions
+            current_input = full_input.clone()
+            
+            for t in range(1, nt):
+                # Run model with current known inputs
+                pred = model(current_input)
+                # Use prediction for timestep t as input for next iteration
+                current_input[:, :, t, 1:-1] = pred[:, :, t, 1:-1]
+            
+            # Final prediction after filling all timesteps
+            final_pred = model(current_input)
+            loss = criterion(final_pred, targets)
+            running_loss += loss.item()
+            n_batches += 1
+    
+    val_loss = running_loss / max(1, n_batches)
+    
+    return train_loss, val_loss
+
+
 def train_model(model, train_loader, val_loader, args):
     """
-    Train one-shot FNO for multiple epochs with learning rate scheduling and early stopping.
+    Train FNO for multiple epochs with learning rate scheduling and early stopping.
+    
+    If args.autoregressive is True, uses scheduled sampling where teacher forcing
+    ratio decays from 1.0 to 0.0 over epochs.
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     criterion = nn.MSELoss()
@@ -151,9 +250,18 @@ def train_model(model, train_loader, val_loader, args):
     train_losses = []
     val_losses = []
     
-    bar = tqdm(range(args.epochs), desc="Training")
+    desc = "Training (Autoregressive)" if args.autoregressive else "Training"
+    bar = tqdm(range(args.epochs), desc=desc)
     for epoch in bar:
-        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion)
+        if args.autoregressive:
+            # Teacher forcing ratio: linearly decay from 1.0 to 0.0
+            teacher_forcing_ratio = 1.0 - (epoch / max(1, args.epochs - 1))
+            train_loss, val_loss = train_autoregressive_epoch(
+                model, train_loader, val_loader, optimizer, criterion, teacher_forcing_ratio
+            )
+        else:
+            teacher_forcing_ratio = None
+            train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion)
         
         # Record history
         train_losses.append(train_loss)
@@ -168,7 +276,7 @@ def train_model(model, train_loader, val_loader, args):
         else:
             epochs_without_improvement += 1
             
-        # Reduce learning rate if no improvement for 10 epochs
+        # Reduce learning rate if no improvement for patience/2 epochs
         if epochs_without_improvement == args.patience // 2:
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= args.lr_decay
@@ -177,7 +285,10 @@ def train_model(model, train_loader, val_loader, args):
             print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
             break
 
-        bar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "LR": current_lr})
+        postfix = {"Train": f"{train_loss:.4f}", "Val": f"{val_loss:.4f}", "LR": f"{current_lr:.2e}"}
+        if teacher_forcing_ratio is not None:
+            postfix["TF"] = f"{teacher_forcing_ratio:.2f}"
+        bar.set_postfix(postfix)
     
     print(f"\nTraining completed! Final best loss: {best_loss:.6f}")
     
@@ -194,22 +305,44 @@ def test_model(model, test_loader, args):
     criterion = nn.MSELoss()
     gts = []
     preds = []
-    for full_input, targets in test_loader:
-        full_input = full_input.to(device)
-        targets = targets.to(device)
-        model_input = full_input  # (B, 3, nt, nx)
-        pred = model(model_input)  # (B, 1, nt, nx)
-        loss = criterion(pred, targets)
-        running_loss += loss.item()
-        n_batches += 1
-        for i in range(targets.shape[0]):
-            gt = targets[i].squeeze(0).detach().cpu().numpy()
-            p = pred[i].squeeze(0).detach().cpu().numpy()
-            gts.append(gt)
-            preds.append(p)
+    
+    with torch.no_grad():
+        for full_input, targets in test_loader:
+            full_input = full_input.to(device)
+            targets = targets.to(device)
+            
+            if args.autoregressive:
+                # True autoregressive inference: predict one timestep at a time
+                # using the previous prediction as input for the next step
+                B, n_vals, nt, nx = targets.shape
+                current_input = full_input.clone()
+                
+                for t in range(1, nt):
+                    # Run model with current known inputs (t=0 to t-1)
+                    pred = model(current_input)
+                    # Use prediction for timestep t as input for next iteration
+                    current_input[:, :, t, 1:-1] = pred[:, :, t, 1:-1]
+                
+                # Final prediction after filling all timesteps autoregressively
+                pred = model(current_input)
+            else:
+                # Standard one-shot prediction
+                pred = model(full_input)
+            
+            loss = criterion(pred, targets)
+            running_loss += loss.item()
+            n_batches += 1
+            
+            for i in range(targets.shape[0]):
+                gt = targets[i].squeeze(0).detach().cpu().numpy()
+                p = pred[i].squeeze(0).detach().cpu().numpy()
+                gts.append(gt)
+                preds.append(p)
+    
     test_loss = running_loss / max(1, n_batches)
-    print(f"Test Loss: {test_loss:.6f}")
-    i = 0
+    mode = "Autoregressive" if args.autoregressive else "One-shot"
+    print(f"Test Loss ({mode}): {test_loss:.6f}")
+    
     gts = np.array(gts)[:args.num_plots]
     preds = np.array(preds)[:args.num_plots]
     plot_comparison(gts, preds, args.nx, args.nt, args.dx, args.dt, save_as=f"results/test_comparison.png")
@@ -233,6 +366,7 @@ def main():
     if args.model_path is not None:
         model.load_state_dict(torch.load(args.model_path, weights_only=False))
     summary(model)
+    
     model = train_model(model, train_loader, val_loader, args)
     test_model(model, test_loader, args)
 
