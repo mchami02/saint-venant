@@ -42,7 +42,7 @@ class GridDataset(Dataset):
         self.nt = nt
         self.dx = dx
         self.dt = dt
-        self.grids = generate_data(solver, n_samples, nx, nt, dx, dt)
+        self.grids = get_nfv_dataset(n_samples, nx, nt, dx, dt)
 
     def __len__(self):
         return len(self.grids)
