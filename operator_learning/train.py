@@ -91,7 +91,19 @@ def plot_training_history(train_losses, val_losses, save_path="results/training_
     print(f"Training history plot saved to {save_path}")
 
 
-def train_epoch(model, train_loader, val_loader, optimizer, criterion):
+def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
+    targets = targets.to(device)
+    prediction = targets.clone()
+    model_input = targets[:, :, 0]
+    for t in range(1, args.nt):
+        if random.random() < teacher_forcing_ratio:
+            model_input = targets[:, :, t]
+        prediction[:, :, t, 1:-1] = model(model_input)[:, :, 1:-1]
+        model_input = prediction[:, :, t]
+    return prediction
+
+
+def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,args):
     """
     Training loop for one-shot FNO prediction.
     Model predicts entire spatiotemporal solution in one forward pass.
@@ -110,7 +122,13 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion):
         optimizer.zero_grad()
         
         # Forward pass - single prediction for entire grid
-        pred = model(full_input)  # (B, n_vals, nt, nx)
+        if args.autoregressive:
+            # Prevent division by zero by ensuring denominator is at least 1
+            max_epochs = max(1, args.epochs - 1)
+            teacher_forcing_ratio = 1.0 - (epoch / max_epochs)
+            pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
+        else:
+            pred = model(full_input)  # (B, n_vals, nt, nx)
         
         # Compute loss
         loss = criterion(pred, targets)
@@ -129,95 +147,16 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion):
         full_input = full_input.to(device)
         targets = targets.to(device)
 
-        pred = model(full_input)  # (B, n_vals, nt, nx)
+        if args.autoregressive:
+            teacher_forcing_ratio = 1.0 - (epoch / max(1, args.epochs - 1))
+            pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
+        else:
+            pred = model(full_input)  # (B, n_vals, nt, nx)
         
         loss = criterion(pred, targets)
         running_loss += loss.item()
         n_batches += 1
 
-    val_loss = running_loss / max(1, n_batches)
-    
-    return train_loss, val_loss
-
-
-def train_autoregressive_epoch(model, train_loader, val_loader, optimizer, criterion, teacher_forcing_ratio):
-    """
-    Autoregressive training with scheduled sampling.
-    
-    Instead of predicting the whole grid in one shot, this trains the model to predict
-    timestep by timestep. Uses scheduled sampling where:
-    - teacher_forcing_ratio = 1.0: always use ground truth as input
-    - teacher_forcing_ratio = 0.0: always use model predictions as input
-    
-    The teacher forcing ratio should decay from 1.0 to 0.0 over training epochs.
-    
-    Args:
-        model: The neural operator model
-        train_loader: Training data loader
-        val_loader: Validation data loader
-        optimizer: Optimizer
-        criterion: Loss function
-        teacher_forcing_ratio: Probability of using ground truth (1.0 = all GT, 0.0 = all predictions)
-    """
-    model.train()
-    running_loss = 0.0
-    n_batches = 0
-    
-    for full_input, targets in tqdm(train_loader, desc=f"Train AR (tf={teacher_forcing_ratio:.2f})", leave=False):
-        # full_input: (B, n_vals, nt, nx) - has IC and boundaries, rest masked with -1
-        # targets: (B, n_vals, nt, nx) - full ground truth
-        
-        full_input = full_input.to(device)
-        targets = targets.to(device)
-        
-        B, n_vals, nt, nx = targets.shape
-        
-        optimizer.zero_grad()
-        model_input = full_input[:, :, 0]
-        model_pred = full_input.clone()
-        for t in range(1, nt):
-            model_pred[:, :, t, 1:-1] = model(model_input)[:, :, 1:-1]
-            if random.random() < teacher_forcing_ratio:
-                # Use ground truth for interior points (boundaries stay from full_input)
-                model_input = targets[:, :, t]
-            else:
-                # Use predictions for interior points
-                model_input = model_pred[:, :, t]
-        loss = criterion(model_pred, targets)
-        loss.backward()
-        optimizer.step()
-        
-        running_loss += loss.item()
-        n_batches += 1
-    
-    train_loss = running_loss / max(1, n_batches)
-    
-    # Validation: use pure autoregressive (no teacher forcing)
-    model.eval()
-    running_loss = 0.0
-    n_batches = 0
-    
-    with torch.no_grad():
-        for full_input, targets in tqdm(val_loader, desc="Val AR", leave=False):
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            
-            B, n_vals, nt, nx = targets.shape
-            
-            # True autoregressive: predict one timestep at a time using previous predictions
-            current_input = full_input[:, :, 0]
-            model_pred = full_input.clone()
-            for t in range(1, nt):
-                # Run model with current known inputs
-                model_pred[:, :, t, 1:-1] = model(current_input)[:, :, 1:-1]
-                # Use prediction for timestep t as input for next iteration
-                current_input = model_pred[:, :, t]
-            
-            # Final prediction after filling all timesteps
-            loss = criterion(model_pred, targets)
-            running_loss += loss.item()
-            n_batches += 1
-    
     val_loss = running_loss / max(1, n_batches)
     
     return train_loss, val_loss
@@ -243,15 +182,7 @@ def train_model(model, train_loader, val_loader, args):
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
     for epoch in bar:
-        if args.autoregressive:
-            # Teacher forcing ratio: linearly decay from 1.0 to 0.0
-            teacher_forcing_ratio = 1.0 - (epoch / max(1, args.epochs - 1))
-            train_loss, val_loss = train_autoregressive_epoch(
-                model, train_loader, val_loader, optimizer, criterion, teacher_forcing_ratio
-            )
-        else:
-            teacher_forcing_ratio = None
-            train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion)
+        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch, args)
         
         # Record history
         train_losses.append(train_loss)
@@ -276,7 +207,8 @@ def train_model(model, train_loader, val_loader, args):
             break
 
         postfix = {"Train": f"{train_loss:.4f}", "Val": f"{val_loss:.4f}", "LR": f"{current_lr:.2e}"}
-        if teacher_forcing_ratio is not None:
+        if args.autoregressive:
+            teacher_forcing_ratio = 1.0 - (epoch / max(1, args.epochs - 1))
             postfix["TF"] = f"{teacher_forcing_ratio:.2f}"
         bar.set_postfix(postfix)
     
@@ -302,19 +234,8 @@ def test_model(model, test_loader, args):
             targets = targets.to(device)
             
             if args.autoregressive:
-                # True autoregressive inference: predict one timestep at a time
-                # using the previous prediction as input for the next step
-                B, n_vals, nt, nx = targets.shape
-                current_input = full_input.clone()
-                
-                for t in range(1, nt):
-                    # Run model with current known inputs (t=0 to t-1)
-                    pred = model(current_input[:, :, t-1])
-                    # Use prediction for timestep t as input for next iteration
-                    current_input[:, :, t, 1:-1] = pred[:, :, 1:-1]
-                pred = current_input
+                pred = pred_autoregressive(model, targets, 0.0, args)
             else:
-                # Standard one-shot prediction
                 pred = model(full_input)
             
             loss = criterion(pred, targets)
