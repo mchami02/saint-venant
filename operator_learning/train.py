@@ -309,12 +309,10 @@ def test_model(model, test_loader, args):
                 
                 for t in range(1, nt):
                     # Run model with current known inputs (t=0 to t-1)
-                    pred = model(current_input)
+                    pred = model(current_input[:, :, t-1])
                     # Use prediction for timestep t as input for next iteration
-                    current_input[:, :, t, 1:-1] = pred[:, :, t, 1:-1]
-                
-                # Final prediction after filling all timesteps autoregressively
-                pred = model(current_input)
+                    current_input[:, :, t, 1:-1] = pred[:, :, 1:-1]
+                pred = current_input
             else:
                 # Standard one-shot prediction
                 pred = model(full_input)
