@@ -24,6 +24,8 @@ dependencies = [
     "pytorch-wavelets",
     "ptwt>=0.1.9",
     "einops>=0.8.1",
+    "huggingface-hub>=1.1.7",
+    "dotenv>=0.9.9",
 ]
 
 [project.scripts]

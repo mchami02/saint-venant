@@ -12,6 +12,7 @@ import os
 from model import create_model
 from torchinfo import summary
 import matplotlib.pyplot as plt
+from loss.lwr_loss import LWRLoss
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -58,6 +59,9 @@ def parse_args():
     parser.add_argument("--num_plots", type=int, default=5)
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--autoregressive", action="store_true", help="Train autoregressively with scheduled sampling")
+    parser.add_argument("--residuals", action="store_true", help="Predict residuals instead of full solution")
+    parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
+    parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
     return parser.parse_args()
 
 
@@ -99,9 +103,29 @@ def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
         if random.random() < teacher_forcing_ratio:
             model_input = targets[:, :, t]
         prediction[:, :, t, 1:-1] = model(model_input)[:, :, 1:-1]
+        if args.residuals:
+            prediction[:, :, t, 1:-1] += model_input[:, :, 1:-1]
         model_input = prediction[:, :, t]
     return prediction
 
+def decaying_loss(pred, targets, args):
+    '''
+    Make the loss decay over the timesteps predicted
+    The loss is L=∑_{k=1}^K w_k ∥u^t+k - u^{t+k}∥_2^2 where w_k = gamma^(k-1)'''
+    timesteps = torch.arange(1, args.nt, device=pred.device, dtype=pred.dtype)
+    weights = torch.linspace(1, 0, args.nt-1, device=pred.device, dtype=pred.dtype)  # shape: (nt-1,)
+    mse = (pred[:, :, 1:] - targets[:, :, 1:]).pow(2).mean(dim=(0, 1)).mean(dim=-1)  # shape: (nt-1,)
+    loss = (weights * mse).sum()
+    return loss
+
+def get_loss(pred, targets, args):
+    if args.autoregressive:
+        loss = decaying_loss(pred, targets, args)
+    else:
+        loss = nn.MSELoss()(pred, targets)
+    if args.pinn_loss:
+        loss += LWRLoss(dt=args.dt, dx=args.dx, vmax=1.0, rhomax=1.0)(pred, targets)
+    return loss
 
 def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,args):
     """
@@ -124,14 +148,16 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
         # Forward pass - single prediction for entire grid
         if args.autoregressive:
             # Prevent division by zero by ensuring denominator is at least 1
-            max_epochs = max(1, args.epochs - 1)
-            teacher_forcing_ratio = 1.0 - (epoch / max_epochs)
+            if epoch < args.epochs // 4:
+                teacher_forcing_ratio = 1.0 - (epoch / (args.epochs // 4))
+            else:
+                teacher_forcing_ratio = 0.0
             pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
         else:
             pred = model(full_input)  # (B, n_vals, nt, nx)
         
         # Compute loss
-        loss = criterion(pred, targets)
+        loss = get_loss(pred, targets, args)
         loss.backward()
         optimizer.step()
         
@@ -148,12 +174,12 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
         targets = targets.to(device)
 
         if args.autoregressive:
-            teacher_forcing_ratio = 1.0 - (epoch / max(1, args.epochs - 1))
+            teacher_forcing_ratio = 0.0
             pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
         else:
             pred = model(full_input)  # (B, n_vals, nt, nx)
         
-        loss = criterion(pred, targets)
+        loss = get_loss(pred, targets, args)
         running_loss += loss.item()
         n_batches += 1
 
@@ -206,10 +232,7 @@ def train_model(model, train_loader, val_loader, args):
             print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
             break
 
-        postfix = {"Train": f"{train_loss:.4f}", "Val": f"{val_loss:.4f}", "LR": f"{current_lr:.2e}"}
-        if args.autoregressive:
-            teacher_forcing_ratio = 1.0 - (epoch / max(1, args.epochs - 1))
-            postfix["TF"] = f"{teacher_forcing_ratio:.2f}"
+        postfix = {"Train": f"{train_loss:.2e}", "Val": f"{val_loss:.2e}", "LR": f"{current_lr:.2e}"}
         bar.set_postfix(postfix)
     
     print(f"\nTraining completed! Final best loss: {best_loss:.6f}")
@@ -258,6 +281,7 @@ def test_model(model, test_loader, args):
 
 def main():
     args = parse_args()
+    print(f"Using device: {device}")
     solver = get_solver(args)
     train_samples = int(args.n_samples * 0.8)
     val_samples = int(args.n_samples * 0.15)

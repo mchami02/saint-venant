@@ -1,4 +1,4 @@
-from deepxde.nn.pytorch import DeepONetCartesianProd
+from deepxde.nn.pytorch import DeepONetCartesianProd, DeepONet
 import torch
 
 class DeepONetWrapper(DeepONetCartesianProd):
