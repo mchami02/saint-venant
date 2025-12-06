@@ -89,4 +89,6 @@ class LWRLoss(torch.nn.Module):
         self.bc_loss_weight = bc_loss_weight
 
     def forward(self, pred, gt):
-        return lpde_loss(pred, self.dt, self.dx, self.vmax, self.rhomax) + ic_loss(pred, gt) + bc_loss(pred, gt)
+        return (self.lpde_loss_weight * lpde_loss(pred, self.dt, self.dx, self.vmax, self.rhomax) 
+        + self.ic_loss_weight * ic_loss(pred, gt) 
+        + self.bc_loss_weight * bc_loss(pred, gt))
