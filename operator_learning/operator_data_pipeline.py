@@ -8,11 +8,10 @@ from nfv.initial_conditions import PiecewiseConstant
 from nfv.flows import Greenshield
 from nfv.solvers import LaxHopf
 from nfv.problem import Problem
+from hf_grids import download_grids, upload_grids
+
 mem = Memory(location='.cache')
 
-
-
-@mem.cache
 def generate_data(solver, n_samples, nx, nt, dx, dt, initial_condition = None, boundary_condition = None, ic_kwargs = None, bc_kwargs = None):
     grid_generator = GridGenerator(solver, nx, nt, dx, dt, randomize=False)
     grids = []
@@ -27,22 +26,46 @@ class PiecewiseRandom(PiecewiseConstant):
         self.xs = np.sort(self.xs)
         self.xs = np.concatenate([[0], self.xs, [1]])
 
-@mem.cache
 def get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps = 3):
     ics = [PiecewiseRandom(ks=[np.random.rand() for _ in range(max_steps)], x_noise=False) for _ in range(n_samples)]
     problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=ics, flow=Greenshield())
     grids = problem.solve(LaxHopf, batch_size=4, dtype=torch.float64, progressbar=True).cpu().numpy()
     return grids
 
+@mem.cache
+def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_ratio=0.8, val_ratio=0.1, random_seed=42):
+    '''
+    Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
+    If available in the repository, download the grids from the repository, otherwise generate them and upload them to the repository
+    '''
+    # Try to download the grids from the repository
+    grids = download_grids(solver, flux, nx, nt, dx, dt, max_steps)
+    if grids is None or len(grids) < n_samples:
+        print(f"No big enough grids available in the repository, generating {n_samples} grids")
+        grids = get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps)
+        upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps)
+
+    grids_idx = np.arange(len(grids))
+    np.random.shuffle(grids_idx)
+    grids_idx = grids_idx[:n_samples]
+    train_idx = grids_idx[:int(train_ratio * len(grids_idx))]
+    val_idx = grids_idx[int(train_ratio * len(grids_idx)):int((train_ratio + val_ratio) * len(grids_idx))]
+    test_idx = grids_idx[int((train_ratio + val_ratio) * len(grids_idx)):]
+    
+    train_dataset = GridDataset(grids[train_idx], nx, nt, dx, dt)
+    val_dataset = GridDataset(grids[val_idx], nx, nt, dx, dt)
+    test_dataset = GridDataset(grids[test_idx], nx, nt, dx, dt)
+
+    return train_dataset, val_dataset, test_dataset
+
 
 class GridDataset(Dataset):
-    def __init__(self, solver, n_samples, nx, nt, dx, dt):
-        self.n_samples = n_samples
+    def __init__(self, grids, nx, nt, dx, dt):
         self.nx = nx
         self.nt = nt
         self.dx = dx
         self.dt = dt
-        self.grids = get_nfv_dataset(n_samples, nx, nt, dx, dt)
+        self.grids = grids
 
     def __len__(self):
         return len(self.grids)

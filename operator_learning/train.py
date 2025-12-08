@@ -2,7 +2,7 @@ import argparse
 import random
 from typing import Any
 from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver, plot_comparison
-from operator_data_pipeline import GridDataset
+from operator_data_pipeline import get_datasets
 from torch.utils.data import DataLoader
 import torch
 import numpy as np
@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument("--dx", type=float, default=0.25)
     parser.add_argument("--dt", type=float, default=0.05)
     parser.add_argument("--bc", type=str, default="GhostCell")
-    parser.add_argument("--solver", type=str, default="Godunov")
+    parser.add_argument("--solver", type=str, default="LaxHopf")
     parser.add_argument("--flux", type=str, default="Greenshields")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--epochs", type=int, default=100)
@@ -257,14 +257,8 @@ def test_model(model, test_loader, args):
 def main():
     args = parse_args()
     print(f"Using device: {device}")
-    solver = get_solver(args)
-    train_samples = int(args.n_samples * 0.8)
-    val_samples = int(args.n_samples * 0.15)
-    test_samples = args.n_samples - train_samples - val_samples
 
-    train_dataset = GridDataset(solver, train_samples, args.nx, args.nt, args.dx, args.dt)
-    val_dataset = GridDataset(solver, val_samples, args.nx, args.nt, args.dx, args.dt)
-    test_dataset = GridDataset(solver, test_samples, args.nx, args.nt, args.dx, args.dt)
+    train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
