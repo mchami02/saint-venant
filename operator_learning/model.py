@@ -4,6 +4,8 @@ from models.fno_wrapper import fno_custom_freqs
 from models.wno import WNO2d
 from models.lno import LNOWrapper
 from models.deeponet import DeepONetWrapper
+# from models.gnn_attention import MaskedGridPredictor
+from models.fno_cnn import FNOCNNWrapper
 # DeepXDE sets torch default device to cuda, but this breaks DataLoader with num_workers > 0
 # Reset it to None/cpu to avoid generator device mismatch
 import torch
@@ -79,6 +81,36 @@ def create_model(args):
             n_layer=2,          # Number of MLP layers
             attn="Attention_Vanilla",  # Attention type
             act="GELU"          # Activation function
+        )
+    # elif args.model == "GNN":
+    #     n_features = args.in_channels - 2  # Exclude coordinate channels
+    #     model = MaskedGridPredictor(
+    #         nt=args.nt,
+    #         nx=args.nx,
+    #         dt=args.dt,
+    #         dx=args.dx,
+    #         in_channels=n_features,
+    #         out_channels=args.out_channels,
+    #         hidden_dim=args.hidden_channels,
+    #         num_heads=4,
+    #         num_encoder_layers=args.n_layers,
+    #         num_decoder_layers=args.n_layers,
+    #         dropout=0.0,
+    #         relative_emb=True,
+    #         mask_value=-1.0
+    #     )
+    elif args.model == "FNOCNN":
+        model = FNOCNNWrapper(
+            in_channels=args.in_channels - 2,  # Exclude coordinate channels, like FNO
+            out_channels=args.out_channels,
+            fno_modes=(16, 8),
+            fno_hidden_channels=args.hidden_channels,
+            fno_layers=args.n_layers,
+            cnn_hidden_channels=args.hidden_channels,
+            cnn_layers=args.n_layers,
+            cnn_kernel_size=3,
+            skip_connection=True,
+            strip_coords=False,  # Coords already excluded above
         )
     else:
         raise ValueError(f"Model {args.model} not supported")
