@@ -13,7 +13,7 @@ from model import create_model
 from torchinfo import summary
 import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
-
+from loss.pde_loss import PDELoss
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
 def get_solver(args):
@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument("--residuals", action="store_true", help="Predict residuals instead of full solution")
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
     parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
+    parser.add_argument("--decaying_loss", action="store_true", help="Use decaying loss")
     return parser.parse_args()
 
 
@@ -108,34 +109,13 @@ def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
         model_input = prediction[:, :, t]
     return prediction
 
-def decaying_loss(pred, targets, args):
-    '''
-    Make the loss decay over the timesteps predicted
-    The loss is L=∑_{k=1}^K w_k ∥u^t+k - u^{t+k}∥_2^2 where w_k = gamma^(k-1)'''
-    timesteps = torch.arange(1, args.nt, device=pred.device, dtype=pred.dtype)
-    weights = torch.linspace(1, 0, args.nt-1, device=pred.device, dtype=pred.dtype)  # shape: (nt-1,)
-    mse = (pred[:, :, 1:] - targets[:, :, 1:]).pow(2).mean(dim=(0, 1)).mean(dim=-1)  # shape: (nt-1,)
-    loss = (weights * mse).sum()
-    return loss
-
-def get_loss(pred, targets, args):
-    if args.autoregressive:
-        loss = decaying_loss(pred, targets, args)
-    else:
-        loss = nn.MSELoss()(pred, targets)
-    if args.pinn_loss:
-        loss += LWRLoss(dt=args.dt, dx=args.dx, vmax=1.0, rhomax=1.0)(pred, targets)
-    return loss
-
 def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,args):
     """
     Training loop for one-shot FNO prediction.
     Model predicts entire spatiotemporal solution in one forward pass.
     """
     model.train()
-    running_loss = 0.0
-    n_batches = 0
-    
+    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss)
     for full_input, targets in tqdm(train_loader, desc="Train epoch", leave=False):
         # full_input: (B, nt, nx, 3)
         # targets: (B, nt, nx)
@@ -157,34 +137,29 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
             pred = model(full_input)  # (B, n_vals, nt, nx)
         
         # Compute loss
-        loss = get_loss(pred, targets, args)
+        loss = train_pde_loss(pred, targets)
         loss.backward()
         optimizer.step()
-        
-        running_loss += loss.item()
-        n_batches += 1
-    
-    train_loss = running_loss / max(1, n_batches)
-    
+            
+    train_loss = train_pde_loss.get_loss_value()
+    train_pde_loss.show_loss_values()
     model.eval()
-    running_loss = 0.0
-    n_batches = 0
-    for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
-        full_input = full_input.to(device)
-        targets = targets.to(device)
+    val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss)
+    with torch.no_grad():
+        for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
+            full_input = full_input.to(device)
+            targets = targets.to(device)
 
-        if args.autoregressive:
-            teacher_forcing_ratio = 0.0
-            pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
-        else:
-            pred = model(full_input)  # (B, n_vals, nt, nx)
-        
-        loss = get_loss(pred, targets, args)
-        running_loss += loss.item()
-        n_batches += 1
+            if args.autoregressive:
+                teacher_forcing_ratio = 0.0
+                pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
+            else:
+                pred = model(full_input)  # (B, n_vals, nt, nx)
+            
+            loss = val_pde_loss(pred, targets)
 
-    val_loss = running_loss / max(1, n_batches)
-    
+    val_loss = val_pde_loss.get_loss_value()
+
     return train_loss, val_loss
 
 
