@@ -12,7 +12,7 @@ def decaying_loss(pred, targets, nt):
     return loss
 
 class PDELoss(torch.nn.Module):
-    def __init__(self, nt, nx, dt, dx, vmax=1.0, rhomax=1.0, decaying_loss = False):
+    def __init__(self, nt, nx, dt, dx, vmax=1.0, rhomax=1.0, decaying_loss = False, pinn_loss = False):
         super(PDELoss, self).__init__()
         self.nt = nt
         self.nx = nx
@@ -23,9 +23,13 @@ class PDELoss(torch.nn.Module):
         self.losses = {}
         self.loss_count = 0
         self.decaying_loss = decaying_loss
+        self.pinn_loss = pinn_loss
 
     def compute_loss(self, pred, gt) -> dict[str, torch.Tensor]:
-        raise NotImplementedError("Subclasses must implement this method")
+        if self.pinn_loss:
+            raise NotImplementedError("Subclasses must implement this method")
+        else:
+            return {"grid_loss": self.grid_loss(pred, gt)}
 
     def grid_loss(self, pred, gt):
         """
@@ -53,6 +57,8 @@ class PDELoss(torch.nn.Module):
         return {loss_name: loss_value / self.loss_count for loss_name, loss_value in self.losses.items()}
 
     def show_loss_values(self):
+        if not self.pinn_loss:
+            return
         loss_values = self.get_loss_values()
         loss_str = " | ".join([f"{name} : {value:.6f}" for name, value in loss_values.items()])
         print(f"Loss Values: {loss_str}")

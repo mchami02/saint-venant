@@ -6,6 +6,7 @@ from models.lno import LNOWrapper
 from models.deeponet import DeepONetWrapper
 # from models.gnn_attention import MaskedGridPredictor
 from models.fno_cnn import FNOCNNWrapper
+from models.fno_denoiser import FNODenoiserWrapper
 # DeepXDE sets torch default device to cuda, but this breaks DataLoader with num_workers > 0
 # Reset it to None/cpu to avoid generator device mismatch
 import torch
@@ -103,11 +104,24 @@ def create_model(args):
         model = FNOCNNWrapper(
             in_channels=args.in_channels - 2,  # Exclude coordinate channels, like FNO
             out_channels=args.out_channels,
-            fno_modes=(16, 8),
-            fno_hidden_channels=args.hidden_channels,
-            fno_layers=args.n_layers,
-            cnn_hidden_channels=args.hidden_channels,
-            cnn_layers=args.n_layers,
+            fno_modes=(64, 16),
+            fno_hidden_channels=64,
+            fno_layers=4,
+            cnn_hidden_channels=64,
+            cnn_layers=6,
+            cnn_kernel_size=3,
+            skip_connection=True,
+            strip_coords=False,  # Coords already excluded above
+        )
+    elif args.model == "FNODenoiser":
+        model = FNODenoiserWrapper(
+            in_channels=args.in_channels - 2,  # Exclude coordinate channels, like FNO
+            out_channels=args.out_channels,
+            fno_modes=(64, 16),
+            fno_hidden_channels=64,
+            fno_layers=4,
+            cnn_hidden_channels=64,
+            cnn_layers=6,
             cnn_kernel_size=3,
             skip_connection=True,
             strip_coords=False,  # Coords already excluded above

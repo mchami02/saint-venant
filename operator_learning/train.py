@@ -115,7 +115,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
     Model predicts entire spatiotemporal solution in one forward pass.
     """
     model.train()
-    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss)
+    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss, pinn_loss=args.pinn_loss)
     for full_input, targets in tqdm(train_loader, desc="Train epoch", leave=False):
         # full_input: (B, nt, nx, 3)
         # targets: (B, nt, nx)
