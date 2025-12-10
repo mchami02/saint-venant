@@ -62,3 +62,11 @@ class PDELoss(torch.nn.Module):
         loss_values = self.get_loss_values()
         loss_str = " | ".join([f"{name} : {value:.6f}" for name, value in loss_values.items()])
         print(f"Loss Values: {loss_str}")
+
+    def log_loss_values(self, experiment, stage):
+        experiment.log_metric(f"{stage}/loss", self.get_loss_value())
+        if not self.pinn_loss:
+            return
+        loss_values = self.get_loss_values()
+        for loss_name, loss_value in loss_values.items():
+            experiment.log_metric(f"stage/loss/{loss_name}", loss_value)

@@ -1,7 +1,9 @@
+from comet_ml import start
+from comet_ml.integration.pytorch import log_model
 import argparse
 import random
 from typing import Any
-from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver, plot_comparison
+from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver
 from operator_data_pipeline import get_datasets
 from torch.utils.data import DataLoader
 import torch
@@ -14,6 +16,7 @@ from torchinfo import summary
 import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
 from loss.pde_loss import PDELoss
+
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
 def get_solver(args):
@@ -96,6 +99,65 @@ def plot_training_history(train_losses, val_losses, save_path="results/training_
     print(f"Training history plot saved to {save_path}")
 
 
+def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, name="comparison"):
+    """
+    Create comparison plots (ground truth, prediction, difference) and upload to Comet.
+    
+    Args:
+        ground_truth: (B, nx, nt) or (nx, nt) array
+        prediction: (B, nx, nt) or (nx, nt) array
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+        experiment: Comet experiment object
+        name: Name prefix for the logged figure
+    """
+    ground_truth = np.asarray(ground_truth)
+    prediction = np.asarray(prediction)
+    
+    # Handle 2D input by adding batch dimension
+    if ground_truth.ndim == 2:
+        ground_truth = ground_truth[np.newaxis, ...]
+        prediction = prediction[np.newaxis, ...]
+    
+    B = ground_truth.shape[0]
+    difference = np.abs(prediction - ground_truth)
+    
+    fig, axes = plt.subplots(B, 3, figsize=(18, 5 * B))
+    if B == 1:
+        axes = axes.reshape(1, -1)
+    
+    extent = [0, nx * dx, 0, nt * dt]
+    
+    for b in range(B):
+        # Ground Truth
+        im1 = axes[b, 0].imshow(ground_truth[b], extent=extent, aspect='auto', 
+                                 origin='lower', cmap='jet', vmin=0, vmax=1)
+        axes[b, 0].set_xlabel('Space x')
+        axes[b, 0].set_ylabel('Time t')
+        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
+        plt.colorbar(im1, ax=axes[b, 0], label='Value')
+        
+        # Prediction
+        im2 = axes[b, 1].imshow(prediction[b], extent=extent, aspect='auto',
+                                 origin='lower', cmap='jet', vmin=0, vmax=1)
+        axes[b, 1].set_xlabel('Space x')
+        axes[b, 1].set_ylabel('Time t')
+        axes[b, 1].set_title(f'Prediction (Sample {b+1})')
+        plt.colorbar(im2, ax=axes[b, 1], label='Value')
+        
+        # Difference
+        im3 = axes[b, 2].imshow(difference[b], extent=extent, aspect='auto',
+                                 origin='lower', cmap='RdBu_r', vmin=0, vmax=1)
+        axes[b, 2].set_xlabel('Space x')
+        axes[b, 2].set_ylabel('Time t')
+        axes[b, 2].set_title(f'Difference (Sample {b+1})')
+        plt.colorbar(im3, ax=axes[b, 2], label='Error')
+    
+    plt.tight_layout()
+    experiment.log_figure(figure_name=name, figure=fig)
+    plt.close(fig)
+
+
 def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
     targets = targets.to(device)
     prediction = targets.clone()
@@ -109,7 +171,7 @@ def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
         model_input = prediction[:, :, t]
     return prediction
 
-def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,args):
+def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,args, experiment):
     """
     Training loop for one-shot FNO prediction.
     Model predicts entire spatiotemporal solution in one forward pass.
@@ -140,8 +202,9 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
         loss = train_pde_loss(pred, targets)
         loss.backward()
         optimizer.step()
-            
+    
     train_loss = train_pde_loss.get_loss_value()
+    train_pde_loss.log_loss_values(experiment, "train")
     train_pde_loss.show_loss_values()
     model.eval()
     val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss)
@@ -159,11 +222,11 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
             loss = val_pde_loss(pred, targets)
 
     val_loss = val_pde_loss.get_loss_value()
-
+    val_pde_loss.log_loss_values(experiment, "val")
     return train_loss, val_loss
 
 
-def train_model(model, train_loader, val_loader, args):
+def train_model(model, train_loader, val_loader, args, experiment):
     """
     Train FNO for multiple epochs with learning rate scheduling and early stopping.
     
@@ -183,13 +246,13 @@ def train_model(model, train_loader, val_loader, args):
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
     for epoch in bar:
-        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch, args)
+        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch, args, experiment)
         
         # Record history
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
-        
+        experiment.log_metric("train/lr", current_lr)
         # Check for improvement
         if val_loss < best_loss * (1 - tolerance):
             best_loss = val_loss
@@ -213,16 +276,14 @@ def train_model(model, train_loader, val_loader, args):
     print(f"\nTraining completed! Final best loss: {best_loss:.6f}")
     
     # Plot training history
-    plot_training_history(train_losses, val_losses)
+    # plot_training_history(train_losses, val_losses)
     
     model.load_state_dict(torch.load(args.save_path, weights_only=False))
     return model
 
-def test_model(model, test_loader, args):
+def test_model(model, test_loader, args, experiment):
     model.eval()
-    running_loss = 0.0
-    n_batches = 0
-    criterion = nn.MSELoss()
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss, pinn_loss=False)
     gts = []
     preds = []
     
@@ -236,28 +297,34 @@ def test_model(model, test_loader, args):
             else:
                 pred = model(full_input)
             
-            loss = criterion(pred, targets)
-            running_loss += loss.item()
-            n_batches += 1
-            
+            loss = test_pde_loss(pred, targets)
             for i in range(targets.shape[0]):
                 gt = targets[i].squeeze(0).detach().cpu().numpy()
                 p = pred[i].squeeze(0).detach().cpu().numpy()
                 gts.append(gt)
                 preds.append(p)
     
-    test_loss = running_loss / max(1, n_batches)
+    test_loss = test_pde_loss.get_loss_value()
+    test_pde_loss.log_loss_values(experiment, "test")
     mode = "Autoregressive" if args.autoregressive else "One-shot"
     print(f"Test Loss ({mode}): {test_loss:.6f}")
     
     gts = np.array(gts)[:args.num_plots]
     preds = np.array(preds)[:args.num_plots]
-    plot_comparison(gts, preds, args.nx, args.nt, args.dx, args.dt, save_as=f"results/test_comparison.png")
+    plot_comparison_comet(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, name="test_comparison")
 
 def main():
     args = parse_args()
     print(f"Using device: {device}")
 
+    print("Using CometML for logging")
+    experiment = start(api_key=os.getenv("COMET_API_KEY"), project_name="operator-learning-pde", workspace="pde-thesis")
+    experiment.log_parameters(vars(args))
+    experiment.log_code(folder="loss")
+    experiment.log_code(folder="operator_learning/models")
+    experiment.log_code(file_name="operator_learning/operator_data_pipeline.py")
+    experiment.log_code(file_name="operator_learning/model.py")
+    experiment.log_code(file_name="operator_learning/train.py")
     train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -269,8 +336,10 @@ def main():
         model.load_state_dict(torch.load(args.model_path, weights_only=False))
     summary(model)
     
-    model = train_model(model, train_loader, val_loader, args)
-    test_model(model, test_loader, args)
+    model = train_model(model, train_loader, val_loader, args, experiment)
+    log_model(experiment, model, "model")
+
+    test_model(model, test_loader, args, experiment)
 
 
 
