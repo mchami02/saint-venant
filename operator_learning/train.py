@@ -221,8 +221,8 @@ def train_model(model, train_loader, val_loader, args, experiment):
     
     # Plot training history
     # plot_training_history(train_losses, val_losses)
-    
-    model.load_state_dict(torch.load(args.save_path, weights_only=False))
+    state_dict = torch.load(args.save_path, weights_only=False)
+    model.load_state_dict(state_dict, strict=False)
     return model
 
 def test_model(model, test_loader, args, experiment):
@@ -269,7 +269,7 @@ def main():
     experiment.log_code(file_name="operator_data_pipeline.py")
     experiment.log_code(file_name="model.py")
     experiment.log_code(file_name="train.py")
-    experiment.log_code(file_name="plot_data.py")
+    experiment.log_code(file_name="train.py")
     train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -282,7 +282,12 @@ def main():
     summary(model)
     
     model = train_model(model, train_loader, val_loader, args, experiment)
-    log_model(experiment, model, "model")
+    log_model(
+        experiment=experiment, 
+        model=model,
+        model_name=args.model,
+        metadata=model.metadata
+    )
 
     test_model(model, test_loader, args, experiment)
 

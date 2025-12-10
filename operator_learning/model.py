@@ -13,9 +13,19 @@ import torch
 torch.set_default_device(None)
 
 
+class OperatorModel(torch.nn.Module):
+    def __init__(self, model, **kwargs):
+        super().__init__()
+        self.metadata = kwargs
+        self.model = model(**kwargs)
+
+    def forward(self, x):
+        return self.model(x)
+
+
 def create_model(args):
     if args.model == "FNO":
-        model = FNO(
+        model = OperatorModel(FNO,
         n_modes=(16, 4),        # modes in (time, space) dimensions
         hidden_channels=16,       # network width
         in_channels=args.in_channels - 2,           # density + time + space
@@ -23,7 +33,7 @@ def create_model(args):
         n_layers=4               # number of FNO layers
         )
     elif args.model == "FNO1d":
-        model = FNO(
+        model = OperatorModel(FNO,
         n_modes=(16,),        # modes in (time) dimension
         hidden_channels=16,       # network width
         in_channels=1,           # density + time
@@ -31,7 +41,7 @@ def create_model(args):
         n_layers=4               # number of FNO layers
         )
     elif args.model == "FNOPersonalized":
-        model = fno_custom_freqs(
+        model = OperatorModel(fno_custom_freqs,
             n_modes=(8, 16),
             hidden_channels=16,
             in_channels=args.in_channels - 2,
@@ -44,7 +54,7 @@ def create_model(args):
         n_features = args.in_channels - 2  # Exclude coordinate channels
         branch_input_size = n_features * (args.nx + 2 * args.nt)
         
-        model = DeepONetWrapper(
+        model = OperatorModel(DeepONetWrapper,
         nt=args.nt,
         nx=args.nx,
         dt=args.dt,
@@ -57,7 +67,7 @@ def create_model(args):
         num_outputs = args.out_channels
         )
     elif args.model == "WNO":
-        model = WNO2d(
+        model = OperatorModel(WNO2d,
             width=8,
             level=3,
             layers=2,
@@ -68,7 +78,7 @@ def create_model(args):
         )
     elif args.model == "LNO":
         n_features = args.in_channels - 2  # Exclude coordinate channels
-        model = LNOWrapper(
+        model = OperatorModel(LNOWrapper,
             nt=args.nt,
             nx=args.nx,
             dt=args.dt,
@@ -83,7 +93,7 @@ def create_model(args):
             attn="Attention_Vanilla",  # Attention type
             act="GELU"          # Activation function
         )
-    # elif args.model == "GNN":
+    # elif OperatorModel(args.model == "GNN"):
     #     n_features = args.in_channels - 2  # Exclude coordinate channels
     #     model = MaskedGridPredictor(
     #         nt=args.nt,
@@ -101,7 +111,7 @@ def create_model(args):
     #         mask_value=-1.0
     #     )
     elif args.model == "FNOCNN":
-        model = FNOCNNWrapper(
+        model = OperatorModel(FNOCNNWrapper,
             in_channels=args.in_channels - 2,  # Exclude coordinate channels, like FNO
             out_channels=args.out_channels,
             fno_modes=(64, 16),
@@ -114,7 +124,7 @@ def create_model(args):
             strip_coords=False,  # Coords already excluded above
         )
     elif args.model == "FNODenoiser":
-        model = FNODenoiserWrapper(
+        model = OperatorModel(FNODenoiserWrapper,
             in_channels=args.in_channels - 2,  # Exclude coordinate channels, like FNO
             out_channels=args.out_channels,
             fno_modes=(64, 16),
