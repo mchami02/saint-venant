@@ -2,6 +2,8 @@
 
 import argparse
 import tempfile
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend (thread-safe, no GUI)
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -72,7 +74,7 @@ def _create_comparison_animation(gt, pred, nx, nt, dx, dt, sample_idx, skip_fram
     return anim, fig
 
 
-def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, name="comparison"):
+def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch, test=False):
     """
     Create comparison plots (ground truth, prediction, difference) and upload to Comet.
     Also creates animated GIFs showing the evolution through time.
@@ -129,7 +131,11 @@ def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, 
         plt.colorbar(im3, ax=axes[b, 2], label='Error')
     
     plt.tight_layout()
-    experiment.log_figure(figure_name=name, figure=fig)
+    if not test:
+        experiment.log_figure(figure_name="comparison_plot", figure=fig, step=epoch)
+    else:
+        experiment.log_figure(figure_name="test_comparison_plot", figure=fig, step=epoch)
+
     plt.close(fig)
     
     # Create and upload animated GIFs for each sample
@@ -142,7 +148,10 @@ def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, 
         # Save to temporary file and upload to Comet
         with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as tmp:
             anim.save(tmp.name, writer='pillow', fps=20)
-            experiment.log_video(tmp.name, name=f"{name}_animation_sample_{b+1}")
+            if not test:
+                experiment.log_video(tmp.name, name=f"animation_sample_{b+1}", step=epoch)
+            else:
+                experiment.log_video(tmp.name, name=f"test_animation_sample_{b+1}", step=epoch)
         
         plt.close(anim_fig)
 

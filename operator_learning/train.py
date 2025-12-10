@@ -3,6 +3,7 @@ from comet_ml.integration.pytorch import log_model
 import argparse
 import random
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver
 from operator_data_pipeline import get_datasets
 from torch.utils.data import DataLoader
@@ -19,6 +20,17 @@ from loss.pde_loss import PDELoss
 from plot_data import plot_comparison_comet
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+
+# Global thread pool for async plotting (1 worker to avoid overwhelming resources)
+_plot_executor = ThreadPoolExecutor(max_workers=1)
+
+
+def async_plot(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch):
+    """Submit plotting task to background thread. Copies data to avoid race conditions."""
+    # Copy data since plotting happens asynchronously
+    gt_copy = np.copy(ground_truth)
+    pred_copy = np.copy(prediction)
+    _plot_executor.submit(plot_comparison_comet, gt_copy, pred_copy, nx, nt, dx, dt, experiment, epoch)
 
 def get_solver(args):
     if args.solver == "Godunov":
@@ -67,6 +79,7 @@ def parse_args():
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
     parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
     parser.add_argument("--decaying_loss", action="store_true", help="Use decaying loss")
+    parser.add_argument("--plot_every", type=int, default=0, help="Plot comparison every N epochs (0 = only at end)")
     return parser.parse_args()
 
 
@@ -170,6 +183,30 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
     return train_loss, val_loss
 
 
+def sample_predictions(model, val_loader, args, num_samples=3):
+    """Sample a few predictions from validation set for visualization."""
+    model.eval()
+    gts, preds = [], []
+    with torch.no_grad():
+        for full_input, targets in val_loader:
+            full_input = full_input.to(device)
+            targets = targets.to(device)
+            
+            if args.autoregressive:
+                pred = pred_autoregressive(model, targets, 0.0, args)
+            else:
+                pred = model(full_input)
+            
+            for i in range(min(num_samples - len(gts), targets.shape[0])):
+                gts.append(targets[i].squeeze(0).cpu().numpy())
+                preds.append(pred[i].squeeze(0).cpu().numpy())
+            
+            if len(gts) >= num_samples:
+                break
+    
+    return np.array(gts), np.array(preds)
+
+
 def train_model(model, train_loader, val_loader, args, experiment):
     """
     Train FNO for multiple epochs with learning rate scheduling and early stopping.
@@ -214,6 +251,12 @@ def train_model(model, train_loader, val_loader, args, experiment):
             print(f"\nEarly stopping triggered after {epoch+1} epochs (patience={args.patience})")
             break
 
+        # Async plotting during training (non-blocking)
+        if args.plot_every > 0 and (epoch + 1) % args.plot_every == 0:
+            gts, preds = sample_predictions(model, val_loader, args, num_samples=2)
+            async_plot(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, epoch)
+            model.train()  # Restore training mode
+
         postfix = {"Train": f"{train_loss:.2e}", "Val": f"{val_loss:.2e}", "LR": f"{current_lr:.2e}"}
         bar.set_postfix(postfix)
     
@@ -255,7 +298,7 @@ def test_model(model, test_loader, args, experiment):
     
     gts = np.array(gts)[:args.num_plots]
     preds = np.array(preds)[:args.num_plots]
-    plot_comparison_comet(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, name="test_comparison")
+    plot_comparison_comet(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, epoch=args.epochs, test=True)
 
 def main():
     args = parse_args()
@@ -280,7 +323,7 @@ def main():
     if args.model_path is not None:
         model.load_state_dict(torch.load(args.model_path, weights_only=False))
     summary(model)
-    
+
     model = train_model(model, train_loader, val_loader, args, experiment)
     log_model(
         experiment=experiment, 
