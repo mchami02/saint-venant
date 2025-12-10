@@ -1,8 +1,10 @@
 """Generate and plot data from the GridDataset."""
 
 import argparse
+import tempfile
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import FuncAnimation
 from operator_data_pipeline import GridDataset
 
 
@@ -15,6 +17,134 @@ def parse_args():
     parser.add_argument("--dt", type=float, default=0.05, help="Time step size")
     parser.add_argument("--output", type=str, default="data_samples.png", help="Output file name")
     return parser.parse_args()
+
+def _create_comparison_animation(gt, pred, nx, nt, dx, dt, sample_idx, skip_frames=5, fps=20):
+    """
+    Create an animation showing ground truth vs prediction side by side through time.
+    
+    Args:
+        gt: Ground truth array (nt, nx) - each row is spatial values at a time step
+        pred: Prediction array (nt, nx) - each row is spatial values at a time step
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+        sample_idx: Sample index for title
+        skip_frames: Number of frames to skip
+        fps: Frames per second
+    
+    Returns:
+        FuncAnimation object and the figure
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    x = np.linspace(0, nx * dx, gt.shape[1])  # Use actual data shape
+    
+    # Set consistent y-axis limits
+    y_min = min(gt.min(), pred.min())
+    y_max = max(gt.max(), pred.max())
+    y_margin = (y_max - y_min) * 0.1 if y_max > y_min else 0.1
+    
+    # Initialize lines with initial data
+    line_gt, = axes[0].plot(x, gt[0], 'b-', linewidth=2)
+    line_pred, = axes[1].plot(x, pred[0], 'r-', linewidth=2)
+    
+    for ax, title in zip(axes, [f'Ground Truth (Sample {sample_idx+1})', f'Prediction (Sample {sample_idx+1})']):
+        ax.set_xlim(0, nx * dx)
+        ax.set_ylim(y_min - y_margin, y_max + y_margin)
+        ax.set_xlabel('Position x')
+        ax.set_ylabel('Density ρ')
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+    
+    time_text = axes[0].text(0.02, 0.95, '', transform=axes[0].transAxes, fontsize=10)
+    plt.tight_layout()
+    
+    def update(frame):
+        t = frame * skip_frames
+        if t >= nt:
+            t = nt - 1
+        line_gt.set_ydata(gt[t])
+        line_pred.set_ydata(pred[t])
+        time_text.set_text(f'Time: {t * dt:.3f} s (step {t}/{nt})')
+        return line_gt, line_pred, time_text
+    
+    n_frames = max(1, nt // skip_frames)
+    anim = FuncAnimation(fig, update, frames=n_frames, interval=1000/fps)
+    
+    return anim, fig
+
+
+def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, name="comparison"):
+    """
+    Create comparison plots (ground truth, prediction, difference) and upload to Comet.
+    Also creates animated GIFs showing the evolution through time.
+    
+    Args:
+        ground_truth: (B, nt, nx) or (nt, nx) array
+        prediction: (B, nt, nx) or (nt, nx) array
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+        experiment: Comet experiment object
+        name: Name prefix for the logged figure
+    """
+    ground_truth = np.asarray(ground_truth)
+    prediction = np.asarray(prediction)
+    
+    # Handle 2D input by adding batch dimension
+    if ground_truth.ndim == 2:
+        ground_truth = ground_truth[np.newaxis, ...]
+        prediction = prediction[np.newaxis, ...]
+    
+    B = ground_truth.shape[0]
+    difference = np.abs(prediction - ground_truth)
+    
+    # Create static comparison plots
+    fig, axes = plt.subplots(B, 3, figsize=(18, 5 * B))
+    if B == 1:
+        axes = axes.reshape(1, -1)
+    
+    extent = [0, nx * dx, 0, nt * dt]
+    
+    for b in range(B):
+        # Ground Truth
+        im1 = axes[b, 0].imshow(ground_truth[b], extent=extent, aspect='auto', 
+                                 origin='lower', cmap='jet', vmin=0, vmax=1)
+        axes[b, 0].set_xlabel('Space x')
+        axes[b, 0].set_ylabel('Time t')
+        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
+        plt.colorbar(im1, ax=axes[b, 0], label='Value')
+        
+        # Prediction
+        im2 = axes[b, 1].imshow(prediction[b], extent=extent, aspect='auto',
+                                 origin='lower', cmap='jet', vmin=0, vmax=1)
+        axes[b, 1].set_xlabel('Space x')
+        axes[b, 1].set_ylabel('Time t')
+        axes[b, 1].set_title(f'Prediction (Sample {b+1})')
+        plt.colorbar(im2, ax=axes[b, 1], label='Value')
+        
+        # Difference
+        im3 = axes[b, 2].imshow(difference[b], extent=extent, aspect='auto',
+                                 origin='lower', cmap='RdBu_r', vmin=0, vmax=1)
+        axes[b, 2].set_xlabel('Space x')
+        axes[b, 2].set_ylabel('Time t')
+        axes[b, 2].set_title(f'Difference (Sample {b+1})')
+        plt.colorbar(im3, ax=axes[b, 2], label='Error')
+    
+    plt.tight_layout()
+    experiment.log_figure(figure_name=name, figure=fig)
+    plt.close(fig)
+    
+    # Create and upload animated GIFs for each sample
+    for b in range(B):
+        # Data is in (nt, nx) format - each row is spatial values at a time step
+        anim, anim_fig = _create_comparison_animation(
+            ground_truth[b], prediction[b], nx, nt, dx, dt, sample_idx=b
+        )
+        
+        # Save to temporary file and upload to Comet
+        with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as tmp:
+            anim.save(tmp.name, writer='pillow', fps=20)
+            experiment.log_video(tmp.name, name=f"{name}_animation_sample_{b+1}")
+        
+        plt.close(anim_fig)
 
 
 def main():

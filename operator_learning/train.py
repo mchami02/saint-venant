@@ -16,6 +16,7 @@ from torchinfo import summary
 import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
 from loss.pde_loss import PDELoss
+from plot_data import plot_comparison_comet
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -99,63 +100,6 @@ def plot_training_history(train_losses, val_losses, save_path="results/training_
     print(f"Training history plot saved to {save_path}")
 
 
-def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, name="comparison"):
-    """
-    Create comparison plots (ground truth, prediction, difference) and upload to Comet.
-    
-    Args:
-        ground_truth: (B, nx, nt) or (nx, nt) array
-        prediction: (B, nx, nt) or (nx, nt) array
-        nx, nt: Grid dimensions
-        dx, dt: Grid spacing
-        experiment: Comet experiment object
-        name: Name prefix for the logged figure
-    """
-    ground_truth = np.asarray(ground_truth)
-    prediction = np.asarray(prediction)
-    
-    # Handle 2D input by adding batch dimension
-    if ground_truth.ndim == 2:
-        ground_truth = ground_truth[np.newaxis, ...]
-        prediction = prediction[np.newaxis, ...]
-    
-    B = ground_truth.shape[0]
-    difference = np.abs(prediction - ground_truth)
-    
-    fig, axes = plt.subplots(B, 3, figsize=(18, 5 * B))
-    if B == 1:
-        axes = axes.reshape(1, -1)
-    
-    extent = [0, nx * dx, 0, nt * dt]
-    
-    for b in range(B):
-        # Ground Truth
-        im1 = axes[b, 0].imshow(ground_truth[b], extent=extent, aspect='auto', 
-                                 origin='lower', cmap='jet', vmin=0, vmax=1)
-        axes[b, 0].set_xlabel('Space x')
-        axes[b, 0].set_ylabel('Time t')
-        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
-        plt.colorbar(im1, ax=axes[b, 0], label='Value')
-        
-        # Prediction
-        im2 = axes[b, 1].imshow(prediction[b], extent=extent, aspect='auto',
-                                 origin='lower', cmap='jet', vmin=0, vmax=1)
-        axes[b, 1].set_xlabel('Space x')
-        axes[b, 1].set_ylabel('Time t')
-        axes[b, 1].set_title(f'Prediction (Sample {b+1})')
-        plt.colorbar(im2, ax=axes[b, 1], label='Value')
-        
-        # Difference
-        im3 = axes[b, 2].imshow(difference[b], extent=extent, aspect='auto',
-                                 origin='lower', cmap='RdBu_r', vmin=0, vmax=1)
-        axes[b, 2].set_xlabel('Space x')
-        axes[b, 2].set_ylabel('Time t')
-        axes[b, 2].set_title(f'Difference (Sample {b+1})')
-        plt.colorbar(im3, ax=axes[b, 2], label='Error')
-    
-    plt.tight_layout()
-    experiment.log_figure(figure_name=name, figure=fig)
-    plt.close(fig)
 
 
 def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
@@ -321,10 +265,11 @@ def main():
     experiment = start(api_key=os.getenv("COMET_API_KEY"), project_name="operator-learning-pde", workspace="pde-thesis")
     experiment.log_parameters(vars(args))
     experiment.log_code(folder="loss")
-    experiment.log_code(folder="operator_learning/models")
-    experiment.log_code(file_name="operator_learning/operator_data_pipeline.py")
-    experiment.log_code(file_name="operator_learning/model.py")
-    experiment.log_code(file_name="operator_learning/train.py")
+    experiment.log_code(folder="models")
+    experiment.log_code(file_name="operator_data_pipeline.py")
+    experiment.log_code(file_name="model.py")
+    experiment.log_code(file_name="train.py")
+    experiment.log_code(file_name="plot_data.py")
     train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
