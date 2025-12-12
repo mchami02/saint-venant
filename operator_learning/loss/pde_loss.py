@@ -69,4 +69,4 @@ class PDELoss(torch.nn.Module):
             return
         loss_values = self.get_loss_values()
         for loss_name, loss_value in loss_values.items():
-            experiment.log_metric(f"stage/loss/{loss_name}", loss_value)
+            experiment.log_metric(f"{stage}/loss/{loss_name}", loss_value)

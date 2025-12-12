@@ -4,6 +4,7 @@ from models.fno_wrapper import fno_custom_freqs
 from models.wno import WNO2d
 from models.lno import LNOWrapper
 from models.deeponet import DeepONetWrapper
+from models.encoder_decoder import EncoderDecoder
 # from models.gnn_attention import MaskedGridPredictor
 from models.fno_cnn import FNOCNNWrapper
 from models.fno_denoiser import FNODenoiserWrapper
@@ -135,6 +136,12 @@ def create_model(args):
             cnn_kernel_size=3,
             skip_connection=True,
             strip_coords=False,  # Coords already excluded above
+        )
+    elif args.model == "EncoderDecoder":
+        model = OperatorModel(EncoderDecoder,
+            hidden_dim=128,
+            layers_encoder=4,
+            layers_decoder=4
         )
     else:
         raise ValueError(f"Model {args.model} not supported")

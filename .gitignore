@@ -10,3 +10,4 @@ numerical_solver/temp/
 .cache/
 .DS_Store
 operator_learning/.env
+build/

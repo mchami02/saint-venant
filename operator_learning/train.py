@@ -79,7 +79,7 @@ def parse_args():
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
     parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
     parser.add_argument("--decaying_loss", action="store_true", help="Use decaying loss")
-    parser.add_argument("--plot_every", type=int, default=0, help="Plot comparison every N epochs (0 = only at end)")
+    parser.add_argument("--plot_every", type=int, default=5, help="Plot comparison every N epochs (0 = only at end)")
     return parser.parse_args()
 
 
@@ -227,6 +227,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
     for epoch in bar:
+        experiment.set_epoch(epoch+1)
         train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch, args, experiment)
         
         # Record history
@@ -323,7 +324,7 @@ def main():
     if args.model_path is not None:
         model.load_state_dict(torch.load(args.model_path, weights_only=False))
     summary(model)
-
+    
     model = train_model(model, train_loader, val_loader, args, experiment)
     log_model(
         experiment=experiment, 
