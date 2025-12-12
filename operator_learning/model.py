@@ -139,9 +139,9 @@ def create_model(args):
         )
     elif args.model == "EncoderDecoder":
         model = OperatorModel(EncoderDecoder,
-            hidden_dim=128,
-            layers_encoder=4,
-            layers_decoder=4
+            hidden_dim=64,
+            layers_encoder=2,
+            layers_decoder=2
         )
     else:
         raise ValueError(f"Model {args.model} not supported")

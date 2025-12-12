@@ -53,7 +53,7 @@ def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_rat
     val_idx = grids_idx[int(train_ratio * len(grids_idx)):int((train_ratio + val_ratio) * len(grids_idx))]
     test_idx = grids_idx[int((train_ratio + val_ratio) * len(grids_idx)):]
     
-    train_dataset = GridDataset(grids[train_idx], nx, nt, dx, dt, transform=GridMaskRandom(mask_ratio=0.9))
+    train_dataset = GridDataset(grids[train_idx], nx, nt, dx, dt)
     val_dataset = GridDataset(grids[val_idx], nx, nt, dx, dt)
     test_dataset = GridDataset(grids[test_idx], nx, nt, dx, dt)
 
@@ -73,8 +73,8 @@ class GridMaskRandom:
         self.mask_ratio = mask_ratio
 
     def __call__(self, grid):
-        mask = torch.rand(grid.shape[1], grid.shape[2]) < self.mask_ratio
-        grid[0, mask] = -1.0
+        mask = torch.rand(grid.shape[1] - 1, grid.shape[2] - 2) < self.mask_ratio
+        grid[0, 1:, 1:-1][mask] = -1.0
         return grid
     
 class GridDataset(Dataset):

@@ -255,7 +255,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
         # Async plotting during training (non-blocking)
         if args.plot_every > 0 and (epoch + 1) % args.plot_every == 0:
             gts, preds = sample_predictions(model, val_loader, args, num_samples=2)
-            async_plot(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, epoch)
+            async_plot(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, epoch+1)
             model.train()  # Restore training mode
 
         postfix = {"Train": f"{train_loss:.2e}", "Val": f"{val_loss:.2e}", "LR": f"{current_lr:.2e}"}
