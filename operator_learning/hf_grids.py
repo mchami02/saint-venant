@@ -92,6 +92,8 @@ def download_grids(solver, flux, nx, nt, dx, dt, max_steps, repo_id="mchami/grid
     npz_local = hf_hub_download(repo_id, file_path, repo_type="dataset")
     grids = np.load(npz_local)["grids"]  # shape (N, nt, nx)
 
+    if grids is None:
+        raise ValueError(f"No grids found for config {config_id}")
     return grids
 
 if __name__ == "__main__":

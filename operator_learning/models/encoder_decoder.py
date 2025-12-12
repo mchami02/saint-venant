@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class Tokenizer(nn.Module):
@@ -97,9 +98,19 @@ class EncoderDecoder(nn.Module):
         # Select conditions where first channel is not -1
         mask = x[:, 0, :, :] != -1  # Shape: (B, T, N)
         x_permuted = x.permute(0, 2, 3, 1)  # (B, T, N, C)
-        conds = x_permuted[mask].reshape(B, -1, C)
+
+        # Count valid elements per batch and find max length
+        counts = mask.view(B, -1).sum(dim=1)  # (B,)
+        max_length = counts.max().item()
+
+        # Extract and pad conditions for each batch
+        conds = torch.full((B, max_length, C), -1.0, device=x.device, dtype=x.dtype)
+        for b in range(B):
+            valid_elements = x_permuted[b][mask[b]]  # (counts[b], C)
+            conds[b, :counts[b]] = valid_elements
+
         encoder_output = self.encoder(conds)
-        all_coords = x[:, 1:].reshape(B, -1, 2)
+        all_coords = x[:, 1:].permute(0, 2, 3, 1).reshape(B, T * N, 2)
         decoder_output = self.decoder(all_coords, encoder_output)
         return decoder_output.reshape(B, 1, T, N)
 
