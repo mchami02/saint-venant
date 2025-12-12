@@ -86,9 +86,9 @@ class GridDataset(Dataset):
         input_grid[1:, 1:-1] = -1 # mask all but the initial condition and boundary
         
         # Create coordinate grids that tell the model what time/space to predict
-        # t_coords = (torch.arange(nt).float() * self.grids[idx].dt)[:, None].expand(nt, nx)  # (nt, nx)
-        # x_coords = (torch.arange(nx).float() * self.grids[idx].dx)[None, :].expand(nt, nx)  # (nt, nx)
+        t_coords = (torch.arange(nt).float() * self.dt)[:, None].expand(nt, nx).unsqueeze(-1)  # (nt, nx, 1)
+        x_coords = (torch.arange(nx).float() * self.dx)[None, :].expand(nt, nx).unsqueeze(-1)  # (nt, nx, 1)
         
         # Stack: (nt, nx, n_vals + 2) where channels are [initial_density_repeated, time, space]
-        full_input = input_grid
+        full_input = torch.cat([input_grid, t_coords, x_coords], dim=-1)
         return full_input.permute(2, 0, 1), target_grid.permute(2, 0, 1)  # Returns: (n_vals + 2, nt, nx), (n_vals, nt, nx)
