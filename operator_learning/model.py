@@ -24,12 +24,12 @@ class OperatorModel(torch.nn.Module):
         return self.model(x)
 
 
-def create_model(args):
+def create_model(args, device):
     if args.model == "FNO":
         model = OperatorModel(FNO,
-        n_modes=(16, 4),        # modes in (time, space) dimensions
-        hidden_channels=16,       # network width
-        in_channels=args.in_channels - 2,           # density + time + space
+        n_modes=(64, 16),        # modes in (time, space) dimensions
+        hidden_channels=64,       # network width
+        in_channels=args.in_channels,           # density + time + space
         out_channels=args.out_channels,          # predicted density
         n_layers=4               # number of FNO layers
         )
@@ -141,8 +141,14 @@ def create_model(args):
         model = OperatorModel(EncoderDecoder,
             hidden_dim=64,
             layers_encoder=2,
-            layers_decoder=2
+            layers_decoder_attention=2,
+            layers_decoder_gcn=1,
+            nt=args.nt,
+            nx=args.nx,
+            dx=args.dx,
+            dt=args.dt,
+            device=device
         )
     else:
         raise ValueError(f"Model {args.model} not supported")
-    return model
+    return model.to(device)

@@ -306,6 +306,16 @@ def main():
     print(f"Using device: {device}")
 
     print("Using CometML for logging")
+    train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
+    
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    
+    model = create_model(args, device)
+    if args.model_path is not None:
+        model.load_state_dict(torch.load(args.model_path, weights_only=False))
+    summary(model)
     experiment = start(api_key=os.getenv("COMET_API_KEY"), project_name="operator-learning-pde", workspace="pde-thesis")
     experiment.log_parameters(vars(args))
     experiment.log_code(folder="loss")
@@ -314,17 +324,7 @@ def main():
     experiment.log_code(file_name="model.py")
     experiment.log_code(file_name="train.py")
     experiment.log_code(file_name="train.py")
-    train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
-    
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    
-    model = create_model(args).to(device)
-    if args.model_path is not None:
-        model.load_state_dict(torch.load(args.model_path, weights_only=False))
-    summary(model)
-    
+
     model = train_model(model, train_loader, val_loader, args, experiment)
     log_model(
         experiment=experiment, 
