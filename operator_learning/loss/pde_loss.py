@@ -11,8 +11,20 @@ def decaying_loss(pred, targets, nt):
     loss = (weights * mse).sum()
     return loss
 
+def get_loss_function(loss_type, nt):
+    if loss_type == "mse":
+        return nn.MSELoss()
+    elif loss_type == "l1":
+        return nn.L1Loss()
+    elif loss_type == "huber":
+        return nn.HuberLoss()
+    elif loss_type == "decaying_mse":
+        return lambda pred, targets: decaying_loss(pred, targets, nt)
+    else:
+        raise ValueError(f"Invalid loss type: {loss_type}")
+
 class PDELoss(torch.nn.Module):
-    def __init__(self, nt, nx, dt, dx, vmax=1.0, rhomax=1.0, decaying_loss = False, pinn_loss = False):
+    def __init__(self, nt, nx, dt, dx, vmax=1.0, rhomax=1.0, loss_type = "mse", pinn_loss = False, subset = 1.0):
         super(PDELoss, self).__init__()
         self.nt = nt
         self.nx = nx
@@ -22,8 +34,9 @@ class PDELoss(torch.nn.Module):
         self.rhomax = rhomax
         self.losses = {}
         self.loss_count = 0
-        self.decaying_loss = decaying_loss
+        self.loss_function = get_loss_function(loss_type, nt)
         self.pinn_loss = pinn_loss
+        self.subset = subset
 
     def compute_loss(self, pred, gt) -> dict[str, torch.Tensor]:
         if self.pinn_loss:
@@ -36,10 +49,19 @@ class PDELoss(torch.nn.Module):
         pred : (B, 1, T, X)
         gt   : (B, 1, T, X)
         """
-        if self.decaying_loss:
-            return decaying_loss(pred, gt, self.nt)
-        else:
-            return nn.MSELoss()(pred, gt)
+        if self.subset < 1.0:
+            B, _, T, X = pred.shape
+            device = pred.device
+            k = int(self.subset * X)
+            x_idx = torch.randperm(X, device=device)[:k]
+            x_idx = torch.unique(torch.cat([
+                x_idx,
+                torch.tensor([0, X - 1], device=device)
+            ]))
+            pred = pred[:, :, :, x_idx]
+            gt = gt[:, :, :, x_idx]
+            
+        return self.loss_function(pred, gt)
 
     def forward(self, pred, gt):
         loss_values = self.compute_loss(pred, gt)

@@ -142,7 +142,7 @@ def create_model(args, device):
             hidden_dim=64,
             layers_encoder=2,
             layers_decoder_attention=2,
-            layers_decoder_gcn=1,
+            layers_decoder_gcn=0,
             nt=args.nt,
             nx=args.nx,
             dx=args.dx,

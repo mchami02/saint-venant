@@ -9,6 +9,10 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform == 'linux'",
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
+conflicts = [[
+    { package = "saint-venant", group = "def" },
+    { package = "saint-venant", group = "gnn" },
+]]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -26,7 +30,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohappyeyeballs" },
     { name = "aiosignal" },
-    { name = "async-timeout", marker = "python_full_version < '3.11'" },
+    { name = "async-timeout", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "attrs" },
     { name = "frozenlist" },
     { name = "multidict" },
@@ -145,7 +149,7 @@ version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "frozenlist" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7", size = 25007, upload-time = "2025-07-03T22:54:43.528Z" }
 wheels = [
@@ -166,10 +170,10 @@ name = "anyio"
 version = "4.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "idna" },
     { name = "sniffio" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c6/78/7d432127c41b50bccba979505f272c16cbcadcc33645d5fa3a738110ae75/anyio-4.11.0.tar.gz", hash = "sha256:82a8d0b81e318cc5ce71a5f1f8b5c4e63619620b63141ef8c995fa0db95a57c4", size = 219094, upload-time = "2025-09-23T09:19:12.58Z" }
 wheels = [
@@ -275,7 +279,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -446,7 +450,7 @@ name = "click"
 version = "8.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/46/61/de6cd827efad202d7057d93e0fed9294b96952e188f7384832791c7b2254/click-8.3.0.tar.gz", hash = "sha256:e7b8232224eba16f4ebe410c25ced9f7875cb5f3263ffc93cc3e8da705e229c4", size = 276943, upload-time = "2025-09-18T17:32:23.696Z" }
 wheels = [
@@ -477,7 +481,7 @@ dependencies = [
     { name = "rich" },
     { name = "semantic-version" },
     { name = "sentry-sdk" },
-    { name = "setuptools", marker = "python_full_version >= '3.12'" },
+    { name = "setuptools", marker = "python_full_version >= '3.12' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "simplejson" },
     { name = "urllib3" },
     { name = "wrapt" },
@@ -529,7 +533,8 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/66/54/eb9bfc647b19f2009dd5c7f5ec51c4e6ca831725f1aea7a993034f483147/contourpy-1.3.2.tar.gz", hash = "sha256:b6945942715a034c671b7fc54f9588126b0b8bf23db2696e3ca8328f3ff0ab54", size = 13466130, upload-time = "2025-04-15T17:47:53.79Z" }
 wheels = [
@@ -602,7 +607,8 @@ resolution-markers = [
     "python_full_version == '3.11.*' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/58/01/1253e6698a07380cd31a736d248a3f2a50a7c88779a1813da27503cadc2a/contourpy-1.3.3.tar.gz", hash = "sha256:083e12155b210502d0bca491432bb04d56dc3432f95a979b429f2848c3dbe880", size = 13466174, upload-time = "2025-07-26T12:03:12.549Z" }
 wheels = [
@@ -699,8 +705,9 @@ dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "multiprocess" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "packaging" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -758,16 +765,47 @@ version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "scikit-learn" },
     { name = "scikit-optimize" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/00/09/6875fc6aeec73b3525d8e76de5447af4f24b25c50584502d3b6fec72a1ec/deepxde-1.14.0.tar.gz", hash = "sha256:7cbd7e394a35d8d4c640e2c7b2c6f5dce1698269507769bf48613b710e06f0b7", size = 25838682, upload-time = "2025-05-08T22:27:15.674Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ce/2a/b696c9bb69707bf3cad5cd61e91d3f7ce9b2366453318b257d381ac18215/deepxde-1.14.0-py3-none-any.whl", hash = "sha256:75c7cea2a4cbf7ab5eaba0a3bfdcf5fd7607a578475a539e3303a30fce52d0cf", size = 194172, upload-time = "2025-05-08T22:27:13.012Z" },
+]
+
+[[package]]
+name = "dgl"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "psutil" },
+    { name = "requests" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "torchdata" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/2d/c0a40c0d78a8e9c0c43e7f6e4aebebb39c8bf0f80380db2c1f1ba9f3bdfa/dgl-2.1.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ff74c7119cb1e87c1b06293eba8c22725594517062e74659b1a8636134b16974", size = 6889468, upload-time = "2024-03-05T07:16:21.004Z" },
+    { url = "https://files.pythonhosted.org/packages/89/19/08b77e50de7beb9c011905167ab38ecee759a796447ed7ad466484eafb53/dgl-2.1.0-cp310-cp310-macosx_11_0_x86_64.whl", hash = "sha256:1fda987e01987d655e9a2b16281e1f31759bd5088ce08785422055c71abc0298", size = 7464359, upload-time = "2024-03-05T07:16:24.216Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/45/44fea6e5228602f5d6ad8b4f5a377f5cf5cb5cb6444d9e7cd99150f13fa2/dgl-2.1.0-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:336e5aed294b9f2f398be332caa0b256e6386e5a6a3a25dfe0715a161e6c4f94", size = 8548990, upload-time = "2024-03-05T07:16:26.655Z" },
+    { url = "https://files.pythonhosted.org/packages/73/72/6bc97419cf8fa1e11420c674fafa3c03e4df9d91bfd8fd802011b5741ce9/dgl-2.1.0-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:65f5ae94c4c88433fc4524ab8c431494cfddd8100181d5de6df4ed08aa41d14d", size = 7430720, upload-time = "2024-03-05T07:16:29.505Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/15/6571516b8bdd2f8db29e2739bca7afcd6cf75179b156f72f159a0986c9ed/dgl-2.1.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:fc7ea52fa9d42bf507ccf3b43b6d05c5ee3fce4c614033833ef08aa089b89bc6", size = 6872096, upload-time = "2024-03-05T07:16:31.298Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/48/c62028815d8f1fadff4dc83bbb9bd2e5aa113835bbe14dad92b716d1fd05/dgl-2.1.0-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:994a7dd11d6da251438762e9fb6657ee2bd9715300aa1f11143a0d61be620ec5", size = 7331725, upload-time = "2024-03-05T07:16:33.862Z" },
+    { url = "https://files.pythonhosted.org/packages/15/0b/07c479b28b2b36cbc49f5fa78156fc77f918a4bf5927c9409947d2d3d68d/dgl-2.1.0-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:050af2b3d54f158be67ae222dbf786b2b35e5d5d6a29fbf2a81b854e99f13adf", size = 8561303, upload-time = "2024-03-05T07:16:36.714Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/28/173f36cae067f17ddb45faa4ee91ca5e31efb194edba667761b53b2e1baf/dgl-2.1.0-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:3b54764b7fae40d41eb936bbfe9f254b1b11ed4993d8c61be8e81d09d955f72a", size = 7443820, upload-time = "2024-03-05T07:16:40.077Z" },
+    { url = "https://files.pythonhosted.org/packages/22/62/6868d769988961d8bb482325c4a6ba3c0007d49ba96d11c79d8c33d016c9/dgl-2.1.0-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:c0abdc0bf4407f67d1df45b9acd5f8017d26ef13aebaaec973a35905cb70e4ef", size = 7331721, upload-time = "2024-03-05T07:16:43.233Z" },
+    { url = "https://files.pythonhosted.org/packages/24/5b/40e7802b5bfda663408841e3f4f5ccdb97ceefae8011f47be22b81c40275/dgl-2.1.0-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:ffebbfbbc2278861601fa44b533e3b4a6f21bbfd742542932cb3af0c7621cffc", size = 6872090, upload-time = "2024-03-05T07:16:45.76Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/78/84bc05dd88db7a15eb32798d538cb8fd5e4e4c6fa966a650844a43c7beb5/dgl-2.1.0-cp312-cp312-manylinux1_x86_64.whl", hash = "sha256:af9b5974d667d11b9b2dc153981241c248a314c1a54880d4a2af12a00470b78d", size = 8551552, upload-time = "2024-03-05T07:16:47.994Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/d7/910035a1501d13b7fd7d90c5333ecc17ff7ebfa43195e2f856a0140d22a4/dgl-2.1.0-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:0f8605418e71191f7a4b43a5a6597e655512c7a48171ac042993d77c676f3092", size = 7435020, upload-time = "2024-03-05T07:16:50.847Z" },
 ]
 
 [[package]]
@@ -795,7 +833,7 @@ name = "dulwich"
 version = "0.24.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "urllib3" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3e/7c/cb4a5fb0d3d0f6585894759730ae9052e8dd9d2e5172bff544d369b24243/dulwich-0.24.10.tar.gz", hash = "sha256:30e028979b6fa7220c913da9c786026611c10746c06496149742602b36a11f6b", size = 999843, upload-time = "2025-11-10T17:16:50.359Z" }
@@ -855,7 +893,7 @@ name = "exceptiongroup"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749, upload-time = "2025-05-10T17:42:51.123Z" }
 wheels = [
@@ -1136,8 +1174,9 @@ name = "h5py"
 version = "3.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4d/6a/0d79de0b025aa85dc8864de8e97659c94cf3d23148394a954dc5ca52f8c8/h5py-3.15.1.tar.gz", hash = "sha256:c86e3ed45c4473564de55aa83b6fc9e5ead86578773dfbd93047380042e26b69", size = 426236, upload-time = "2025-10-16T10:35:27.404Z" }
 wheels = [
@@ -1255,7 +1294,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
+    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "httpx" },
     { name = "packaging" },
     { name = "pyyaml" },
@@ -1301,11 +1340,11 @@ name = "ipykernel"
 version = "7.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "appnope", marker = "sys_platform == 'darwin'" },
+    { name = "appnope", marker = "sys_platform == 'darwin' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "comm" },
     { name = "debugpy" },
-    { name = "ipython", version = "8.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "ipython", version = "9.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "ipython", version = "8.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ipython", version = "9.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "jupyter-client" },
     { name = "jupyter-core" },
     { name = "matplotlib-inline" },
@@ -1330,17 +1369,17 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "colorama", marker = "python_full_version < '3.11' and sys_platform == 'win32'" },
-    { name = "decorator", marker = "python_full_version < '3.11'" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
-    { name = "jedi", marker = "python_full_version < '3.11'" },
-    { name = "matplotlib-inline", marker = "python_full_version < '3.11'" },
-    { name = "pexpect", marker = "python_full_version < '3.11' and sys_platform != 'emscripten' and sys_platform != 'win32'" },
-    { name = "prompt-toolkit", marker = "python_full_version < '3.11'" },
-    { name = "pygments", marker = "python_full_version < '3.11'" },
-    { name = "stack-data", marker = "python_full_version < '3.11'" },
-    { name = "traitlets", marker = "python_full_version < '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "colorama", marker = "(python_full_version < '3.11' and sys_platform == 'win32') or (python_full_version >= '3.11' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'win32' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "decorator", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "jedi", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "matplotlib-inline", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pexpect", marker = "(python_full_version < '3.11' and sys_platform != 'emscripten' and sys_platform != 'win32') or (python_full_version >= '3.11' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform == 'emscripten' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform == 'win32' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "prompt-toolkit", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pygments", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "stack-data", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "traitlets", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/85/31/10ac88f3357fc276dc8a64e8880c82e80e7459326ae1d0a211b40abf6665/ipython-8.37.0.tar.gz", hash = "sha256:ca815841e1a41a1e6b73a0b08f3038af9b2252564d01fc405356d34033012216", size = 5606088, upload-time = "2025-05-31T16:39:09.613Z" }
 wheels = [
@@ -1358,17 +1397,17 @@ resolution-markers = [
     "python_full_version == '3.11.*' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "colorama", marker = "python_full_version >= '3.11' and sys_platform == 'win32'" },
-    { name = "decorator", marker = "python_full_version >= '3.11'" },
-    { name = "ipython-pygments-lexers", marker = "python_full_version >= '3.11'" },
-    { name = "jedi", marker = "python_full_version >= '3.11'" },
-    { name = "matplotlib-inline", marker = "python_full_version >= '3.11'" },
-    { name = "pexpect", marker = "python_full_version >= '3.11' and sys_platform != 'emscripten' and sys_platform != 'win32'" },
-    { name = "prompt-toolkit", marker = "python_full_version >= '3.11'" },
-    { name = "pygments", marker = "python_full_version >= '3.11'" },
-    { name = "stack-data", marker = "python_full_version >= '3.11'" },
-    { name = "traitlets", marker = "python_full_version >= '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version == '3.11.*'" },
+    { name = "colorama", marker = "(python_full_version >= '3.11' and sys_platform == 'win32') or (python_full_version < '3.11' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'win32' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "decorator", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ipython-pygments-lexers", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "jedi", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "matplotlib-inline", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pexpect", marker = "(python_full_version >= '3.11' and sys_platform != 'emscripten' and sys_platform != 'win32') or (python_full_version < '3.11' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform == 'emscripten' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform == 'win32' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "prompt-toolkit", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pygments", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "stack-data", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "traitlets", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "typing-extensions", marker = "python_full_version == '3.11.*' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2a/34/29b18c62e39ee2f7a6a3bba7efd952729d8aadd45ca17efc34453b717665/ipython-9.6.0.tar.gz", hash = "sha256:5603d6d5d356378be5043e69441a072b50a5b33b4503428c77b04cb8ce7bc731", size = 4396932, upload-time = "2025-09-29T10:55:53.948Z" }
 wheels = [
@@ -1380,7 +1419,7 @@ name = "ipython-pygments-lexers"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pygments", marker = "python_full_version >= '3.11'" },
+    { name = "pygments", marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ef/4c/5dd1d8af08107f88c7f741ead7a40854b8ac24ddf9ae850afbcf698aa552/ipython_pygments_lexers-1.1.1.tar.gz", hash = "sha256:09c0138009e56b6854f9535736f4171d855c8c08a563a0dcd8022f78355c7e81", size = 8393, upload-time = "2025-01-17T11:24:34.505Z" }
 wheels = [
@@ -1714,13 +1753,14 @@ name = "matplotlib"
 version = "3.10.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "contourpy", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "contourpy", version = "1.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "contourpy", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "contourpy", version = "1.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "cycler" },
     { name = "fonttools" },
     { name = "kiwisolver" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "pyparsing" },
@@ -1844,7 +1884,7 @@ name = "multidict"
 version = "6.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/80/1e/5492c365f222f907de1039b91f922b93fa4f764c713ee858d235495d8f50/multidict-6.7.0.tar.gz", hash = "sha256:c6e99d9a65ca282e578dfea819cfa9c0a62b2499d8677392e09feaf305e9e6f5", size = 101834, upload-time = "2025-10-06T14:52:30.657Z" }
 wheels = [
@@ -2045,8 +2085,9 @@ dependencies = [
     { name = "configmypy" },
     { name = "h5py" },
     { name = "matplotlib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "opt-einsum" },
     { name = "ruamel-yaml" },
     { name = "tensorly" },
@@ -2065,10 +2106,12 @@ version = "0.1.0"
 source = { git = "https://github.com/mchami02/nfv.git#0d68ea7203dd7bf041f5489d0b2fd915e078b8e3" }
 dependencies = [
     { name = "matplotlib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "rich" },
-    { name = "torch" },
+    { name = "torch", version = "2.2.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
     { name = "wandb" },
 ]
 
@@ -2078,8 +2121,9 @@ version = "0.62.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "llvmlite" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a3/20/33dbdbfe60e5fd8e3dbfde299d106279a33d9f8308346022316781368591/numba-0.62.1.tar.gz", hash = "sha256:7b774242aa890e34c21200a1fc62e5b5757d5286267e71103257f4e2af0d5161", size = 2749817, upload-time = "2025-09-29T10:46:31.551Z" }
 wheels = [
@@ -2103,6 +2147,46 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/78/7e/bf2e3634993d57f95305c7cee4c9c6cb3c9c78404ee7b49569a0dfecfe33/numba-0.62.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:8c9460b9e936c5bd2f0570e20a0a5909ee6e8b694fd958b210e3bde3a6dba2d7", size = 3804576, upload-time = "2025-09-29T10:42:59.53Z" },
     { url = "https://files.pythonhosted.org/packages/e8/b6/8a1723fff71f63bbb1354bdc60a1513a068acc0f5322f58da6f022d20247/numba-0.62.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:728f91a874192df22d74e3fd42c12900b7ce7190b1aad3574c6c61b08313e4c5", size = 3503367, upload-time = "2025-09-29T10:43:26.326Z" },
     { url = "https://files.pythonhosted.org/packages/9c/ec/9d414e7a80d6d1dc4af0e07c6bfe293ce0b04ea4d0ed6c45dad9bd6e72eb/numba-0.62.1-cp313-cp313-win_amd64.whl", hash = "sha256:bbf3f88b461514287df66bc8d0307e949b09f2b6f67da92265094e8fa1282dd8", size = 2745529, upload-time = "2025-09-29T10:44:31.738Z" },
+]
+
+[[package]]
+name = "numpy"
+version = "1.26.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version >= '3.12' and sys_platform != 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform != 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform != 'linux'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/6e/09db70a523a96d25e115e71cc56a6f9031e7b8cd166c1ac8438307c14058/numpy-1.26.4.tar.gz", hash = "sha256:2a02aba9ed12e4ac4eb3ea9421c420301a0c6460d9830d74a9df87efa4912010", size = 15786129, upload-time = "2024-02-06T00:26:44.495Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/94/ace0fdea5241a27d13543ee117cbc65868e82213fb31a8eb7fe9ff23f313/numpy-1.26.4-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:9ff0f4f29c51e2803569d7a51c2304de5554655a60c5d776e35b4a41413830d0", size = 20631468, upload-time = "2024-02-05T23:48:01.194Z" },
+    { url = "https://files.pythonhosted.org/packages/20/f7/b24208eba89f9d1b58c1668bc6c8c4fd472b20c45573cb767f59d49fb0f6/numpy-1.26.4-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:2e4ee3380d6de9c9ec04745830fd9e2eccb3e6cf790d39d7b98ffd19b0dd754a", size = 13966411, upload-time = "2024-02-05T23:48:29.038Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/a5/4beee6488160798683eed5bdb7eead455892c3b4e1f78d79d8d3f3b084ac/numpy-1.26.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d209d8969599b27ad20994c8e41936ee0964e6da07478d6c35016bc386b66ad4", size = 14219016, upload-time = "2024-02-05T23:48:54.098Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/d7/ecf66c1cd12dc28b4040b15ab4d17b773b87fa9d29ca16125de01adb36cd/numpy-1.26.4-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ffa75af20b44f8dba823498024771d5ac50620e6915abac414251bd971b4529f", size = 18240889, upload-time = "2024-02-05T23:49:25.361Z" },
+    { url = "https://files.pythonhosted.org/packages/24/03/6f229fe3187546435c4f6f89f6d26c129d4f5bed40552899fcf1f0bf9e50/numpy-1.26.4-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:62b8e4b1e28009ef2846b4c7852046736bab361f7aeadeb6a5b89ebec3c7055a", size = 13876746, upload-time = "2024-02-05T23:49:51.983Z" },
+    { url = "https://files.pythonhosted.org/packages/39/fe/39ada9b094f01f5a35486577c848fe274e374bbf8d8f472e1423a0bbd26d/numpy-1.26.4-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:a4abb4f9001ad2858e7ac189089c42178fcce737e4169dc61321660f1a96c7d2", size = 18078620, upload-time = "2024-02-05T23:50:22.515Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/ef/6ad11d51197aad206a9ad2286dc1aac6a378059e06e8cf22cd08ed4f20dc/numpy-1.26.4-cp310-cp310-win32.whl", hash = "sha256:bfe25acf8b437eb2a8b2d49d443800a5f18508cd811fea3181723922a8a82b07", size = 5972659, upload-time = "2024-02-05T23:50:35.834Z" },
+    { url = "https://files.pythonhosted.org/packages/19/77/538f202862b9183f54108557bfda67e17603fc560c384559e769321c9d92/numpy-1.26.4-cp310-cp310-win_amd64.whl", hash = "sha256:b97fe8060236edf3662adfc2c633f56a08ae30560c56310562cb4f95500022d5", size = 15808905, upload-time = "2024-02-05T23:51:03.701Z" },
+    { url = "https://files.pythonhosted.org/packages/11/57/baae43d14fe163fa0e4c47f307b6b2511ab8d7d30177c491960504252053/numpy-1.26.4-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:4c66707fabe114439db9068ee468c26bbdf909cac0fb58686a42a24de1760c71", size = 20630554, upload-time = "2024-02-05T23:51:50.149Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/2e/151484f49fd03944c4a3ad9c418ed193cfd02724e138ac8a9505d056c582/numpy-1.26.4-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:edd8b5fe47dab091176d21bb6de568acdd906d1887a4584a15a9a96a1dca06ef", size = 13997127, upload-time = "2024-02-05T23:52:15.314Z" },
+    { url = "https://files.pythonhosted.org/packages/79/ae/7e5b85136806f9dadf4878bf73cf223fe5c2636818ba3ab1c585d0403164/numpy-1.26.4-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7ab55401287bfec946ced39700c053796e7cc0e3acbef09993a9ad2adba6ca6e", size = 14222994, upload-time = "2024-02-05T23:52:47.569Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/d0/edc009c27b406c4f9cbc79274d6e46d634d139075492ad055e3d68445925/numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:666dbfb6ec68962c033a450943ded891bed2d54e6755e35e5835d63f4f6931d5", size = 18252005, upload-time = "2024-02-05T23:53:15.637Z" },
+    { url = "https://files.pythonhosted.org/packages/09/bf/2b1aaf8f525f2923ff6cfcf134ae5e750e279ac65ebf386c75a0cf6da06a/numpy-1.26.4-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:96ff0b2ad353d8f990b63294c8986f1ec3cb19d749234014f4e7eb0112ceba5a", size = 13885297, upload-time = "2024-02-05T23:53:42.16Z" },
+    { url = "https://files.pythonhosted.org/packages/df/a0/4e0f14d847cfc2a633a1c8621d00724f3206cfeddeb66d35698c4e2cf3d2/numpy-1.26.4-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:60dedbb91afcbfdc9bc0b1f3f402804070deed7392c23eb7a7f07fa857868e8a", size = 18093567, upload-time = "2024-02-05T23:54:11.696Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/b7/a734c733286e10a7f1a8ad1ae8c90f2d33bf604a96548e0a4a3a6739b468/numpy-1.26.4-cp311-cp311-win32.whl", hash = "sha256:1af303d6b2210eb850fcf03064d364652b7120803a0b872f5211f5234b399f20", size = 5968812, upload-time = "2024-02-05T23:54:26.453Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/6b/5610004206cf7f8e7ad91c5a85a8c71b2f2f8051a0c0c4d5916b76d6cbb2/numpy-1.26.4-cp311-cp311-win_amd64.whl", hash = "sha256:cd25bcecc4974d09257ffcd1f098ee778f7834c3ad767fe5db785be9a4aa9cb2", size = 15811913, upload-time = "2024-02-05T23:54:53.933Z" },
+    { url = "https://files.pythonhosted.org/packages/95/12/8f2020a8e8b8383ac0177dc9570aad031a3beb12e38847f7129bacd96228/numpy-1.26.4-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:b3ce300f3644fb06443ee2222c2201dd3a89ea6040541412b8fa189341847218", size = 20335901, upload-time = "2024-02-05T23:55:32.801Z" },
+    { url = "https://files.pythonhosted.org/packages/75/5b/ca6c8bd14007e5ca171c7c03102d17b4f4e0ceb53957e8c44343a9546dcc/numpy-1.26.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:03a8c78d01d9781b28a6989f6fa1bb2c4f2d51201cf99d3dd875df6fbd96b23b", size = 13685868, upload-time = "2024-02-05T23:55:56.28Z" },
+    { url = "https://files.pythonhosted.org/packages/79/f8/97f10e6755e2a7d027ca783f63044d5b1bc1ae7acb12afe6a9b4286eac17/numpy-1.26.4-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9fad7dcb1aac3c7f0584a5a8133e3a43eeb2fe127f47e3632d43d677c66c102b", size = 13925109, upload-time = "2024-02-05T23:56:20.368Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/50/de23fde84e45f5c4fda2488c759b69990fd4512387a8632860f3ac9cd225/numpy-1.26.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:675d61ffbfa78604709862923189bad94014bef562cc35cf61d3a07bba02a7ed", size = 17950613, upload-time = "2024-02-05T23:56:56.054Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/0c/9c603826b6465e82591e05ca230dfc13376da512b25ccd0894709b054ed0/numpy-1.26.4-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:ab47dbe5cc8210f55aa58e4805fe224dac469cde56b9f731a4c098b91917159a", size = 13572172, upload-time = "2024-02-05T23:57:21.56Z" },
+    { url = "https://files.pythonhosted.org/packages/76/8c/2ba3902e1a0fc1c74962ea9bb33a534bb05984ad7ff9515bf8d07527cadd/numpy-1.26.4-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:1dda2e7b4ec9dd512f84935c5f126c8bd8b9f2fc001e9f54af255e8c5f16b0e0", size = 17786643, upload-time = "2024-02-05T23:57:56.585Z" },
+    { url = "https://files.pythonhosted.org/packages/28/4a/46d9e65106879492374999e76eb85f87b15328e06bd1550668f79f7b18c6/numpy-1.26.4-cp312-cp312-win32.whl", hash = "sha256:50193e430acfc1346175fcbdaa28ffec49947a06918b7b92130744e81e640110", size = 5677803, upload-time = "2024-02-05T23:58:08.963Z" },
+    { url = "https://files.pythonhosted.org/packages/16/2e/86f24451c2d530c88daf997cb8d6ac622c1d40d19f5a031ed68a4b73a374/numpy-1.26.4-cp312-cp312-win_amd64.whl", hash = "sha256:08beddf13648eb95f8d867350f6a018a4be2e5ad54c8d8caed89ebca558b2818", size = 15517754, upload-time = "2024-02-05T23:58:36.364Z" },
 ]
 
 [[package]]
@@ -2260,56 +2344,184 @@ wheels = [
 
 [[package]]
 name = "nvidia-cublas-cu12"
+version = "12.1.3.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/6d/121efd7382d5b0284239f4ab1fc1590d86d34ed4a4a2fdb13b30ca8e5740/nvidia_cublas_cu12-12.1.3.1-py3-none-manylinux1_x86_64.whl", hash = "sha256:ee53ccca76a6fc08fb9701aa95b6ceb242cdaab118c3bb152af4e579af792728", size = 410594774, upload-time = "2023-04-19T15:50:03.519Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/ef/32a375b74bea706c93deea5613552f7c9104f961b21df423f5887eca713b/nvidia_cublas_cu12-12.1.3.1-py3-none-win_amd64.whl", hash = "sha256:2b964d60e8cf11b5e1073d179d85fa340c120e99b3067558f3cf98dd69d02906", size = 439918445, upload-time = "2023-04-19T15:56:13.346Z" },
+]
+
+[[package]]
+name = "nvidia-cublas-cu12"
 version = "12.8.4.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/99/db44d685f0e257ff0e213ade1964fc459b4a690a73293220e98feb3307cf/nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:b86f6dd8935884615a0683b663891d43781b819ac4f2ba2b0c9604676af346d0", size = 590537124, upload-time = "2025-03-07T01:43:53.556Z" },
     { url = "https://files.pythonhosted.org/packages/dc/61/e24b560ab2e2eaeb3c839129175fb330dfcfc29e5203196e5541a4c44682/nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:8ac4e771d5a348c551b2a426eda6193c19aa630236b418086020df5ba9667142", size = 594346921, upload-time = "2025-03-07T01:44:31.254Z" },
+    { url = "https://files.pythonhosted.org/packages/70/61/7d7b3c70186fb651d0fbd35b01dbfc8e755f69fd58f817f3d0f642df20c3/nvidia_cublas_cu12-12.8.4.1-py3-none-win_amd64.whl", hash = "sha256:47e9b82132fa8d2b4944e708049229601448aaad7e6f296f630f2d1a32de35af", size = 567544208, upload-time = "2025-03-07T01:53:30.535Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-cupti-cu12"
+version = "12.1.105"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/00/6b218edd739ecfc60524e585ba8e6b00554dd908de2c9c66c1af3e44e18d/nvidia_cuda_cupti_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:e54fde3983165c624cb79254ae9818a456eb6e87a7fd4d56a2352c24ee542d7e", size = 14109015, upload-time = "2023-04-19T15:47:32.502Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/56/0021e32ea2848c24242f6b56790bd0ccc8bf99f973ca790569c6ca028107/nvidia_cuda_cupti_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:bea8236d13a0ac7190bd2919c3e8e6ce1e402104276e6f9694479e48bb0eb2a4", size = 10154340, upload-time = "2023-04-19T15:53:33.563Z" },
 ]
 
 [[package]]
 name = "nvidia-cuda-cupti-cu12"
 version = "12.8.90"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/1f/b3bd73445e5cb342727fd24fe1f7b748f690b460acadc27ea22f904502c8/nvidia_cuda_cupti_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:4412396548808ddfed3f17a467b104ba7751e6b58678a4b840675c56d21cf7ed", size = 9533318, upload-time = "2025-03-07T01:40:10.421Z" },
     { url = "https://files.pythonhosted.org/packages/f8/02/2adcaa145158bf1a8295d83591d22e4103dbfd821bcaf6f3f53151ca4ffa/nvidia_cuda_cupti_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ea0cb07ebda26bb9b29ba82cda34849e73c166c18162d3913575b0c9db9a6182", size = 10248621, upload-time = "2025-03-07T01:40:21.213Z" },
+    { url = "https://files.pythonhosted.org/packages/41/bc/83f5426095d93694ae39fe1311431b5d5a9bb82e48bf0dd8e19be2765942/nvidia_cuda_cupti_cu12-12.8.90-py3-none-win_amd64.whl", hash = "sha256:bb479dcdf7e6d4f8b0b01b115260399bf34154a1a2e9fe11c85c517d87efd98e", size = 7015759, upload-time = "2025-03-07T01:51:11.355Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-nvrtc-cu12"
+version = "12.1.105"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/9f/c64c03f49d6fbc56196664d05dba14e3a561038a81a638eeb47f4d4cfd48/nvidia_cuda_nvrtc_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:339b385f50c309763ca65456ec75e17bbefcbbf2893f462cb8b90584cd27a1c2", size = 23671734, upload-time = "2023-04-19T15:48:32.42Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/1d/f76987c4f454eb86e0b9a0e4f57c3bf1ac1d13ad13cd1a4da4eb0e0c0ce9/nvidia_cuda_nvrtc_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:0a98a522d9ff138b96c010a65e145dc1b4850e9ecb75a0172371793752fd46ed", size = 19331863, upload-time = "2023-04-19T15:54:34.603Z" },
 ]
 
 [[package]]
 name = "nvidia-cuda-nvrtc-cu12"
 version = "12.8.93"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/05/6b/32f747947df2da6994e999492ab306a903659555dddc0fbdeb9d71f75e52/nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:a7756528852ef889772a84c6cd89d41dfa74667e24cca16bb31f8f061e3e9994", size = 88040029, upload-time = "2025-03-07T01:42:13.562Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/d1/e50d0acaab360482034b84b6e27ee83c6738f7d32182b987f9c7a4e32962/nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:fc1fec1e1637854b4c0a65fb9a8346b51dd9ee69e61ebaccc82058441f15bce8", size = 43106076, upload-time = "2025-03-07T01:41:59.817Z" },
+    { url = "https://files.pythonhosted.org/packages/45/51/52a3d84baa2136cc8df15500ad731d74d3a1114d4c123e043cb608d4a32b/nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-win_amd64.whl", hash = "sha256:7a4b6b2904850fe78e0bd179c4b655c404d4bb799ef03ddc60804247099ae909", size = 73586838, upload-time = "2025-03-07T01:52:13.483Z" },
+]
+
+[[package]]
+name = "nvidia-cuda-runtime-cu12"
+version = "12.1.105"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/d5/c68b1d2cdfcc59e72e8a5949a37ddb22ae6cade80cd4a57a84d4c8b55472/nvidia_cuda_runtime_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:6e258468ddf5796e25f1dc591a31029fa317d97a0a94ed93468fc86301d61e40", size = 823596, upload-time = "2023-04-19T15:47:22.471Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/e2/7a2b4b5064af56ea8ea2d8b2776c0f2960d95c88716138806121ae52a9c9/nvidia_cuda_runtime_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:dfb46ef84d73fababab44cf03e3b83f80700d27ca300e537f85f636fac474344", size = 821226, upload-time = "2023-04-19T15:53:23.082Z" },
 ]
 
 [[package]]
 name = "nvidia-cuda-runtime-cu12"
 version = "12.8.90"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/75/f865a3b236e4647605ea34cc450900854ba123834a5f1598e160b9530c3a/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:52bf7bbee900262ffefe5e9d5a2a69a30d97e2bc5bb6cc866688caa976966e3d", size = 965265, upload-time = "2025-03-07T01:39:43.533Z" },
     { url = "https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90", size = 954765, upload-time = "2025-03-07T01:40:01.615Z" },
+    { url = "https://files.pythonhosted.org/packages/30/a5/a515b7600ad361ea14bfa13fb4d6687abf500adc270f19e89849c0590492/nvidia_cuda_runtime_cu12-12.8.90-py3-none-win_amd64.whl", hash = "sha256:c0c6027f01505bfed6c3b21ec546f69c687689aad5f1a377554bc6ca4aa993a8", size = 944318, upload-time = "2025-03-07T01:51:01.794Z" },
+]
+
+[[package]]
+name = "nvidia-cudnn-cu12"
+version = "8.9.2.26"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "nvidia-cublas-cu12", version = "12.1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/74/a2e2be7fb83aaedec84f391f082cf765dfb635e7caa9b49065f73e4835d8/nvidia_cudnn_cu12-8.9.2.26-py3-none-manylinux1_x86_64.whl", hash = "sha256:5ccb288774fdfb07a7e7025ffec286971c06d8d7b4fb162525334616d7629ff9", size = 731725872, upload-time = "2023-06-01T19:24:57.328Z" },
 ]
 
 [[package]]
 name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12", version = "12.8.4.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/41/e79269ce215c857c935fd86bcfe91a451a584dfc27f1e068f568b9ad1ab7/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:c9132cc3f8958447b4910a1720036d9eff5928cc3179b0a51fb6d167c6cc87d8", size = 705026878, upload-time = "2025-06-06T21:52:51.348Z" },
     { url = "https://files.pythonhosted.org/packages/ba/51/e123d997aa098c61d029f76663dedbfb9bc8dcf8c60cbd6adbe42f76d049/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:949452be657fa16687d0930933f032835951ef0892b37d2d53824d1a84dc97a8", size = 706758467, upload-time = "2025-06-06T21:54:08.597Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/90/0bd6e586701b3a890fd38aa71c387dab4883d619d6e5ad912ccbd05bfd67/nvidia_cudnn_cu12-9.10.2.21-py3-none-win_amd64.whl", hash = "sha256:c6288de7d63e6cf62988f0923f96dc339cea362decb1bf5b3141883392a7d65e", size = 692992268, upload-time = "2025-06-06T21:55:18.114Z" },
+]
+
+[[package]]
+name = "nvidia-cufft-cu12"
+version = "11.0.2.54"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/94/eb540db023ce1d162e7bea9f8f5aa781d57c65aed513c33ee9a5123ead4d/nvidia_cufft_cu12-11.0.2.54-py3-none-manylinux1_x86_64.whl", hash = "sha256:794e3948a1aa71fd817c3775866943936774d1c14e7628c74f6f7417224cdf56", size = 121635161, upload-time = "2023-04-19T15:50:46Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/57/7927a3aa0e19927dfed30256d1c854caf991655d847a4e7c01fe87e3d4ac/nvidia_cufft_cu12-11.0.2.54-py3-none-win_amd64.whl", hash = "sha256:d9ac353f78ff89951da4af698f80870b1534ed69993f10a4cf1d96f21357e253", size = 121344196, upload-time = "2023-04-19T15:56:59.562Z" },
 ]
 
 [[package]]
 name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/bc/7771846d3a0272026c416fbb7e5f4c1f146d6d80704534d0b187dd6f4800/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:848ef7224d6305cdb2a4df928759dca7b1201874787083b6e7550dd6765ce69a", size = 193109211, upload-time = "2025-03-07T01:44:56.873Z" },
     { url = "https://files.pythonhosted.org/packages/1f/13/ee4e00f30e676b66ae65b4f08cb5bcbb8392c03f54f2d5413ea99a5d1c80/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4d2dd21ec0b88cf61b62e6b43564355e5222e4a3fb394cac0db101f2dd0d4f74", size = 193118695, upload-time = "2025-03-07T01:45:27.821Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/ec/ce1629f1e478bb5ccd208986b5f9e0316a78538dd6ab1d0484f012f8e2a1/nvidia_cufft_cu12-11.3.3.83-py3-none-win_amd64.whl", hash = "sha256:7a64a98ef2a7c47f905aaf8931b69a3a43f27c55530c698bb2ed7c75c0b42cb7", size = 192216559, upload-time = "2025-03-07T01:53:57.106Z" },
 ]
 
 [[package]]
@@ -2318,38 +2530,110 @@ version = "1.13.1.3"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/fe/1bcba1dfbfb8d01be8d93f07bfc502c93fa23afa6fd5ab3fc7c1df71038a/nvidia_cufile_cu12-1.13.1.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1d069003be650e131b21c932ec3d8969c1715379251f8d23a1860554b1cb24fc", size = 1197834, upload-time = "2025-03-07T01:45:50.723Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/f5/5607710447a6fe9fd9b3283956fceeee8a06cda1d2f56ce31371f595db2a/nvidia_cufile_cu12-1.13.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:4beb6d4cce47c1a0f1013d72e02b0994730359e17801d395bdcbf20cfb3bb00a", size = 1120705, upload-time = "2025-03-07T01:45:41.434Z" },
+]
+
+[[package]]
+name = "nvidia-curand-cu12"
+version = "10.3.2.106"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/31/4890b1c9abc496303412947fc7dcea3d14861720642b49e8ceed89636705/nvidia_curand_cu12-10.3.2.106-py3-none-manylinux1_x86_64.whl", hash = "sha256:9d264c5036dde4e64f1de8c50ae753237c12e0b1348738169cd0f8a536c0e1e0", size = 56467784, upload-time = "2023-04-19T15:51:04.804Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/97/4c9c7c79efcdf5b70374241d48cf03b94ef6707fd18ea0c0f53684931d0b/nvidia_curand_cu12-10.3.2.106-py3-none-win_amd64.whl", hash = "sha256:75b6b0c574c0037839121317e17fd01f8a69fd2ef8e25853d826fec30bdba74a", size = 55995813, upload-time = "2023-04-19T15:57:16.676Z" },
 ]
 
 [[package]]
 name = "nvidia-curand-cu12"
 version = "10.3.9.90"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/5e/92aa15eca622a388b80fbf8375d4760738df6285b1e92c43d37390a33a9a/nvidia_curand_cu12-10.3.9.90-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:dfab99248034673b779bc6decafdc3404a8a6f502462201f2f31f11354204acd", size = 63625754, upload-time = "2025-03-07T01:46:10.735Z" },
     { url = "https://files.pythonhosted.org/packages/fb/aa/6584b56dc84ebe9cf93226a5cde4d99080c8e90ab40f0c27bda7a0f29aa1/nvidia_curand_cu12-10.3.9.90-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:b32331d4f4df5d6eefa0554c565b626c7216f87a06a4f56fab27c3b68a830ec9", size = 63619976, upload-time = "2025-03-07T01:46:23.323Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/75/70c05b2f3ed5be3bb30b7102b6eb78e100da4bbf6944fd6725c012831cab/nvidia_curand_cu12-10.3.9.90-py3-none-win_amd64.whl", hash = "sha256:f149a8ca457277da854f89cf282d6ef43176861926c7ac85b2a0fbd237c587ec", size = 62765309, upload-time = "2025-03-07T01:54:20.478Z" },
+]
+
+[[package]]
+name = "nvidia-cusolver-cu12"
+version = "11.4.5.107"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "nvidia-cublas-cu12", version = "12.1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusparse-cu12", version = "12.1.0.106", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/1d/8de1e5c67099015c834315e333911273a8c6aaba78923dd1d1e25fc5f217/nvidia_cusolver_cu12-11.4.5.107-py3-none-manylinux1_x86_64.whl", hash = "sha256:8a7ec542f0412294b15072fa7dab71d31334014a69f953004ea7a118206fe0dd", size = 124161928, upload-time = "2023-04-19T15:51:25.781Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/80/8fca0bf819122a631c3976b6fc517c1b10741b643b94046bd8dd451522c5/nvidia_cusolver_cu12-11.4.5.107-py3-none-win_amd64.whl", hash = "sha256:74e0c3a24c78612192a74fcd90dd117f1cf21dea4822e66d89e8ea80e3cd2da5", size = 121643081, upload-time = "2023-04-19T15:57:43.035Z" },
 ]
 
 [[package]]
 name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-cusparse-cu12", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12", version = "12.8.4.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusparse-cu12", version = "12.5.8.93", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/32/f7cd6ce8a7690544d084ea21c26e910a97e077c9b7f07bf5de623ee19981/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:db9ed69dbef9715071232caa9b69c52ac7de3a95773c2db65bdba85916e4e5c0", size = 267229841, upload-time = "2025-03-07T01:46:54.356Z" },
     { url = "https://files.pythonhosted.org/packages/85/48/9a13d2975803e8cf2777d5ed57b87a0b6ca2cc795f9a4f59796a910bfb80/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:4376c11ad263152bd50ea295c05370360776f8c3427b30991df774f9fb26c450", size = 267506905, upload-time = "2025-03-07T01:47:16.273Z" },
+    { url = "https://files.pythonhosted.org/packages/13/c0/76ca8551b8a84146ffa189fec81c26d04adba4bc0dbe09cd6e6fd9b7de04/nvidia_cusolver_cu12-11.7.3.90-py3-none-win_amd64.whl", hash = "sha256:4a550db115fcabc4d495eb7d39ac8b58d4ab5d8e63274d3754df1c0ad6a22d34", size = 256720438, upload-time = "2025-03-07T01:54:39.898Z" },
+]
+
+[[package]]
+name = "nvidia-cusparse-cu12"
+version = "12.1.0.106"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/65/5b/cfaeebf25cd9fdec14338ccb16f6b2c4c7fa9163aefcf057d86b9cc248bb/nvidia_cusparse_cu12-12.1.0.106-py3-none-manylinux1_x86_64.whl", hash = "sha256:f3b50f42cf363f86ab21f720998517a659a48131e8d538dc02f8768237bd884c", size = 195958278, upload-time = "2023-04-19T15:51:49.939Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/95/48fdbba24c93614d1ecd35bc6bdc6087bd17cbacc3abc4b05a9c2a1ca232/nvidia_cusparse_cu12-12.1.0.106-py3-none-win_amd64.whl", hash = "sha256:b798237e81b9719373e8fae8d4f091b70a0cf09d9d85c95a557e11df2d8e9a5a", size = 195414588, upload-time = "2023-04-19T15:58:08.389Z" },
 ]
 
 [[package]]
 name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/f7/cd777c4109681367721b00a106f491e0d0d15cfa1fd59672ce580ce42a97/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9b6c161cb130be1a07a27ea6923df8141f3c295852f4b260c65f18f3e0a091dc", size = 288117129, upload-time = "2025-03-07T01:47:40.407Z" },
     { url = "https://files.pythonhosted.org/packages/c2/f5/e1854cb2f2bcd4280c44736c93550cc300ff4b8c95ebe370d0aa7d2b473d/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1ec05d76bbbd8b61b06a80e1eaf8cf4959c3d4ce8e711b65ebd0443bb0ebb13b", size = 288216466, upload-time = "2025-03-07T01:48:13.779Z" },
+    { url = "https://files.pythonhosted.org/packages/62/07/f3b2ad63f8e3d257a599f422ae34eb565e70c41031aecefa3d18b62cabd1/nvidia_cusparse_cu12-12.5.8.93-py3-none-win_amd64.whl", hash = "sha256:9a33604331cb2cac199f2e7f5104dfbb8a5a898c367a53dfda9ff2acb6b6b4dd", size = 284937404, upload-time = "2025-03-07T01:55:07.742Z" },
 ]
 
 [[package]]
@@ -2357,14 +2641,35 @@ name = "nvidia-cusparselt-cu12"
 version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/b9/598f6ff36faaece4b3c50d26f50e38661499ff34346f00e057760b35cc9d/nvidia_cusparselt_cu12-0.7.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:8878dce784d0fac90131b6817b607e803c36e629ba34dc5b433471382196b6a5", size = 283835557, upload-time = "2025-02-26T00:16:54.265Z" },
     { url = "https://files.pythonhosted.org/packages/56/79/12978b96bd44274fe38b5dde5cfb660b1d114f70a65ef962bcbbed99b549/nvidia_cusparselt_cu12-0.7.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:f1bb701d6b930d5a7cea44c19ceb973311500847f81b634d802b7b539dc55623", size = 287193691, upload-time = "2025-02-26T00:15:44.104Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/d8/a6b0d0d0c2435e9310f3e2bb0d9c9dd4c33daef86aa5f30b3681defd37ea/nvidia_cusparselt_cu12-0.7.1-py3-none-win_amd64.whl", hash = "sha256:f67fbb5831940ec829c9117b7f33807db9f9678dc2a617fbe781cac17b4e1075", size = 271020911, upload-time = "2025-02-26T00:14:47.204Z" },
+]
+
+[[package]]
+name = "nvidia-nccl-cu12"
+version = "2.19.3"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/00/d0d4e48aef772ad5aebcf70b73028f88db6e5640b36c38e90445b7a57c45/nvidia_nccl_cu12-2.19.3-py3-none-manylinux1_x86_64.whl", hash = "sha256:a9734707a2c96443331c1e48c717024aa6678a0e2a4cb66b2c364d18cee6b48d", size = 165987969, upload-time = "2023-10-24T16:16:24.789Z" },
 ]
 
 [[package]]
 name = "nvidia-nccl-cu12"
 version = "2.27.5"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/1c/857979db0ef194ca5e21478a0612bcdbbe59458d7694361882279947b349/nvidia_nccl_cu12-2.27.5-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:31432ad4d1fb1004eb0c56203dc9bc2178a1ba69d1d9e02d64a6938ab5e40e7a", size = 322400625, upload-time = "2025-06-26T04:11:04.496Z" },
     { url = "https://files.pythonhosted.org/packages/6e/89/f7a07dc961b60645dbbf42e80f2bc85ade7feb9a491b11a1e973aa00071f/nvidia_nccl_cu12-2.27.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ad730cf15cb5d25fe849c6e6ca9eb5b76db16a80f13f425ac68d8e2e55624457", size = 322348229, upload-time = "2025-06-26T04:11:28.385Z" },
 ]
 
@@ -2374,6 +2679,8 @@ version = "12.8.93"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/74/86a07f1d0f42998ca31312f998bd3b9a7eff7f52378f4f270c8679c77fb9/nvidia_nvjitlink_cu12-12.8.93-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:81ff63371a7ebd6e6451970684f916be2eab07321b73c9d244dc2b4da7f73b88", size = 39254836, upload-time = "2025-03-07T01:49:55.661Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/a2/8cee5da30d13430e87bf99bb33455d2724d0a4a9cb5d7926d80ccb96d008/nvidia_nvjitlink_cu12-12.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:adccd7161ace7261e01bb91e44e88da350895c270d23f744f0820c818b7229e7", size = 38386204, upload-time = "2025-03-07T01:49:43.612Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/d7/34f02dad2e30c31b10a51f6b04e025e5dd60e5f936af9045a9b858a05383/nvidia_nvjitlink_cu12-12.8.93-py3-none-win_amd64.whl", hash = "sha256:bd93fbeeee850917903583587f4fc3a4eafa022e34572251368238ab5e6bd67f", size = 268553710, upload-time = "2025-03-07T01:56:24.13Z" },
 ]
 
 [[package]]
@@ -2381,15 +2688,37 @@ name = "nvidia-nvshmem-cu12"
 version = "3.3.20"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/9d/3dd98852568fb845ec1f7902c90a22b240fe1cbabda411ccedf2fd737b7b/nvidia_nvshmem_cu12-3.3.20-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0b0b960da3842212758e4fa4696b94f129090b30e5122fea3c5345916545cff0", size = 124484616, upload-time = "2025-08-04T20:24:59.172Z" },
     { url = "https://files.pythonhosted.org/packages/3b/6c/99acb2f9eb85c29fc6f3a7ac4dccfd992e22666dd08a642b303311326a97/nvidia_nvshmem_cu12-3.3.20-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:d00f26d3f9b2e3c3065be895e3059d6479ea5c638a3f38c9fec49b1b9dd7c1e5", size = 124657145, upload-time = "2025-08-04T20:25:19.995Z" },
+]
+
+[[package]]
+name = "nvidia-nvtx-cu12"
+version = "12.1.105"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/d3/8057f0587683ed2fcd4dbfbdfdfa807b9160b809976099d36b8f60d08f03/nvidia_nvtx_cu12-12.1.105-py3-none-manylinux1_x86_64.whl", hash = "sha256:dc21cf308ca5691e7c04d962e213f8a4aa9bbfa23d95412f452254c2caeb09e5", size = 99138, upload-time = "2023-04-19T15:48:43.556Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/d7/bd7cb2d95ac6ac6e8d05bfa96cdce69619f1ef2808e072919044c2d47a8c/nvidia_nvtx_cu12-12.1.105-py3-none-win_amd64.whl", hash = "sha256:65f4d98982b31b60026e0e6de73fbdfc09d08a96f4656dd3665ca616a11e1e82", size = 66307, upload-time = "2023-04-19T15:54:45.736Z" },
 ]
 
 [[package]]
 name = "nvidia-nvtx-cu12"
 version = "12.8.90"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/c0/1b303feea90d296f6176f32a2a70b5ef230f9bdeb3a72bddb0dc922dc137/nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d7ad891da111ebafbf7e015d34879f7112832fc239ff0d7d776b6cb685274615", size = 91161, upload-time = "2025-03-07T01:42:23.922Z" },
     { url = "https://files.pythonhosted.org/packages/a2/eb/86626c1bbc2edb86323022371c39aa48df6fd8b0a1647bc274577f72e90b/nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5b17e2001cc0d751a5bc2c6ec6d26ad95913324a4adb86788c944f8ce9ba441f", size = 89954, upload-time = "2025-03-07T01:42:44.131Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/99/4c9c0c329bf9fc125008c3b54c7c94c0023518d06fc025ae36431375e1fe/nvidia_nvtx_cu12-12.8.90-py3-none-win_amd64.whl", hash = "sha256:619c8304aedc69f02ea82dd244541a83c3d9d40993381b3b590f1adaed3db41e", size = 56492, upload-time = "2025-03-07T01:52:24.69Z" },
 ]
 
 [[package]]
@@ -2415,8 +2744,9 @@ name = "pandas"
 version = "2.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "python-dateutil" },
     { name = "pytz" },
     { name = "tzdata" },
@@ -2775,9 +3105,11 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pywavelets", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "torch", marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pywavelets", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "torch", version = "2.2.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3c/12/ef50e2556c3ea15157ddc27716ce1df8059cab7f5c1617f557f94ace9acb/ptwt-0.1.9.tar.gz", hash = "sha256:25add2fbbb2a02fff0ca35c2b7960ee3b7b6e3085cb74630be716972f65be240", size = 70928, upload-time = "2024-06-19T08:46:32.253Z" }
 wheels = [
@@ -2795,9 +3127,11 @@ resolution-markers = [
     "python_full_version == '3.11.*' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pywavelets", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "torch", marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pywavelets", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "torch", version = "2.2.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4c/43/1577fdfacd87b986e9437e36b554febb52085c73634d8937dac7d767886c/ptwt-1.0.1.tar.gz", hash = "sha256:c4f4f6bb733f717435bf9e49a985fc64cc95a12a27ddf431aa1be73074dea498", size = 74381, upload-time = "2025-09-12T13:37:36.924Z" }
 wheels = [
@@ -3056,13 +3390,13 @@ name = "pytest"
 version = "9.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
     { name = "pygments" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/1d/eb34f286b164c5e431a810a38697409cca1112cee04b287bb56ac486730b/pytest-9.0.0.tar.gz", hash = "sha256:8f44522eafe4137b0f35c9ce3072931a788a21ee40a2ed279e817d3cc16ed21e", size = 1562764, upload-time = "2025-11-08T17:25:33.34Z" }
 wheels = [
@@ -3122,10 +3456,12 @@ name = "pytorch-wavelets"
 version = "1.3.0"
 source = { git = "https://github.com/fbcotter/pytorch_wavelets.git#9a0c507f04f43c5397e384bb6be8340169b2fd9a" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "six" },
-    { name = "torch" },
+    { name = "torch", version = "2.2.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
 ]
 
 [[package]]
@@ -3146,7 +3482,8 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/48/45/bfaaab38545a33a9f06c61211fc3bea2e23e8a8e00fedeb8e57feda722ff/pywavelets-1.8.0.tar.gz", hash = "sha256:f3800245754840adc143cbc29534a1b8fc4b8cff6e9d403326bd52b7bb5c35aa", size = 3935274, upload-time = "2024-12-04T19:54:20.593Z" }
 wheels = [
@@ -3200,7 +3537,8 @@ resolution-markers = [
     "python_full_version == '3.11.*' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5a/75/50581633d199812205ea8cdd0f6d52f12a624886b74bf1486335b67f01ff/pywavelets-1.9.0.tar.gz", hash = "sha256:148d12203377772bea452a59211d98649c8ee4a05eff019a9021853a36babdc8", size = 3938340, upload-time = "2025-08-04T16:20:04.978Z" }
 wheels = [
@@ -3323,7 +3661,7 @@ name = "pyzmq"
 version = "27.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "implementation_name == 'pypy'" },
+    { name = "cffi", marker = "implementation_name == 'pypy' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/04/0b/3c9baedbdf613ecaa7aa07027780b8867f57b6293b6ee50de316c9f3222b/pyzmq-27.1.0.tar.gz", hash = "sha256:ac0765e3d44455adb6ddbf4417dcce460fc40a05978c08efdf2948072f6db540", size = 281750, upload-time = "2025-09-08T23:10:18.157Z" }
 wheels = [
@@ -3398,7 +3736,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "rpds-py" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8", size = 78036, upload-time = "2025-10-13T15:30:48.871Z" }
 wheels = [
@@ -3572,7 +3910,7 @@ name = "ruamel-yaml"
 version = "0.18.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ruamel-yaml-clib", marker = "python_full_version < '3.14' and platform_python_implementation == 'CPython'" },
+    { name = "ruamel-yaml-clib", marker = "(python_full_version < '3.14' and platform_python_implementation == 'CPython') or (python_full_version >= '3.14' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (platform_python_implementation != 'CPython' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9f/c7/ee630b29e04a672ecfc9b63227c87fd7a37eb67c1bf30fe95376437f897c/ruamel.yaml-0.18.16.tar.gz", hash = "sha256:a6e587512f3c998b2225d68aa1f35111c29fad14aed561a26e73fab729ec5e5a", size = 147269, upload-time = "2025-10-22T17:54:02.346Z" }
 wheels = [
@@ -3638,6 +3976,11 @@ name = "saint-venant"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "torch-geometric" },
+]
+
+[package.dev-dependencies]
+def = [
     { name = "comet-ml" },
     { name = "datasets" },
     { name = "deepxde" },
@@ -3652,18 +3995,70 @@ dependencies = [
     { name = "neuraloperator" },
     { name = "nfv" },
     { name = "numba" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "ptwt", version = "0.1.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "ptwt", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ptwt", version = "0.1.9", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ptwt", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "pytorch-wavelets" },
-    { name = "torch" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "torchinfo" },
+    { name = "tqdm" },
+]
+default = [
+    { name = "comet-ml" },
+    { name = "datasets" },
+    { name = "deepxde" },
+    { name = "dotenv" },
+    { name = "einops" },
+    { name = "h5py" },
+    { name = "huggingface-hub" },
+    { name = "ipykernel" },
+    { name = "joblib" },
+    { name = "matplotlib" },
+    { name = "modal" },
+    { name = "neuraloperator" },
+    { name = "nfv" },
+    { name = "numba" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ptwt", version = "0.1.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ptwt", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pytorch-wavelets" },
+    { name = "torchinfo" },
+    { name = "tqdm" },
+]
+gnn = [
+    { name = "comet-ml" },
+    { name = "datasets" },
+    { name = "deepxde" },
+    { name = "dgl" },
+    { name = "dotenv" },
+    { name = "einops" },
+    { name = "h5py" },
+    { name = "huggingface-hub" },
+    { name = "ipykernel" },
+    { name = "joblib" },
+    { name = "matplotlib" },
+    { name = "modal" },
+    { name = "neuraloperator" },
+    { name = "nfv" },
+    { name = "numba" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" } },
+    { name = "ptwt", version = "0.1.9", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "ptwt", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "pytorch-wavelets" },
+    { name = "torch", version = "2.2.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "torchdata" },
     { name = "torchinfo" },
     { name = "tqdm" },
 ]
 
 [package.metadata]
-requires-dist = [
+requires-dist = [{ name = "torch-geometric", specifier = ">=2.7.0" }]
+
+[package.metadata.requires-dev]
+def = [
     { name = "comet-ml", specifier = ">=3.54.1" },
     { name = "datasets", specifier = ">=4.4.1" },
     { name = "deepxde", specifier = ">=1.10.1" },
@@ -3685,9 +4080,53 @@ requires-dist = [
     { name = "torchinfo", specifier = ">=1.8.0" },
     { name = "tqdm", specifier = ">=4.65.0" },
 ]
-
-[package.metadata.requires-dev]
+default = [
+    { name = "comet-ml", specifier = ">=3.54.1" },
+    { name = "datasets", specifier = ">=4.4.1" },
+    { name = "deepxde", specifier = ">=1.10.1" },
+    { name = "dotenv", specifier = ">=0.9.9" },
+    { name = "einops", specifier = ">=0.8.1" },
+    { name = "h5py", specifier = ">=3.8.0" },
+    { name = "huggingface-hub", specifier = ">=1.1.7" },
+    { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "joblib", specifier = ">=1.4.2" },
+    { name = "matplotlib", specifier = ">=3.7.5" },
+    { name = "modal", specifier = ">=0.65.66" },
+    { name = "neuraloperator", specifier = ">=0.3.0" },
+    { name = "nfv", git = "https://github.com/mchami02/nfv.git" },
+    { name = "numba", specifier = ">=0.57.0" },
+    { name = "numpy", specifier = ">=1.20.0" },
+    { name = "ptwt", specifier = ">=0.1.9" },
+    { name = "pytorch-wavelets", git = "https://github.com/fbcotter/pytorch_wavelets.git" },
+    { name = "torchinfo", specifier = ">=1.8.0" },
+    { name = "tqdm", specifier = ">=4.65.0" },
+]
 dev = []
+gnn = [
+    { name = "comet-ml", specifier = ">=3.54.1" },
+    { name = "datasets", specifier = ">=4.4.1" },
+    { name = "deepxde", specifier = ">=1.10.1" },
+    { name = "dgl", specifier = "==2.1.0" },
+    { name = "dotenv", specifier = ">=0.9.9" },
+    { name = "einops", specifier = ">=0.8.1" },
+    { name = "h5py", specifier = ">=3.8.0" },
+    { name = "huggingface-hub", specifier = ">=1.1.7" },
+    { name = "ipykernel", specifier = ">=6.29.5" },
+    { name = "joblib", specifier = ">=1.4.2" },
+    { name = "matplotlib", specifier = ">=3.7.5" },
+    { name = "modal", specifier = ">=0.65.66" },
+    { name = "neuraloperator", specifier = ">=0.3.0" },
+    { name = "nfv", git = "https://github.com/mchami02/nfv.git" },
+    { name = "numba", specifier = ">=0.57.0" },
+    { name = "numpy", specifier = "<2" },
+    { name = "numpy", specifier = ">=1.20.0" },
+    { name = "ptwt", specifier = ">=0.1.9" },
+    { name = "pytorch-wavelets", git = "https://github.com/fbcotter/pytorch_wavelets.git" },
+    { name = "torch", specifier = "==2.2.1" },
+    { name = "torchdata", specifier = "==0.7.1" },
+    { name = "torchinfo", specifier = ">=1.8.0" },
+    { name = "tqdm", specifier = ">=4.65.0" },
+]
 
 [[package]]
 name = "scikit-learn"
@@ -3695,10 +4134,11 @@ version = "1.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "joblib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "threadpoolctl" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/98/c2/a7855e41c9d285dfe86dc50b250978105dce513d6e459ea66a6aeb0e1e0c/scikit_learn-1.7.2.tar.gz", hash = "sha256:20e9e49ecd130598f1ca38a1d85090e1a600147b9c02fa6f15d69cb53d968fda", size = 7193136, upload-time = "2025-09-09T08:21:29.075Z" }
@@ -3741,13 +4181,14 @@ version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "joblib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
     { name = "packaging" },
     { name = "pyaml" },
     { name = "scikit-learn" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b3/95/1b433b9eb9eb653fb97fd525552fd027886e3812d7d20d843994263340aa/scikit_optimize-0.10.2.tar.gz", hash = "sha256:00a3d91bf9015e292b6e7aaefe7e6cb95e8d25ce19adafd2cd88849e1a0b0da0", size = 86202, upload-time = "2024-06-04T19:12:56.879Z" }
 wheels = [
@@ -3763,7 +4204,8 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0f/37/6964b830433e654ec7485e45a00fc9a27cf868d622838f6b6d9c5ec0d532/scipy-1.15.3.tar.gz", hash = "sha256:eae3cf522bc7df64b42cad3925c876e1b0b6c35c1337c93e12c0f366f55b0eaf", size = 59419214, upload-time = "2025-05-08T16:13:05.955Z" }
 wheels = [
@@ -3825,7 +4267,8 @@ resolution-markers = [
     "python_full_version == '3.11.*' and sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0a/ca/d8ace4f98322d01abcd52d381134344bf7b431eba7ed8b42bdea5a3c2ac9/scipy-1.16.3.tar.gz", hash = "sha256:01e87659402762f43bd2fee13370553a17ada367d42e7487800bf2916535aecb", size = 30597883, upload-time = "2025-10-28T17:38:54.068Z" }
 wheels = [
@@ -4062,10 +4505,11 @@ name = "tensorly"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/57/39/76a859505dc5331cf43baba1fc011e85184c8ad0dbe01e6b01fe0f935ea2/tensorly-0.9.0.tar.gz", hash = "sha256:9b970dde47e2267a17b66a1444113e879c0bb77fb22f497a4207eb2b548ff792", size = 7327121, upload-time = "2024-11-12T14:54:20.504Z" }
 wheels = [
@@ -4077,10 +4521,11 @@ name = "tensorly-torch"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d6/24/afea0adc5c29ae40d28bc359eaf888a1605699fbba690e76ec67c51b055a/tensorly-torch-0.5.0.tar.gz", hash = "sha256:4c2f19f361113ca78f09b504a786075b0f51425468ae997a5f8018d4be6a4db5", size = 43306, upload-time = "2024-06-09T17:36:18.674Z" }
 wheels = [
@@ -4156,33 +4601,92 @@ wheels = [
 
 [[package]]
 name = "torch"
+version = "2.2.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version >= '3.12' and sys_platform != 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform != 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform != 'linux'",
+]
+dependencies = [
+    { name = "filelock", marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "fsspec", marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "jinja2", marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cublas-cu12", version = "12.1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cuda-cupti-cu12", version = "12.1.105", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cuda-nvrtc-cu12", version = "12.1.105", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cuda-runtime-cu12", version = "12.1.105", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cudnn-cu12", version = "8.9.2.26", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cufft-cu12", version = "11.0.2.54", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-curand-cu12", version = "10.3.2.106", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusolver-cu12", version = "11.4.5.107", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusparse-cu12", version = "12.1.0.106", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nccl-cu12", version = "2.19.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nvtx-cu12", version = "12.1.105", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "sympy", marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "triton", version = "2.2.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (python_full_version >= '3.12' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "typing-extensions", marker = "extra == 'group-12-saint-venant-gnn'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/ad/fbe7d4cffb76da4e478438853b51305361c719cff929ab70a808e7fb75e7/torch-2.2.1-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:8d3bad336dd2c93c6bcb3268e8e9876185bda50ebde325ef211fb565c7d15273", size = 755527312, upload-time = "2024-02-22T19:16:58.225Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/ab/37003a4a7ff095827b5f21f82a77d2d980ebdfb2cf4b05a47e708453b1f4/torch-2.2.1-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:5297f13370fdaca05959134b26a06a7f232ae254bf2e11a50eddec62525c9006", size = 86611545, upload-time = "2024-02-22T19:18:29.593Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/df/2c3f3a838b4fa5334ab79a5e0e4efacfb9a1a2fa1ab9e4d343be655fcb64/torch-2.2.1-cp310-cp310-win_amd64.whl", hash = "sha256:5f5dee8433798888ca1415055f5e3faf28a3bad660e4c29e1014acd3275ab11a", size = 198569259, upload-time = "2024-02-22T19:18:20.425Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/46/d4f23bc1ad24e3addb060aebd1ac6203b38e4c48806ac92a6eb992dbe216/torch-2.2.1-cp310-none-macosx_10_9_x86_64.whl", hash = "sha256:b6d78338acabf1fb2e88bf4559d837d30230cf9c3e4337261f4d83200df1fcbe", size = 150792988, upload-time = "2024-02-22T19:17:49.711Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/95/f1af6858fcb923defd2fb0ddb5f4635d8c0dcfc34c2443eee969c2068166/torch-2.2.1-cp310-none-macosx_11_0_arm64.whl", hash = "sha256:6ab3ea2e29d1aac962e905142bbe50943758f55292f1b4fdfb6f4792aae3323e", size = 59707276, upload-time = "2024-02-22T19:18:38.058Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/df/5810707da6f2fd4be57f0cc417987c0fa16a2eecf0b1b71f82ea555dc619/torch-2.2.1-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:d86664ec85902967d902e78272e97d1aff1d331f7619d398d3ffab1c9b8e9157", size = 755552143, upload-time = "2024-02-22T19:15:24.698Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/fd/2121f53629c433589273a2e8f71d29705e98024e0abe2360e63b852e80bb/torch-2.2.1-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:d6227060f268894f92c61af0a44c0d8212e19cb98d05c20141c73312d923bc0a", size = 86619053, upload-time = "2024-02-22T19:18:13.69Z" },
+    { url = "https://files.pythonhosted.org/packages/59/1f/4975d1ab3ed2244053876321ef65bc02935daed67da76c6e7d65900772a3/torch-2.2.1-cp311-cp311-win_amd64.whl", hash = "sha256:77e990af75fb1675490deb374d36e726f84732cd5677d16f19124934b2409ce9", size = 198572606, upload-time = "2024-02-22T19:18:05.117Z" },
+    { url = "https://files.pythonhosted.org/packages/15/23/5d44decce68370cfeef76943bca3f2fb5b0057b7ab39f9d3b1feb53d64b8/torch-2.2.1-cp311-none-macosx_10_9_x86_64.whl", hash = "sha256:46085e328d9b738c261f470231e987930f4cc9472d9ffb7087c7a1343826ac51", size = 150800683, upload-time = "2024-02-22T19:17:56.711Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/b9/256ab23c859cbcd7d6fb7cb46417a07eac817881a0a68df8ea0c18f45221/torch-2.2.1-cp311-none-macosx_11_0_arm64.whl", hash = "sha256:2d9e7e5ecbb002257cf98fae13003abbd620196c35f85c9e34c2adfb961321ec", size = 59714930, upload-time = "2024-02-22T19:17:44.438Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/7e/2f5e867229b4f96c21d1de759ecd2589a1468342ed570ef275bcd02f677f/torch-2.2.1-cp312-cp312-manylinux1_x86_64.whl", hash = "sha256:ada53aebede1c89570e56861b08d12ba4518a1f8b82d467c32665ec4d1f4b3c8", size = 755471734, upload-time = "2024-02-22T19:16:01.574Z" },
+    { url = "https://files.pythonhosted.org/packages/44/94/e049a0570bbac32faafa2374ade5397ab67579e3a8e71ce6948f4f39c9e4/torch-2.2.1-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:be21d4c41ecebed9e99430dac87de1439a8c7882faf23bba7fea3fea7b906ac1", size = 86524159, upload-time = "2024-02-22T19:17:39.398Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/ed/9014bef608b318664c2e8b77888449eb605023cdc6c33fad6c47f1a79596/torch-2.2.1-cp312-cp312-win_amd64.whl", hash = "sha256:79848f46196750367dcdf1d2132b722180b9d889571e14d579ae82d2f50596c5", size = 198519367, upload-time = "2024-02-22T19:17:30.403Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/4b/19527706ab1d1f91cdafe0160407a61e5865e74592ea911f92a81c583125/torch-2.2.1-cp312-none-macosx_10_9_x86_64.whl", hash = "sha256:7ee804847be6be0032fbd2d1e6742fea2814c92bebccb177f0d3b8e92b2d2b18", size = 150801561, upload-time = "2024-02-22T19:17:21.669Z" },
+    { url = "https://files.pythonhosted.org/packages/55/42/4442a5f7ea264168382ac0e4b8e114c0a49252dc3a88a034dfaf836db198/torch-2.2.1-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:84b2fb322ab091039fdfe74e17442ff046b258eb5e513a28093152c5b07325a7", size = 59678393, upload-time = "2024-02-22T19:17:15.794Z" },
+]
+
+[[package]]
+name = "torch"
 version = "2.9.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version >= '3.12' and sys_platform != 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform != 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform != 'linux'",
+]
 dependencies = [
-    { name = "filelock" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "nvidia-cublas-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-cupti-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-runtime-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cudnn-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cufft-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cufile-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-curand-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cusolver-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cusparse-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-cusparselt-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-nccl-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-nvshmem-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "nvidia-nvtx-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "setuptools", marker = "python_full_version >= '3.12'" },
-    { name = "sympy" },
-    { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "typing-extensions" },
+    { name = "filelock", marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
+    { name = "fsspec", marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
+    { name = "jinja2", marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cublas-cu12", version = "12.8.4.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cuda-cupti-cu12", version = "12.8.90", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cuda-nvrtc-cu12", version = "12.8.93", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cuda-runtime-cu12", version = "12.8.90", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cudnn-cu12", version = "9.10.2.21", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cufft-cu12", version = "11.3.3.83", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cufile-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-curand-cu12", version = "10.3.9.90", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusolver-cu12", version = "11.7.3.90", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusparse-cu12", version = "12.5.8.93", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-cusparselt-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nccl-cu12", version = "2.27.5", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nvshmem-cu12", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "nvidia-nvtx-cu12", version = "12.8.90", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "setuptools", marker = "(python_full_version >= '3.12' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.12' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "sympy", marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
+    { name = "triton", version = "3.5.0", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'group-12-saint-venant-def') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'group-12-saint-venant-gnn') or (platform_machine != 'x86_64' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "typing-extensions", marker = "extra == 'group-12-saint-venant-def' or extra != 'group-12-saint-venant-gnn'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/86/245c240d2138c17ed572c943c289056c2721abab70810d772c6bf5495b28/torch-2.9.0-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:030bbfe367379ae6a4ae4042b6c44da25383343b8b3c68abaa9c7231efbaf2dd", size = 104213554, upload-time = "2025-10-15T15:45:59.798Z" },
@@ -4213,6 +4717,49 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/62/51/dc3b4e2f9ba98ae27238f0153ca098bf9340b2dafcc67fde645d496dfc2a/torch-2.9.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:c08fb654d783899e204a32cca758a7ce8a45b2d78eeb89517cc937088316f78e", size = 104140340, upload-time = "2025-10-15T15:50:19.67Z" },
     { url = "https://files.pythonhosted.org/packages/c0/8d/b00657f8141ac16af7bb6cda2e67de18499a3263b78d516b9a93fcbc98e3/torch-2.9.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:ec8feb0099b2daa5728fbc7abb0b05730fd97e0f359ff8bda09865aaa7bd7d4b", size = 899731750, upload-time = "2025-10-15T15:49:36.673Z" },
     { url = "https://files.pythonhosted.org/packages/fc/29/bd361e0cbb2c79ce6450f42643aaf6919956f89923a50571b0ebfe92d142/torch-2.9.0-cp314-cp314t-win_amd64.whl", hash = "sha256:695ba920f234ad4170c9c50e28d56c848432f8f530e6bc7f88fcb15ddf338e75", size = 109503850, upload-time = "2025-10-15T15:50:24.118Z" },
+]
+
+[[package]]
+name = "torch-geometric"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "fsspec" },
+    { name = "jinja2" },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-12-saint-venant-gnn'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version < '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "numpy", version = "2.3.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra == 'group-12-saint-venant-def') or (python_full_version >= '3.11' and extra != 'group-12-saint-venant-gnn') or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+    { name = "psutil" },
+    { name = "pyparsing" },
+    { name = "requests" },
+    { name = "tqdm" },
+    { name = "xxhash" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/75/63/b210152635902da7fe79fcdd16517fae108f457a0ed22c737e702a9afbae/torch_geometric-2.7.0.tar.gz", hash = "sha256:f9099e4aece1a9f618c84dbaac33a77f43139736698c7e8bddf3301ef1f2e8d4", size = 876725, upload-time = "2025-10-15T20:48:03.443Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/d3/4dffd7300500465e0b4a2ae917dcb2ce771de0b9a772670365799a27c024/torch_geometric-2.7.0-py3-none-any.whl", hash = "sha256:6e0cd3ad824d484651ef5d308fc66c687bfcf5ba040d56d1e0fe0f81f365e292", size = 1275346, upload-time = "2025-10-15T20:48:01.949Z" },
+]
+
+[[package]]
+name = "torchdata"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "torch", version = "2.2.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "urllib3" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/97/6f8f2384d9efb2d1bb6966b5300852d704f4943656360e9352e3cc3358b8/torchdata-0.7.1-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:042db39edbc961c50a36c45b89aea4b099858140c13746c7cc7a87b1cc219d0c", size = 1801802, upload-time = "2023-11-15T17:09:19.271Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/45/7c4674a8a4ac83f0e130d0991d61ff96a231656112bb7c50618d77ab0a8f/torchdata-0.7.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:2d2c8482313dd52652caff99dc530433d898a12bb80bc33a0a4d1680d63272e0", size = 4815667, upload-time = "2023-11-15T17:08:43.478Z" },
+    { url = "https://files.pythonhosted.org/packages/39/18/6f0d33df4b9fe4d44a779c2c7cc7cb042535a336f051bb0e5b5387844ee6/torchdata-0.7.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eed10b1f9265b30161a8cd129a96cfc7da202cfc70acf8b6a21fd29e18274ca3", size = 4657548, upload-time = "2023-11-15T17:09:00.144Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/06/0c916f27ef9f5a566b555f07c82c94fb9277fcabe0fcbf4dfe4505dcb28a/torchdata-0.7.1-cp310-cp310-win_amd64.whl", hash = "sha256:36c591d0910ede6a496d4fccd389f27e7bccabf8b6a8722712ecf28b98bda8ae", size = 1330841, upload-time = "2023-11-15T17:09:14.414Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/9a/8b3c64a141b58228419110858acdd5eae7a1b54db9dd8f22a2af956ac53d/torchdata-0.7.1-cp311-cp311-macosx_10_13_x86_64.whl", hash = "sha256:91a78c677a3e4e2447d888587f7ea0b4ddde81ca95adf709ba0d3dc9a4e9542d", size = 1801812, upload-time = "2023-11-15T17:09:05.57Z" },
+    { url = "https://files.pythonhosted.org/packages/35/b2/7ed3a80ae0673b940f2af14281dc02dee0f667c6094e6dcd399fa35249a7/torchdata-0.7.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:fa325d628aa6125c6b46b6fa27c94150ca9276edbba1042d3eb3cd9c1039b5a9", size = 4815618, upload-time = "2023-11-15T17:09:02.386Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/8d/b17138a9ad7e47dd602587dbcc142bd98374e0c16c0806c2026d8db54242/torchdata-0.7.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d256535648dfb94d1226f233768c6798d1841edfdbf0a09b2115e6cbbda614f9", size = 4657579, upload-time = "2023-11-15T17:09:12.272Z" },
+    { url = "https://files.pythonhosted.org/packages/da/8d/e0413f91944f931cb5c685cbd6330ad450f9d5466c466822d25761ca772d/torchdata-0.7.1-cp311-cp311-win_amd64.whl", hash = "sha256:7460a5fa298e7cd5cef98e8e6455d481e5c73d39a462a89a38918389c8153e20", size = 1330404, upload-time = "2023-11-15T17:09:16.713Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/c8/34eda2bd6beb8a11c06cf905db74092bdbc3dec51a48f4f22cc474866a0a/torchdata-0.7.1-py3-none-any.whl", hash = "sha256:9f9476a26987d90fa3f87cb09ec82b78ce6031ddcaa91851c9fa9f732a987ab8", size = 184418, upload-time = "2023-11-15T17:09:10.159Z" },
 ]
 
 [[package]]
@@ -4248,7 +4795,7 @@ name = "tqdm"
 version = "4.67.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737, upload-time = "2024-11-24T20:12:22.481Z" }
 wheels = [
@@ -4266,15 +4813,44 @@ wheels = [
 
 [[package]]
 name = "triton"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
+dependencies = [
+    { name = "filelock", marker = "(python_full_version < '3.12' and sys_platform == 'linux' and extra == 'group-12-saint-venant-gnn') or (python_full_version >= '3.12' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn') or (sys_platform != 'linux' and extra == 'group-12-saint-venant-def' and extra == 'group-12-saint-venant-gnn')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/05/ed974ce87fe8c8843855daa2136b3409ee1c126707ab54a8b72815c08b49/triton-2.2.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a2294514340cfe4e8f4f9e5c66c702744c4a117d25e618bd08469d0bfed1e2e5", size = 167900779, upload-time = "2024-01-10T03:11:56.576Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/ac/3974caaa459bf2c3a244a84be8d17561f631f7d42af370fc311defeca2fb/triton-2.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:da58a152bddb62cafa9a857dd2bc1f886dbf9f9c90a2b5da82157cd2b34392b0", size = 167928356, upload-time = "2024-01-10T03:12:05.923Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/49/2e1bbae4542b8f624e409540b4197e37ab22a88e8685e99debe721cc2b50/triton-2.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0af58716e721460a61886668b205963dc4d1e4ac20508cc3f623aef0d70283d5", size = 167933985, upload-time = "2024-01-10T03:12:14.556Z" },
+]
+
+[[package]]
+name = "triton"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12' and sys_platform == 'linux'",
+    "python_full_version == '3.11.*' and sys_platform == 'linux'",
+    "python_full_version < '3.11' and sys_platform == 'linux'",
+]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/22/507b6f58a35e05e84381630b2dc2a3cee1a7a2a7eaf4cba857c638a18a24/triton-3.5.0-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6f90de6a6566bb619b4c0adc9855729e1b1b5e26533fca1bf6206e96b6d277a3", size = 159827599, upload-time = "2025-10-15T19:15:43.87Z" },
     { url = "https://files.pythonhosted.org/packages/0b/eb/09e31d107a5d00eb281aa7e6635ca463e9bca86515944e399480eadb71f8/triton-3.5.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d5d3b3d480debf24eaa739623c9a42446b0b77f95593d30eb1f64cd2278cc1f0", size = 170333110, upload-time = "2025-10-13T16:37:49.588Z" },
+    { url = "https://files.pythonhosted.org/packages/79/f9/b6f60f978397c616fd8dacca2305759fe4f80d397b20ef72534803244bd5/triton-3.5.0-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8457b22148defefdcb7fa8144b05ce211b9faefad650a1ce85b23df488d5549c", size = 159926731, upload-time = "2025-10-15T19:15:49.682Z" },
     { url = "https://files.pythonhosted.org/packages/3d/78/949a04391c21956c816523678f0e5fa308eb5b1e7622d88c4e4ef5fceca0/triton-3.5.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f34bfa21c5b3a203c0f0eab28dcc1e49bd1f67d22724e77fb6665a659200a4ec", size = 170433488, upload-time = "2025-10-13T16:37:57.132Z" },
+    { url = "https://files.pythonhosted.org/packages/87/9b/30988039e1e84df7554fba24e6a734d2d0e847af33cabdf9b532b3c51456/triton-3.5.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7da21fccceafc163e3a5e857abe34351ef76345af06cabf9637a914742671f0b", size = 159946647, upload-time = "2025-10-15T19:15:56.325Z" },
     { url = "https://files.pythonhosted.org/packages/f5/3a/e991574f3102147b642e49637e0281e9bb7c4ba254edb2bab78247c85e01/triton-3.5.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c9e71db82261c4ffa3921cd050cd5faa18322d2d405c30eb56084afaff3b0833", size = 170476535, upload-time = "2025-10-13T16:38:05.18Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/85/e37f1197acb04c8f3d83851d23d5d6ed5060ef74580668b112e23fdfa203/triton-3.5.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:188da5b81fa2f8322c27fec1627703eac24cb9bb7ab0dfbe9925973bc1b070d3", size = 159958970, upload-time = "2025-10-15T19:16:01.717Z" },
     { url = "https://files.pythonhosted.org/packages/6c/29/10728de8a6e932e517c10773486b8e99f85d1b1d9dd87d9a9616e1fef4a1/triton-3.5.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e6bb9aa5519c084a333acdba443789e50012a4b851cd486c54f0b8dc2a8d3a12", size = 170487289, upload-time = "2025-10-13T16:38:11.662Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/1d/38258f05010ac17a7b058c022911c9cae6526e149b7397134a048cf5a6c2/triton-3.5.0-cp313-cp313t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:03127d9b33aaf979c856676b394bc059ec1d68cb6da68ae03f62dd8ad77a04ae", size = 160073012, upload-time = "2025-10-15T19:16:07.477Z" },
     { url = "https://files.pythonhosted.org/packages/5c/38/db80e48b9220c9bce872b0f616ad0446cdf554a40b85c7865cbca99ab3c2/triton-3.5.0-cp313-cp313t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:c83f2343e1a220a716c7b3ab9fccfcbe3ad4020d189549200e2d2e8d5868bed9", size = 170577179, upload-time = "2025-10-13T16:38:17.865Z" },
+    { url = "https://files.pythonhosted.org/packages/91/fe/8f5771d00227f4eb1ee034f218ed427102b989366d2275fe3b3c105a3921/triton-3.5.0-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:468936651d383f4a6d10068d34a627505e13af55be5d002b9f27b987e7a5f0ac", size = 159957460, upload-time = "2025-10-15T19:16:12.626Z" },
     { url = "https://files.pythonhosted.org/packages/ff/60/1810655d1d856c9a4fcc90ee8966d85f552d98c53a6589f95ab2cbe27bb8/triton-3.5.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:da0fa67ccd76c3dcfb0bffe1b1c57c685136a6bd33d141c24d9655d4185b1289", size = 170487949, upload-time = "2025-10-13T16:38:24.881Z" },
+    { url = "https://files.pythonhosted.org/packages/78/59/99edd103958fe6e42b50b9ad8ce4f223ddf4ccf475259cf7d2b53381dc6c/triton-3.5.0-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c7ceef21410229ac23173a28eee5cfc0e37c1dfdb8b4bc11ecda2e3ecec7c686", size = 160075629, upload-time = "2025-10-15T19:16:18.746Z" },
     { url = "https://files.pythonhosted.org/packages/fb/b7/1dec8433ac604c061173d0589d99217fe7bf90a70bdc375e745d044b8aad/triton-3.5.0-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:317fe477ea8fd4524a6a8c499fb0a36984a56d0b75bf9c9cb6133a1c56d5a6e7", size = 170580176, upload-time = "2025-10-13T16:38:31.14Z" },
 ]
 

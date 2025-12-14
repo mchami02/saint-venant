@@ -156,6 +156,61 @@ def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, 
         plt.close(anim_fig)
 
 
+def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch):
+    """
+    Create comparison plots (ground truth, delta_u) and upload to Comet.
+    
+    Args:
+        ground_truth: (B, nt, nx) or (nt, nx) array
+        delta_u: (B, nt, nx) or (nt, nx) array - the delta/correction term
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+        experiment: Comet experiment object
+        epoch: Current epoch for logging
+    """
+    ground_truth = np.asarray(ground_truth)
+    delta_u = np.asarray(delta_u)
+    
+    # Handle 2D input by adding batch dimension
+    if ground_truth.ndim == 2:
+        ground_truth = ground_truth[np.newaxis, ...]
+        delta_u = delta_u[np.newaxis, ...]
+    
+    B = ground_truth.shape[0]
+    
+    # Create static comparison plots
+    fig, axes = plt.subplots(B, 2, figsize=(12, 5 * B))
+    if B == 1:
+        axes = axes.reshape(1, -1)
+    
+    extent = [0, nx * dx, 0, nt * dt]
+    
+    for b in range(B):
+        # Ground Truth
+        im1 = axes[b, 0].imshow(ground_truth[b], extent=extent, aspect='auto', 
+                                 origin='lower', cmap='jet', vmin=0, vmax=1)
+        axes[b, 0].set_xlabel('Space x')
+        axes[b, 0].set_ylabel('Time t')
+        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
+        plt.colorbar(im1, ax=axes[b, 0], label='Value')
+        
+        # Delta U
+        delta_min = delta_u[b].min()
+        delta_max = delta_u[b].max()
+        # Use symmetric color scale centered at 0 for delta
+        delta_abs_max = max(abs(delta_min), abs(delta_max))
+        im2 = axes[b, 1].imshow(delta_u[b], extent=extent, aspect='auto',
+                                 origin='lower', cmap='RdBu_r', 
+                                 vmin=-delta_abs_max, vmax=delta_abs_max)
+        axes[b, 1].set_xlabel('Space x')
+        axes[b, 1].set_ylabel('Time t')
+        axes[b, 1].set_title(f'Delta U (Sample {b+1})')
+        plt.colorbar(im2, ax=axes[b, 1], label='Δu')
+    
+    plt.tight_layout()
+    experiment.log_figure(figure_name="delta_u_comparison_plot", figure=fig, step=epoch)
+    plt.close(fig)
+
 def main():
     args = parse_args()
     
