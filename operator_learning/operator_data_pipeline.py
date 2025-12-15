@@ -26,8 +26,12 @@ class PiecewiseRandom(PiecewiseConstant):
         self.xs = np.sort(self.xs)
         self.xs = np.concatenate([[0], self.xs, [1]])
 
-def get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps = 3):
+def get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps = 3, only_shocks = False):
     ics = [PiecewiseRandom(ks=[np.random.rand() for _ in range(max_steps)], x_noise=False) for _ in range(n_samples)]
+    if only_shocks:
+        for ic in ics:
+            ic.ks.sort()
+
     problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=ics, flow=Greenshield())
     grids = problem.solve(LaxHopf, batch_size=4, dtype=torch.float64, progressbar=True).cpu().numpy()
     return grids
@@ -39,10 +43,9 @@ def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_rat
     '''
     # Try to download the grids from the repository
     grids = download_grids(solver, flux, nx, nt, dx, dt, max_steps)
-    print(grids.shape)
     if grids is None or len(grids) < n_samples:
         print(f"No big enough grids available in the repository, generating {n_samples} grids")
-        grids = get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps)
+        grids = get_nfv_dataset(n_samples, nx, nt, dx, dt, 2, True)
         upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps)
 
     grids_idx = np.arange(len(grids))

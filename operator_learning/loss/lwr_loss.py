@@ -66,7 +66,7 @@ class LWRLoss(PDELoss):
         self.bc_loss_weight = bc_loss_weight
         self.grid_loss_weight = grid_loss_weight
 
-    def compute_loss(self, pred, gt):
+    def pinn_loss_func(self, pred, gt):
         """
         pred : (B, 1, T, X)
         gt   : (B, 1, T, X)

@@ -6,9 +6,8 @@ authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
 requires-python = ">=3.10"
-
-[dependency-groups]
-default = [
+dependencies = [
+    "torch-geometric>=2.7.0",
     "matplotlib>=3.7.5",
     "numpy>=1.20.0",
     "numba>=0.57.0",
@@ -29,10 +28,10 @@ default = [
     "dotenv>=0.9.9",
     "datasets>=4.4.1",
 ]
-def = ["torch>=2.5.1",
-    {include-group= "default"}]
+
+[dependency-groups]
+def = ["torch>=2.5.1"]
 gnn = [
-    {include-group="default"},
     "torch==2.2.1",
     "torchdata==0.7.1",
     "dgl==2.1.0",

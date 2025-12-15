@@ -17,7 +17,7 @@ from torchinfo import summary
 import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
 from loss.pde_loss import PDELoss
-from plot_data import plot_comparison_comet
+from plot_data import plot_comparison_comet, plot_delta_u_comet
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -25,12 +25,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 _plot_executor = ThreadPoolExecutor(max_workers=1)
 
 
-def async_plot(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch):
+def async_plot(ground_truth, prediction, delta_u, nx, nt, dx, dt, experiment, epoch):
     """Submit plotting task to background thread. Copies data to avoid race conditions."""
     # Copy data since plotting happens asynchronously
     gt_copy = np.copy(ground_truth)
     pred_copy = np.copy(prediction)
+    delta_u_copy = np.copy(delta_u)
     _plot_executor.submit(plot_comparison_comet, gt_copy, pred_copy, nx, nt, dx, dt, experiment, epoch)
+    _plot_executor.submit(plot_delta_u_comet, gt_copy, delta_u_copy, nx, nt, dx, dt, experiment, epoch)
 
 def get_solver(args):
     if args.solver == "Godunov":
@@ -78,8 +80,9 @@ def parse_args():
     parser.add_argument("--residuals", action="store_true", help="Predict residuals instead of full solution")
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
     parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
-    parser.add_argument("--decaying_loss", action="store_true", help="Use decaying loss")
+    parser.add_argument("--loss", type=str, default="l1", help="Loss type")
     parser.add_argument("--plot_every", type=int, default=5, help="Plot comparison every N epochs (0 = only at end)")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping (0 = no clipping)")
     return parser.parse_args()
 
 
@@ -128,13 +131,28 @@ def pred_autoregressive(model, targets, teacher_forcing_ratio, args):
         model_input = prediction[:, :, t]
     return prediction
 
-def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,args, experiment):
+def compute_gate_loss(gate_values):
+    """
+    Compute sparsity loss on gate values to encourage gates to be selective.
+    Uses L1 penalty to encourage sparsity (gates should be mostly closed).
+    """
+    if not gate_values:
+        return torch.tensor(0.0)
+    
+    # Concatenate all gate values and compute mean L1 (encourages sparsity)
+    all_gates = torch.cat(gate_values, dim=0)
+    return torch.mean(all_gates)
+
+
+def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experiment):
     """
     Training loop for one-shot FNO prediction.
     Model predicts entire spatiotemporal solution in one forward pass.
     """
     model.train()
-    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss, pinn_loss=args.pinn_loss)
+    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=args.pinn_loss, subset=0.5)
+    delta_loss = 0.0
+    gate_loss_accum = 0.0
     for full_input, targets in tqdm(train_loader, desc="Train epoch", leave=False):
         # full_input: (B, nt, nx, 3)
         # targets: (B, nt, nx)
@@ -153,18 +171,31 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
                 teacher_forcing_ratio = 0.0
             pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
         else:
-            pred = model(full_input)  # (B, n_vals, nt, nx)
+            pred, delta_u, gate_values = model(full_input)  # (B, n_vals, nt, nx)
         
         # Compute loss
         loss = train_pde_loss(pred, targets)
+        d_loss = 1e-1 * torch.mean(delta_u**2)
+        loss += d_loss
+        delta_loss += d_loss.detach().item()
+        
+        # Compute gate sparsity loss (encourage gates to be selective)
+        g_loss = 3e-3 * compute_gate_loss(gate_values)
+        loss += g_loss
+        gate_loss_accum += g_loss.detach().item()
+        
         loss.backward()
+        if args.max_grad_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
         optimizer.step()
     
     train_loss = train_pde_loss.get_loss_value()
     train_pde_loss.log_loss_values(experiment, "train")
+    experiment.log_metric("train/delta_loss", delta_loss / len(train_loader.dataset))
+    experiment.log_metric("train/gate_loss", gate_loss_accum / len(train_loader.dataset))
     train_pde_loss.show_loss_values()
     model.eval()
-    val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss)
+    val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss)
     with torch.no_grad():
         for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
             full_input = full_input.to(device)
@@ -174,7 +205,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch,arg
                 teacher_forcing_ratio = 0.0
                 pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
             else:
-                pred = model(full_input)  # (B, n_vals, nt, nx)
+                pred, delta_u, gate_values = model(full_input)  # (B, n_vals, nt, nx)
             
             loss = val_pde_loss(pred, targets)
 
@@ -187,6 +218,7 @@ def sample_predictions(model, val_loader, args, num_samples=3):
     """Sample a few predictions from validation set for visualization."""
     model.eval()
     gts, preds = [], []
+    delta_us = []
     with torch.no_grad():
         for full_input, targets in val_loader:
             full_input = full_input.to(device)
@@ -195,16 +227,16 @@ def sample_predictions(model, val_loader, args, num_samples=3):
             if args.autoregressive:
                 pred = pred_autoregressive(model, targets, 0.0, args)
             else:
-                pred = model(full_input)
+                pred, delta_u, _ = model(full_input)
             
             for i in range(min(num_samples - len(gts), targets.shape[0])):
                 gts.append(targets[i].squeeze(0).cpu().numpy())
                 preds.append(pred[i].squeeze(0).cpu().numpy())
-            
+                delta_us.append(delta_u[i].squeeze(0).cpu().numpy())
             if len(gts) >= num_samples:
                 break
     
-    return np.array(gts), np.array(preds)
+    return np.array(gts), np.array(preds), np.array(delta_us)
 
 
 def train_model(model, train_loader, val_loader, args, experiment):
@@ -214,8 +246,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
     If args.autoregressive is True, uses scheduled sampling where teacher forcing
     ratio decays from 1.0 to 0.0 over epochs.
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    criterion = nn.MSELoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     best_loss = float('inf')
     epochs_without_improvement = 0
     current_lr = optimizer.param_groups[0]['lr']
@@ -226,15 +257,22 @@ def train_model(model, train_loader, val_loader, args, experiment):
     
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
+    model.model.freeze_shock_corrector()
     for epoch in bar:
         experiment.set_epoch(epoch+1)
-        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, criterion, epoch, args, experiment)
+        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, epoch, args, experiment)
         
         # Record history
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
         experiment.log_metric("train/lr", current_lr)
+        if epoch == 20:
+            model.model.unfreeze_shock_corrector()
+            for param_group in optimizer.param_groups:
+                param_group['lr'] *= 0.3
+            model.model.freeze_encoder()
+            print("Unfreezing shock corrector, freezing encoder")
         # Check for improvement
         if val_loss < best_loss * (1 - tolerance):
             best_loss = val_loss
@@ -254,8 +292,8 @@ def train_model(model, train_loader, val_loader, args, experiment):
 
         # Async plotting during training (non-blocking)
         if args.plot_every > 0 and (epoch + 1) % args.plot_every == 0:
-            gts, preds = sample_predictions(model, val_loader, args, num_samples=2)
-            async_plot(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, epoch+1)
+            gts, preds, delta_u = sample_predictions(model, val_loader, args, num_samples=2)
+            async_plot(gts, preds, delta_u, args.nx, args.nt, args.dx, args.dt, experiment, epoch+1)
             model.train()  # Restore training mode
 
         postfix = {"Train": f"{train_loss:.2e}", "Val": f"{val_loss:.2e}", "LR": f"{current_lr:.2e}"}
@@ -271,7 +309,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
 
 def test_model(model, test_loader, args, experiment):
     model.eval()
-    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, decaying_loss=args.decaying_loss, pinn_loss=False)
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
     gts = []
     preds = []
     
@@ -283,7 +321,7 @@ def test_model(model, test_loader, args, experiment):
             if args.autoregressive:
                 pred = pred_autoregressive(model, targets, 0.0, args)
             else:
-                pred = model(full_input)
+                pred, _, _ = model(full_input)
             
             loss = test_pde_loss(pred, targets)
             for i in range(targets.shape[0]):

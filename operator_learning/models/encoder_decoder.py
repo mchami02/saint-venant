@@ -121,11 +121,13 @@ class GatedMPNNLayer(MessagePassing):
 
         # gate uses |u_i - u_j|, |du_dx_i|, |du_dx_j|, |du_dt_i|, |du_dt_j|
         self.gate_mlp = nn.Sequential(
-            nn.Linear(5, gate_hidden_dim),
+            nn.Linear(7, gate_hidden_dim),
             nn.GELU(),
             nn.Linear(gate_hidden_dim, 1),
             nn.Sigmoid(),
         )
+        # Initialize gate bias to negative so sigmoid starts near 0 (gate closed by default)
+        nn.init.constant_(self.gate_mlp[2].bias, -3.0)
 
         self.update_mlp = nn.Sequential(
             nn.Linear(2 * hidden_dim, hidden_dim),
@@ -134,8 +136,14 @@ class GatedMPNNLayer(MessagePassing):
         )
 
         self.norm = nn.LayerNorm(hidden_dim)
+        
+        # Store gate values during forward pass
+        self._gate_values = None
 
     def forward(self, x, edge_index, edge_attr, u, du_dx, du_dt):
+        # Reset gate values
+        self._gate_values = None
+        
         out = self.propagate(
             edge_index=edge_index,
             x=x,
@@ -146,28 +154,33 @@ class GatedMPNNLayer(MessagePassing):
         )
 
         x = x + self.update_mlp(torch.cat([x, out], dim=-1))
-        return self.norm(x)
+        return self.norm(x), self._gate_values
 
     def message(self, x_i, x_j, edge_attr, u_i, u_j, du_dx_i, du_dx_j, du_dt_i, du_dt_j):
         gate_input = torch.cat(
             [
+                u_i,
+                u_j,
                 torch.abs(u_i - u_j),
-                torch.abs(du_dx_i),
-                torch.abs(du_dx_j),
-                torch.abs(du_dt_i),
-                torch.abs(du_dt_j),
+                du_dx_i,
+                du_dx_j,
+                du_dt_i,
+                du_dt_j,
             ],
             dim=-1,
         )
 
         gate = self.gate_mlp(gate_input)
+        
+        # Store gate values for loss computation
+        self._gate_values = gate
 
         msg = self.msg_mlp(torch.cat([x_i, x_j, edge_attr], dim=-1))
         return gate * msg
 
 class ShockCorrector(nn.Module):
     """
-    Shock corrector GNN.
+    Shock corrector GNN with 2D grid connectivity.
 
     Forward:
       x : (B, T, N, 2)  grid coordinates (t, x)
@@ -175,6 +188,11 @@ class ShockCorrector(nn.Module):
 
     Output:
       delta_u : (B, T, N, 1)
+    
+    Edges connect each cell to its 4 neighbors (temporal and spatial):
+      - (t-1, n), (t+1, n) for temporal neighbors
+      - (t, n-1), (t, n+1) for spatial neighbors
+    Edge features are (dx, dt) displacements.
     """
 
     def __init__(
@@ -191,13 +209,14 @@ class ShockCorrector(nn.Module):
 
         self.dx = dx
         self.dt = dt
+        self.nx = nx
+        self.nt = nt
 
         # node feature projection (from u only)
         self.in_proj = nn.Linear(1, hidden_dim)
 
-        # build spatial edges ONCE
-        edge_index = self._build_1d_chain_edges(nx, device=device)
-        edge_attr = self._build_1d_edge_attr(nx, dx, device=device)
+        # build 2D grid edges (spatial + temporal)
+        edge_index, edge_attr = self._build_2d_grid_edges(nt, nx, dt, dx, device=device)
 
         self.register_buffer("edge_index", edge_index)
         self.register_buffer("edge_attr", edge_attr)
@@ -214,27 +233,86 @@ class ShockCorrector(nn.Module):
 
         self.out = nn.Linear(hidden_dim, 1)
 
-    def _build_1d_chain_edges(self, n: int, device=None):
+    def _build_2d_grid_edges(self, nt: int, nx: int, dt: float, dx: float, device=None):
+        """
+        Build edges for a 2D grid of shape (T, N).
+        
+        Node indexing: node at (t, n) has index t * nx + n
+        
+        Each cell connects to its 8 neighbors (4 cardinal + 4 diagonal):
+          - Temporal: (t-1, n) and (t+1, n)
+          - Spatial: (t, n-1) and (t, n+1)
+          - Diagonal: (t-1, n-1), (t-1, n+1), (t+1, n-1), (t+1, n+1)
+        
+        Edge features: (dx, dt) displacement from source to target
+        """
         src, dst = [], []
-        for i in range(n):
-            if i > 0:
-                src.append(i)
-                dst.append(i - 1)
-            if i < n - 1:
-                src.append(i)
-                dst.append(i + 1)
-        return torch.tensor([src, dst], dtype=torch.long, device=device)
-    
-    def _build_1d_edge_attr(self, nx: int, dx: float, device=None):
-        edge_attr = []
-        for i in range(nx):
-            if i > 0:
-                edge_attr.append([-dx, abs(dx)])
-            if i < nx - 1:
-                edge_attr.append([ dx, abs(dx)])
-
-        edge_attr = torch.tensor(edge_attr, device=device)
-        return edge_attr
+        edge_attrs = []
+        
+        for t in range(nt):
+            for n in range(nx):
+                node_idx = t * nx + n
+                
+                # Temporal neighbor: previous timestep (t-1, n)
+                if t > 0:
+                    neighbor_idx = (t - 1) * nx + n
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([0.0, -dt])  # dx=0, dt=-dt
+                
+                # Temporal neighbor: next timestep (t+1, n)
+                if t < nt - 1:
+                    neighbor_idx = (t + 1) * nx + n
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([0.0, dt])  # dx=0, dt=+dt
+                
+                # Spatial neighbor: left (t, n-1)
+                if n > 0:
+                    neighbor_idx = t * nx + (n - 1)
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([-dx, 0.0])  # dx=-dx, dt=0
+                
+                # Spatial neighbor: right (t, n+1)
+                if n < nx - 1:
+                    neighbor_idx = t * nx + (n + 1)
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([dx, 0.0])  # dx=+dx, dt=0
+                
+                # Diagonal neighbor: upper-left (t-1, n-1)
+                if t > 0 and n > 0:
+                    neighbor_idx = (t - 1) * nx + (n - 1)
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([-dx, -dt])  # dx=-dx, dt=-dt
+                
+                # Diagonal neighbor: upper-right (t-1, n+1)
+                if t > 0 and n < nx - 1:
+                    neighbor_idx = (t - 1) * nx + (n + 1)
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([dx, -dt])  # dx=+dx, dt=-dt
+                
+                # Diagonal neighbor: lower-left (t+1, n-1)
+                if t < nt - 1 and n > 0:
+                    neighbor_idx = (t + 1) * nx + (n - 1)
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([-dx, dt])  # dx=-dx, dt=+dt
+                
+                # Diagonal neighbor: lower-right (t+1, n+1)
+                if t < nt - 1 and n < nx - 1:
+                    neighbor_idx = (t + 1) * nx + (n + 1)
+                    src.append(node_idx)
+                    dst.append(neighbor_idx)
+                    edge_attrs.append([dx, dt])  # dx=+dx, dt=+dt
+        
+        edge_index = torch.tensor([src, dst], dtype=torch.long, device=device)
+        edge_attr = torch.tensor(edge_attrs, dtype=torch.float32, device=device)
+        
+        return edge_index, edge_attr
 
     def _du_dx(self, u):
         # Compute spatial gradient using finite differences
@@ -244,7 +322,7 @@ class ShockCorrector(nn.Module):
         du_right = (u[..., -1:, 0] - u[..., -2:-1, 0]) / self.dx  # Backward diff at right
         du = torch.cat([du_left, du_center, du_right], dim=-1).unsqueeze(-1)
         # Use log-scaling for better gradient behavior (avoids division by mean)
-        return torch.log1p(du.abs())
+        return du
 
     def _du_dt(self, u):
         # Compute temporal gradient using finite differences
@@ -254,7 +332,7 @@ class ShockCorrector(nn.Module):
         du_last = (u[:, -1:, :, 0] - u[:, -2:-1, :, 0]) / self.dt  # Backward diff at t=end
         du = torch.cat([du_first, du_center, du_last], dim=1).unsqueeze(-1)
         # Use log-scaling for better gradient behavior (avoids division by mean)
-        return torch.log1p(du.abs())
+        return du
         
     def forward(self, x: torch.Tensor, u: torch.Tensor):
         """
@@ -263,42 +341,44 @@ class ShockCorrector(nn.Module):
 
         returns:
           delta_u : (B, T, N, 1)
+          gate_values : list of gate tensors from each layer, each of shape (num_edges * B,)
         """
 
         B, T, N, _ = u.shape
-        BT = B * T
-        C = x.size(-1)
+        num_nodes_per_sample = T * N  # Full 2D grid per sample
 
-        du_dx = self._du_dx(u).reshape(BT * N, 1)
-        du_dt = self._du_dt(u).reshape(BT * N, 1)
-        # flatten
-        u = u.reshape(BT * N, 1)
+        du_dx = self._du_dx(u).reshape(B * num_nodes_per_sample, 1)
+        du_dt = self._du_dt(u).reshape(B * num_nodes_per_sample, 1)
+        # flatten: (B, T, N, 1) -> (B * T * N, 1)
+        u_flat = u.reshape(B * num_nodes_per_sample, 1)
         
         # project u to hidden_dim for GNN layers
-        h = self.in_proj(u)
+        h = self.in_proj(u_flat)
 
-        # batch edges
+        # batch edges: replicate edge structure for each sample in batch
         E = self.edge_index.size(1)
-        offsets = torch.arange(BT, device=h.device).repeat_interleave(E) * N
+        offsets = torch.arange(B, device=h.device).repeat_interleave(E) * num_nodes_per_sample
 
-        edge_index = self.edge_index.repeat(1, BT) + offsets
-        edge_attr = self.edge_attr.repeat(BT, 1)
+        edge_index = self.edge_index.repeat(1, B) + offsets
+        edge_attr = self.edge_attr.repeat(B, 1)
 
-        # message passing
+        # message passing - accumulate gate values from all layers
+        all_gate_values = []
         for layer in self.layers:
-            h = layer(
+            h, gate_values = layer(
                 x=h,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
-                u=u,
+                u=u_flat,
                 du_dx=du_dx,
                 du_dt=du_dt,
             )
+            if gate_values is not None:
+                all_gate_values.append(gate_values)
 
         # output
         delta_u = self.out(h)
-        delta_u = delta_u.view(B, T, N, 1)
-        return delta_u.reshape(B, T, N, 1)
+        return delta_u.view(B, T, N, 1), all_gate_values
 
     
 class DecoderAttentionLayer(nn.Module):
@@ -357,6 +437,11 @@ class EncoderDecoder(nn.Module):
         self.decoder = Decoder(hidden_dim=hidden_dim, attention_layers=layers_decoder_attention)
         self.shock_corrector = ShockCorrector(nx=nx, nt=nt, dx=dx, dt=dt, hidden_dim=hidden_dim, num_layers=layers_decoder_gcn, device=device)
         self.apply(self._init_weights)
+        # Initialize output projection with small weights for stable training
+        nn.init.normal_(self.decoder.to_out.weight, std=0.02)
+        nn.init.zeros_(self.decoder.to_out.bias)
+
+        self.frozen_shock_corrector = False
     
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -374,6 +459,32 @@ class EncoderDecoder(nn.Module):
             if module.out_proj.bias is not None:
                 nn.init.zeros_(module.out_proj.bias)
 
+    def freeze_encoder(self):
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+    
+    def freeze_decoder(self):
+        for param in self.decoder.parameters():
+            param.requires_grad = False
+    
+    def freeze_shock_corrector(self):
+        for param in self.shock_corrector.parameters():
+            param.requires_grad = False
+        self.frozen_shock_corrector = True
+    
+    def unfreeze_encoder(self):
+        for param in self.encoder.parameters():
+            param.requires_grad = True
+    
+    def unfreeze_decoder(self):
+        for param in self.decoder.parameters():
+            param.requires_grad = True
+    
+    def unfreeze_shock_corrector(self):
+        for param in self.shock_corrector.parameters():
+            param.requires_grad = True
+        self.frozen_shock_corrector = False
+    
     def forward(self, x):
         B, C, T, N = x.shape
         
@@ -395,19 +506,26 @@ class EncoderDecoder(nn.Module):
             key_padding_mask[b, :counts[b]] = False  # Don't mask valid positions
 
         encoder_output = self.encoder(conds, key_padding_mask=key_padding_mask)
-        all_coords = x[:, 1:].reshape(B, T, N, -1)
-        decoder_output = self.decoder(all_coords, encoder_output, key_padding_mask=key_padding_mask)
-        shock_corrected_output = self.shock_corrector(all_coords, decoder_output)
+        all_coords = x[:, 1:].permute(0, 2, 3, 1)
+        u = self.decoder(all_coords, encoder_output, key_padding_mask=key_padding_mask)
+        if not self.frozen_shock_corrector:
+            delta_u, gate_values = self.shock_corrector(all_coords, u.detach())
+        else:
+            delta_u = torch.zeros_like(u)
+            gate_values = []
 
-        return (decoder_output + shock_corrected_output).reshape(B, 1, T, N)
+        return (u + delta_u).permute(0, 3, 1, 2), delta_u.permute(0, 3, 1, 2), gate_values
 
 
 if __name__ == "__main__":
     B, C, T, N = 5, 3, 10, 25
     x = torch.randn(B, C, T, N)
     x[:, 0, 1:, 1:-1] = -1
-    model = EncoderDecoder(hidden_dim=128, layers_encoder=4, layers_decoder=4)
-    output = model(x)
+    model = EncoderDecoder(hidden_dim=128, layers_encoder=4, layers_decoder_attention=4, layers_decoder_gcn=1, nt=T, nx=N, dx=1.0, dt=1.0, device=torch.device("cpu"))
+    output, delta_u, gate_values = model(x)
     print(output.shape)
     print(output[0].mean(), output[0].std())
+    print(f"Number of gate value tensors: {len(gate_values)}")
+    if gate_values:
+        print(f"Gate values shape: {gate_values[0].shape}, mean: {gate_values[0].mean().item():.4f}")
 

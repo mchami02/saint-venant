@@ -74,6 +74,128 @@ def _create_comparison_animation(gt, pred, nx, nt, dx, dt, sample_idx, skip_fram
     return anim, fig
 
 
+def _create_delta_u_animation(gt, delta_u, nx, nt, dx, dt, sample_idx, skip_frames=5, fps=20):
+    """
+    Create an animation showing ground truth vs delta u side by side through time.
+    
+    Args:
+        gt: Ground truth array (nt, nx) - each row is spatial values at a time step
+        delta_u: Delta u array (nt, nx) - each row is spatial values at a time step
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+        sample_idx: Sample index for title
+        skip_frames: Number of frames to skip
+        fps: Frames per second
+    
+    Returns:
+        FuncAnimation object and the figure
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    x = np.linspace(0, nx * dx, gt.shape[1])  # Use actual data shape
+    
+    # Set y-axis limits for each subplot independently
+    gt_y_min, gt_y_max = gt.min(), gt.max()
+    gt_y_margin = (gt_y_max - gt_y_min) * 0.1 if gt_y_max > gt_y_min else 0.1
+    
+    du_y_min, du_y_max = delta_u.min(), delta_u.max()
+    du_y_margin = (du_y_max - du_y_min) * 0.1 if du_y_max > du_y_min else 0.1
+    
+    # Initialize lines with initial data
+    line_gt, = axes[0].plot(x, gt[0], 'b-', linewidth=2)
+    line_du, = axes[1].plot(x, delta_u[0], 'g-', linewidth=2)
+    
+    # Ground truth axis
+    axes[0].set_xlim(0, nx * dx)
+    axes[0].set_ylim(gt_y_min - gt_y_margin, gt_y_max + gt_y_margin)
+    axes[0].set_xlabel('Position x')
+    axes[0].set_ylabel('Density ρ')
+    axes[0].set_title(f'Ground Truth (Sample {sample_idx+1})')
+    axes[0].grid(True, alpha=0.3)
+    
+    # Delta u axis
+    axes[1].set_xlim(0, nx * dx)
+    axes[1].set_ylim(du_y_min - du_y_margin, du_y_max + du_y_margin)
+    axes[1].set_xlabel('Position x')
+    axes[1].set_ylabel('Δu')
+    axes[1].set_title(f'Delta U (Sample {sample_idx+1})')
+    axes[1].grid(True, alpha=0.3)
+    
+    time_text = axes[0].text(0.02, 0.95, '', transform=axes[0].transAxes, fontsize=10)
+    plt.tight_layout()
+    
+    def update(frame):
+        t = frame * skip_frames
+        if t >= nt:
+            t = nt - 1
+        line_gt.set_ydata(gt[t])
+        line_du.set_ydata(delta_u[t])
+        time_text.set_text(f'Time: {t * dt:.3f} s (step {t}/{nt})')
+        return line_gt, line_du, time_text
+    
+    n_frames = max(1, nt // skip_frames)
+    anim = FuncAnimation(fig, update, frames=n_frames, interval=1000/fps)
+    
+    return anim, fig
+
+
+def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch, test=False):
+    """
+    Create comparison plots (ground truth, delta u) and upload to Comet.
+    Also creates animated GIFs showing the evolution through time.
+    
+    Args:
+        ground_truth: (B, nt, nx) or (nt, nx) array
+        delta_u: (B, nt, nx) or (nt, nx) array
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+        experiment: Comet experiment object
+        epoch: Current epoch number
+        test: Whether this is a test plot
+    """
+    ground_truth = np.asarray(ground_truth)
+    delta_u = np.asarray(delta_u)
+    
+    # Handle 2D input by adding batch dimension
+    if ground_truth.ndim == 2:
+        ground_truth = ground_truth[np.newaxis, ...]
+        delta_u = delta_u[np.newaxis, ...]
+    
+    B = ground_truth.shape[0]
+    
+    # Create static comparison plots
+    fig, axes = plt.subplots(B, 2, figsize=(12, 5 * B))
+    if B == 1:
+        axes = axes.reshape(1, -1)
+    
+    extent = [0, nx * dx, 0, nt * dt]
+    
+    for b in range(B):
+        # Ground Truth
+        im1 = axes[b, 0].imshow(ground_truth[b], extent=extent, aspect='auto', 
+                                 origin='lower', cmap='jet', vmin=0, vmax=1)
+        axes[b, 0].set_xlabel('Space x')
+        axes[b, 0].set_ylabel('Time t')
+        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
+        plt.colorbar(im1, ax=axes[b, 0], label='Value')
+        
+        # Delta U
+        du_min, du_max = delta_u[b].min(), delta_u[b].max()
+        du_abs_max = max(abs(du_min), abs(du_max))
+        im2 = axes[b, 1].imshow(delta_u[b], extent=extent, aspect='auto',
+                                 origin='lower', cmap='RdBu_r', vmin=-du_abs_max, vmax=du_abs_max)
+        axes[b, 1].set_xlabel('Space x')
+        axes[b, 1].set_ylabel('Time t')
+        axes[b, 1].set_title(f'Delta U (Sample {b+1})')
+        plt.colorbar(im2, ax=axes[b, 1], label='Δu')
+    
+    plt.tight_layout()
+    if not test:
+        experiment.log_figure(figure_name="delta_u_plot", figure=fig, step=epoch)
+    else:
+        experiment.log_figure(figure_name="test_delta_u_plot", figure=fig, step=epoch)
+
+    plt.close(fig)
+    
 def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch, test=False):
     """
     Create comparison plots (ground truth, prediction, difference) and upload to Comet.
