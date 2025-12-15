@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
 from loss.pde_loss import PDELoss
 from plot_data import plot_comparison_comet, plot_delta_u_comet
+from plot_data import plot_comparison_comet, plot_delta_u_comet
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -26,12 +27,15 @@ _plot_executor = ThreadPoolExecutor(max_workers=1)
 
 
 def async_plot(ground_truth, prediction, delta_u, nx, nt, dx, dt, experiment, epoch):
+def async_plot(ground_truth, prediction, delta_u, nx, nt, dx, dt, experiment, epoch):
     """Submit plotting task to background thread. Copies data to avoid race conditions."""
     # Copy data since plotting happens asynchronously
     gt_copy = np.copy(ground_truth)
     pred_copy = np.copy(prediction)
     delta_u_copy = np.copy(delta_u)
+    delta_u_copy = np.copy(delta_u)
     _plot_executor.submit(plot_comparison_comet, gt_copy, pred_copy, nx, nt, dx, dt, experiment, epoch)
+    _plot_executor.submit(plot_delta_u_comet, gt_copy, delta_u_copy, nx, nt, dx, dt, experiment, epoch)
     _plot_executor.submit(plot_delta_u_comet, gt_copy, delta_u_copy, nx, nt, dx, dt, experiment, epoch)
 
 def get_solver(args):
@@ -81,7 +85,9 @@ def parse_args():
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
     parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
     parser.add_argument("--loss", type=str, default="l1", help="Loss type")
+    parser.add_argument("--loss", type=str, default="l1", help="Loss type")
     parser.add_argument("--plot_every", type=int, default=5, help="Plot comparison every N epochs (0 = only at end)")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping (0 = no clipping)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping (0 = no clipping)")
     return parser.parse_args()
 
@@ -187,6 +193,8 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
         loss.backward()
         if args.max_grad_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+        if args.max_grad_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
         optimizer.step()
     
     train_loss = train_pde_loss.get_loss_value()
@@ -195,6 +203,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
     experiment.log_metric("train/gate_loss", gate_loss_accum / len(train_loader.dataset))
     train_pde_loss.show_loss_values()
     model.eval()
+    val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss)
     val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss)
     with torch.no_grad():
         for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
@@ -219,6 +228,7 @@ def sample_predictions(model, val_loader, args, num_samples=3):
     model.eval()
     gts, preds = [], []
     delta_us = []
+    delta_us = []
     with torch.no_grad():
         for full_input, targets in val_loader:
             full_input = full_input.to(device)
@@ -233,9 +243,11 @@ def sample_predictions(model, val_loader, args, num_samples=3):
                 gts.append(targets[i].squeeze(0).cpu().numpy())
                 preds.append(pred[i].squeeze(0).cpu().numpy())
                 delta_us.append(delta_u[i].squeeze(0).cpu().numpy())
+                delta_us.append(delta_u[i].squeeze(0).cpu().numpy())
             if len(gts) >= num_samples:
                 break
     
+    return np.array(gts), np.array(preds), np.array(delta_us)
     return np.array(gts), np.array(preds), np.array(delta_us)
 
 
@@ -246,6 +258,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
     If args.autoregressive is True, uses scheduled sampling where teacher forcing
     ratio decays from 1.0 to 0.0 over epochs.
     """
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     best_loss = float('inf')
     epochs_without_improvement = 0
@@ -258,8 +271,10 @@ def train_model(model, train_loader, val_loader, args, experiment):
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
     model.model.freeze_shock_corrector()
+    model.model.freeze_shock_corrector()
     for epoch in bar:
         experiment.set_epoch(epoch+1)
+        train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, epoch, args, experiment)
         train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, epoch, args, experiment)
         
         # Record history
@@ -294,6 +309,8 @@ def train_model(model, train_loader, val_loader, args, experiment):
         if args.plot_every > 0 and (epoch + 1) % args.plot_every == 0:
             gts, preds, delta_u = sample_predictions(model, val_loader, args, num_samples=2)
             async_plot(gts, preds, delta_u, args.nx, args.nt, args.dx, args.dt, experiment, epoch+1)
+            gts, preds, delta_u = sample_predictions(model, val_loader, args, num_samples=2)
+            async_plot(gts, preds, delta_u, args.nx, args.nt, args.dx, args.dt, experiment, epoch+1)
             model.train()  # Restore training mode
 
         postfix = {"Train": f"{train_loss:.2e}", "Val": f"{val_loss:.2e}", "LR": f"{current_lr:.2e}"}
@@ -309,6 +326,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
 
 def test_model(model, test_loader, args, experiment):
     model.eval()
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
     test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
     gts = []
     preds = []

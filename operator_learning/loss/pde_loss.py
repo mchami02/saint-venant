@@ -27,6 +27,7 @@ def get_loss_function(loss_type, nt):
 
 class PDELoss(torch.nn.Module):
     def __init__(self, nt, nx, dt, dx, vmax=1.0, rhomax=1.0, loss_type = "mse", pinn_loss = False, subset = 1.0):
+    def __init__(self, nt, nx, dt, dx, vmax=1.0, rhomax=1.0, loss_type = "mse", pinn_loss = False, subset = 1.0):
         super(PDELoss, self).__init__()
         self.nt = nt
         self.nx = nx

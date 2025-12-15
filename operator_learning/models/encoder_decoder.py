@@ -128,6 +128,8 @@ class GatedMPNNLayer(MessagePassing):
         )
         # Initialize gate bias to negative so sigmoid starts near 0 (gate closed by default)
         nn.init.constant_(self.gate_mlp[2].bias, -3.0)
+        # Initialize gate bias to negative so sigmoid starts near 0 (gate closed by default)
+        nn.init.constant_(self.gate_mlp[2].bias, -3.0)
 
         self.update_mlp = nn.Sequential(
             nn.Linear(2 * hidden_dim, hidden_dim),
@@ -181,6 +183,7 @@ class GatedMPNNLayer(MessagePassing):
 class ShockCorrector(nn.Module):
     """
     Shock corrector GNN with 2D grid connectivity.
+    Shock corrector GNN with 2D grid connectivity.
 
     Forward:
       x : (B, T, N, 2)  grid coordinates (t, x)
@@ -188,6 +191,11 @@ class ShockCorrector(nn.Module):
 
     Output:
       delta_u : (B, T, N, 1)
+    
+    Edges connect each cell to its 4 neighbors (temporal and spatial):
+      - (t-1, n), (t+1, n) for temporal neighbors
+      - (t, n-1), (t, n+1) for spatial neighbors
+    Edge features are (dx, dt) displacements.
     
     Edges connect each cell to its 4 neighbors (temporal and spatial):
       - (t-1, n), (t+1, n) for temporal neighbors
@@ -211,10 +219,14 @@ class ShockCorrector(nn.Module):
         self.dt = dt
         self.nx = nx
         self.nt = nt
+        self.nx = nx
+        self.nt = nt
 
         # node feature projection (from u only)
         self.in_proj = nn.Linear(1, hidden_dim)
 
+        # build 2D grid edges (spatial + temporal)
+        edge_index, edge_attr = self._build_2d_grid_edges(nt, nx, dt, dx, device=device)
         # build 2D grid edges (spatial + temporal)
         edge_index, edge_attr = self._build_2d_grid_edges(nt, nx, dt, dx, device=device)
 
@@ -346,7 +358,12 @@ class ShockCorrector(nn.Module):
 
         B, T, N, _ = u.shape
         num_nodes_per_sample = T * N  # Full 2D grid per sample
+        num_nodes_per_sample = T * N  # Full 2D grid per sample
 
+        du_dx = self._du_dx(u).reshape(B * num_nodes_per_sample, 1)
+        du_dt = self._du_dt(u).reshape(B * num_nodes_per_sample, 1)
+        # flatten: (B, T, N, 1) -> (B * T * N, 1)
+        u_flat = u.reshape(B * num_nodes_per_sample, 1)
         du_dx = self._du_dx(u).reshape(B * num_nodes_per_sample, 1)
         du_dt = self._du_dt(u).reshape(B * num_nodes_per_sample, 1)
         # flatten: (B, T, N, 1) -> (B * T * N, 1)
@@ -354,11 +371,16 @@ class ShockCorrector(nn.Module):
         
         # project u to hidden_dim for GNN layers
         h = self.in_proj(u_flat)
+        h = self.in_proj(u_flat)
 
+        # batch edges: replicate edge structure for each sample in batch
         # batch edges: replicate edge structure for each sample in batch
         E = self.edge_index.size(1)
         offsets = torch.arange(B, device=h.device).repeat_interleave(E) * num_nodes_per_sample
+        offsets = torch.arange(B, device=h.device).repeat_interleave(E) * num_nodes_per_sample
 
+        edge_index = self.edge_index.repeat(1, B) + offsets
+        edge_attr = self.edge_attr.repeat(B, 1)
         edge_index = self.edge_index.repeat(1, B) + offsets
         edge_attr = self.edge_attr.repeat(B, 1)
 
@@ -369,6 +391,7 @@ class ShockCorrector(nn.Module):
                 x=h,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
+                u=u_flat,
                 u=u_flat,
                 du_dx=du_dx,
                 du_dt=du_dt,
@@ -458,6 +481,33 @@ class EncoderDecoder(nn.Module):
                 nn.init.zeros_(module.in_proj_bias)
             if module.out_proj.bias is not None:
                 nn.init.zeros_(module.out_proj.bias)
+
+    def freeze_encoder(self):
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+    
+    def freeze_decoder(self):
+        for param in self.decoder.parameters():
+            param.requires_grad = False
+    
+    def freeze_shock_corrector(self):
+        for param in self.shock_corrector.parameters():
+            param.requires_grad = False
+        self.frozen_shock_corrector = True
+    
+    def unfreeze_encoder(self):
+        for param in self.encoder.parameters():
+            param.requires_grad = True
+    
+    def unfreeze_decoder(self):
+        for param in self.decoder.parameters():
+            param.requires_grad = True
+    
+    def unfreeze_shock_corrector(self):
+        for param in self.shock_corrector.parameters():
+            param.requires_grad = True
+        self.frozen_shock_corrector = False
+    
 
     def freeze_encoder(self):
         for param in self.encoder.parameters():
