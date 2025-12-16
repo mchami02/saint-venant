@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 from huggingface_hub import HfApi, hf_hub_download
-from joblib import Memory
 import os
-mem = Memory(location='.cache')
+from dotenv import load_dotenv
+load_dotenv()
 
-api = HfApi()
+# Get token from environment variable (set via `export HF_TOKEN=...` or `huggingface-cli login`)
+api = HfApi(token=os.environ.get("HF_TOKEN"))
 
 def make_config_id(solver, flux, nx, nt, dx, dt, max_steps):
     return f"{solver}_{flux}_nx{nx}_nt{nt}_dx{dx}_dt{dt}_steps{max_steps}"
@@ -74,7 +75,6 @@ def upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps,
     os.remove("tmp_grids.npz")
     os.remove("index.parquet")
 
-@mem.cache
 def download_grids(solver, flux, nx, nt, dx, dt, max_steps, repo_id="mchami/grids"):
 
     config_id = make_config_id(solver, flux, nx, nt, dx, dt, max_steps)

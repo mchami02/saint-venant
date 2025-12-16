@@ -196,7 +196,7 @@ def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch,
 
     plt.close(fig)
     
-def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch, test=False):
+def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch, mode):
     """
     Create comparison plots (ground truth, prediction, difference) and upload to Comet.
     Also creates animated GIFs showing the evolution through time.
@@ -253,10 +253,7 @@ def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, 
         plt.colorbar(im3, ax=axes[b, 2], label='Error')
     
     plt.tight_layout()
-    if not test:
-        experiment.log_figure(figure_name="comparison_plot", figure=fig, step=epoch)
-    else:
-        experiment.log_figure(figure_name="test_comparison_plot", figure=fig, step=epoch)
+    experiment.log_figure(figure_name=f"{mode}_comparison_plot", figure=fig, step=epoch)
 
     plt.close(fig)
     
@@ -270,15 +267,12 @@ def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, 
         # Save to temporary file and upload to Comet
         with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as tmp:
             anim.save(tmp.name, writer='pillow', fps=20)
-            if not test:
-                experiment.log_video(tmp.name, name=f"animation_sample_{b+1}", step=epoch)
-            else:
-                experiment.log_video(tmp.name, name=f"test_animation_sample_{b+1}", step=epoch)
+            experiment.log_video(tmp.name, name=f"{mode}/animation_sample_{b+1}", step=epoch)
         
         plt.close(anim_fig)
 
 
-def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch):
+def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch, mode):
     """
     Create comparison plots (ground truth, delta_u) and upload to Comet.
     
@@ -330,7 +324,7 @@ def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch)
         plt.colorbar(im2, ax=axes[b, 1], label='Δu')
     
     plt.tight_layout()
-    experiment.log_figure(figure_name="delta_u_comparison_plot", figure=fig, step=epoch)
+    experiment.log_figure(figure_name=f"{mode}/delta_u_comparison_plot", figure=fig, step=epoch)
     plt.close(fig)
 
 def main():

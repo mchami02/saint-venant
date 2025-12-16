@@ -36,6 +36,27 @@ def get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps = 3, only_shocks = Fals
     grids = problem.solve(LaxHopf, batch_size=4, dtype=torch.float64, progressbar=True).cpu().numpy()
     return grids
 
+def get_dataset(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, random_seed=42):
+    '''
+    Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
+    If available in the repository, download the grids from the repository, otherwise generate them and upload them to the repository
+    '''
+    # Try to download the grids from the repository
+    grids = download_grids(solver, flux, nx, nt, dx, dt, max_steps)
+    if grids is None or len(grids) < n_samples:
+        print(f"No big enough grids available in the repository, generating {n_samples} grids")
+        grids = get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps)
+        upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps)
+
+    grids_idx = np.arange(len(grids))
+    np.random.seed(random_seed)
+    np.random.shuffle(grids_idx)
+    grids_idx = grids_idx[:n_samples]
+    
+    dataset = GridDataset(grids[grids_idx], nx, nt, dx, dt)
+
+    return dataset
+
 def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_ratio=0.8, val_ratio=0.1, random_seed=42):
     '''
     Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
