@@ -88,7 +88,7 @@ def parse_args():
     parser.add_argument("--residuals", action="store_true", help="Predict residuals instead of full solution")
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
     parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
-    parser.add_argument("--loss", type=str, default="l1", help="Loss type")
+    parser.add_argument("--loss", type=str, default="mse", help="Loss type")
     parser.add_argument("--plot_every", type=int, default=5, help="Plot comparison every N epochs (0 = only at end)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping (0 = no clipping)")
     parser.add_argument("--test-high-res", action="store_true", help="Test on high resolution grids (same nx,nt but dx/2, dt/2)")
@@ -282,11 +282,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
     
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
-    
-    # Freeze shock corrector if the model has it (e.g., EncoderDecoder)
-    if hasattr(model.model, 'freeze_shock_corrector'):
-        model.model.freeze_shock_corrector()
-    
+        
     for epoch in bar:
         experiment.set_epoch(epoch+1)
         train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, epoch, args, experiment)
@@ -297,14 +293,6 @@ def train_model(model, train_loader, val_loader, args, experiment):
         current_lr = optimizer.param_groups[0]['lr']
         experiment.log_metric("train/lr", current_lr)
         
-        # Model-specific training schedule for EncoderDecoder
-        if epoch == 20 and hasattr(model.model, 'unfreeze_shock_corrector'):
-            model.model.unfreeze_shock_corrector()
-            for param_group in optimizer.param_groups:
-                param_group['lr'] *= 0.3
-            if hasattr(model.model, 'freeze_encoder'):
-                model.model.freeze_encoder()
-            print("Unfreezing shock corrector, freezing encoder")
         # Check for improvement
         if val_loss < best_loss * (1 - tolerance):
             best_loss = val_loss
