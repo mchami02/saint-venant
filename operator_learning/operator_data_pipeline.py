@@ -1,7 +1,7 @@
 from numerical_methods import GridGenerator, Godunov, Greenshields, Triangular, LWRRiemannSolver, Grid
 from joblib import Memory
 from tqdm import tqdm
-from torch.utils.data import Dataset, ConcatDataset
+from torch.utils.data import Dataset
 import torch
 import numpy as np
 from nfv.initial_conditions import PiecewiseConstant
@@ -36,9 +36,51 @@ def get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps = 3, only_shocks = Fals
     grids = problem.solve(LaxHopf, batch_size=4, dtype=torch.float64, progressbar=True).cpu().numpy()
     return grids
 
+
+def preprocess_grids(grids, nx, nt, dx, dt):
+    """
+    Preprocess raw grids by adding coordinate channels.
+    
+    Args:
+        grids: numpy array of shape (n_samples, nt, nx) or list of Grid objects
+        nx, nt: Grid dimensions
+        dx, dt: Grid spacing
+    
+    Returns:
+        List of tuples (full_input, target_grid) where:
+        - full_input: tensor of shape (n_vals + 2, nt, nx) with coordinates
+        - target_grid: tensor of shape (n_vals, nt, nx)
+    """
+    processed = []
+    
+    for idx in range(len(grids)):
+        if isinstance(grids, list):
+            input_grids = []
+            for val in grids[idx].values():
+                input_grids.append(torch.from_numpy(grids[idx].get_array(val)).to(torch.float32))
+            input_grid = torch.stack(input_grids, dim=-1)  # (nt, nx, n_vals)
+        else:
+            input_grid = torch.from_numpy(grids[idx]).to(torch.float32).unsqueeze(-1)
+        
+        target_grid = input_grid.clone()
+        grid_nt, grid_nx, _ = input_grid.shape
+        
+        # Create coordinate grids that tell the model what time/space to predict
+        t_coords = (torch.arange(grid_nt).float() * dt)[:, None].expand(grid_nt, grid_nx).unsqueeze(-1)  # (nt, nx, 1)
+        x_coords = (torch.arange(grid_nx).float() * dx)[None, :].expand(grid_nt, grid_nx).unsqueeze(-1)  # (nt, nx, 1)
+        
+        # Stack: (nt, nx, n_vals + 2) where channels are [initial_density_repeated, time, space]
+        full_input = torch.cat([input_grid, t_coords, x_coords], dim=-1).permute(2, 0, 1)
+        target_grid = target_grid.permute(2, 0, 1)
+        
+        processed.append((full_input, target_grid))
+    
+    return processed
+
+
 def get_dataset(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, random_seed=42):
     '''
-    Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
+    Get a dataset for the given solver, n_samples, nx, nt, dx, dt
     If available in the repository, download the grids from the repository, otherwise generate them and upload them to the repository
     '''
     # Try to download the grids from the repository
@@ -53,7 +95,9 @@ def get_dataset(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, random_see
     np.random.shuffle(grids_idx)
     grids_idx = grids_idx[:n_samples]
     
-    dataset = GridDataset(grids[grids_idx], nx, nt, dx, dt)
+    # Preprocess grids with coordinates
+    processed = preprocess_grids(grids[grids_idx], nx, nt, dx, dt)
+    dataset = GridDataset(processed)
 
     return dataset
 
@@ -77,9 +121,14 @@ def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_rat
     val_idx = grids_idx[int(train_ratio * len(grids_idx)):int((train_ratio + val_ratio) * len(grids_idx))]
     test_idx = grids_idx[int((train_ratio + val_ratio) * len(grids_idx)):]
     
-    train_dataset = GridDataset(grids[train_idx], nx, nt, dx, dt)
-    val_dataset = GridDataset(grids[val_idx], nx, nt, dx, dt)
-    test_dataset = GridDataset(grids[test_idx], nx, nt, dx, dt)
+    # Preprocess grids with coordinates
+    train_processed = preprocess_grids(grids[train_idx], nx, nt, dx, dt)
+    val_processed = preprocess_grids(grids[val_idx], nx, nt, dx, dt)
+    test_processed = preprocess_grids(grids[test_idx], nx, nt, dx, dt)
+    
+    train_dataset = GridDataset(train_processed)
+    val_dataset = GridDataset(val_processed)
+    test_dataset = GridDataset(test_processed)
 
     return train_dataset, val_dataset, test_dataset
 
@@ -112,8 +161,8 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
         random_seed: Random seed for reproducibility
     
     Returns:
-        train_dataset: ConcatDataset of all training datasets at different resolutions
-        val_dataset: ConcatDataset of all validation datasets at different resolutions
+        train_dataset: GridDataset with all training samples at different resolutions
+        val_dataset: GridDataset with all validation samples at different resolutions
         test_dataset: GridDataset at base resolution
     '''
     # Create linearly spaced scale factors between 1 and 2
@@ -121,11 +170,12 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
     dx_scales = np.linspace(1.0, 2.0, n_res)
     dt_scales = np.linspace(1.0, 2.0, n_res)
     
-    train_datasets = []
-    val_datasets = []
+    all_train_processed = []
+    all_val_processed = []
     
     # Samples per resolution for train/val (split from n_samples)
-    samples_per_res = max(1, n_samples // (n_res * n_res))
+    # Ensure at least 10 samples per resolution for proper train/val split
+    samples_per_res = max(10, n_samples // (n_res * n_res))
     
     print(f"Creating multi-resolution datasets: {n_res}x{n_res} = {n_res*n_res} resolutions")
     print(f"  dx range: [{dx:.4f}, {dx*2:.4f}] (5 values)")
@@ -162,10 +212,13 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
                 train_idx = grids_idx[:train_end]
                 val_idx = grids_idx[train_end:val_end]
                 
+                # Preprocess and add to lists
                 if len(train_idx) > 0:
-                    train_datasets.append(GridDataset(grids[train_idx], nx, nt, dx_i, dt_j))
+                    train_processed = preprocess_grids(grids[train_idx], nx, nt, dx_i, dt_j)
+                    all_train_processed.extend(train_processed)
                 if len(val_idx) > 0:
-                    val_datasets.append(GridDataset(grids[val_idx], nx, nt, dx_i, dt_j))
+                    val_processed = preprocess_grids(grids[val_idx], nx, nt, dx_i, dt_j)
+                    all_val_processed.extend(val_processed)
                 
                 successful_resolutions += 1
                 
@@ -174,12 +227,12 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
                 failed_resolutions.append((dx_i, dt_j))
                 continue
     
-    if not train_datasets:
+    if not all_train_processed:
         raise RuntimeError("Failed to generate any training datasets. Check solver compatibility with the resolution parameters.")
     
-    # Combine all train and val datasets
-    train_dataset = ConcatDataset(train_datasets)
-    val_dataset = ConcatDataset(val_datasets) if val_datasets else None
+    # Create single datasets from all processed grids
+    train_dataset = GridDataset(all_train_processed)
+    val_dataset = GridDataset(all_val_processed) if all_val_processed else GridDataset([])
     
     # Test dataset uses base resolution only
     print(f"  Loading test dataset at base resolution: dx={dx:.4f}, dt={dt:.4f}")
@@ -194,69 +247,72 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
     # Use remaining samples for test
     test_start = int((train_ratio + val_ratio) * len(grids_idx[:samples_per_res]))
     test_idx = grids_idx[test_start:samples_per_res]
-    test_dataset = GridDataset(grids[test_idx], nx, nt, dx, dt)
+    test_processed = preprocess_grids(grids[test_idx], nx, nt, dx, dt)
+    test_dataset = GridDataset(test_processed)
     
     print(f"\nMulti-resolution datasets created:")
     print(f"  Successful resolutions: {successful_resolutions}/{n_res*n_res}")
     if failed_resolutions:
         print(f"  Failed resolutions: {len(failed_resolutions)} (skipped)")
-    print(f"  Train: {len(train_dataset)} samples from {len(train_datasets)} resolutions")
-    print(f"  Val: {len(val_dataset) if val_dataset else 0} samples from {len(val_datasets)} resolutions")
+    print(f"  Train: {len(train_dataset)} samples")
+    print(f"  Val: {len(val_dataset)} samples")
     print(f"  Test: {len(test_dataset)} samples at base resolution")
     
     return train_dataset, val_dataset, test_dataset
 
 
 class GridMaskInner:
+    """Transform that masks inner cells (keeps only initial condition and boundaries)."""
     def __init__(self):
         pass
 
-    def __call__(self, grid):
-        grid[:, 1:, 1:-1] = -1
-        return grid
+    def __call__(self, full_input, target_grid):
+        """
+        Apply mask to input grid.
+        
+        Args:
+            full_input: tensor of shape (n_vals + 2, nt, nx)
+            target_grid: tensor of shape (n_vals, nt, nx)
+        
+        Returns:
+            masked full_input, target_grid
+        """
+        full_input = full_input.clone()
+        full_input[:, 1:, 1:-1] = -1
+        return full_input, target_grid
 
 class GridMaskRandom:
     def __init__(self, mask_ratio=0.5):
         self.mask_ratio = mask_ratio
 
-    def __call__(self, grid):
-        mask = torch.rand(grid.shape[1] - 1, grid.shape[2] - 2) < self.mask_ratio
-        grid[0, 1:, 1:-1][mask] = -1.0
-        return grid
+    def __call__(self, full_input, target_grid):
+        full_input = full_input.clone()
+        mask = torch.rand(full_input.shape[1] - 1, full_input.shape[2] - 2) < self.mask_ratio
+        full_input[0, 1:, 1:-1][mask] = -1.0
+        return full_input, target_grid
     
+
 class GridDataset(Dataset):
-    def __init__(self, grids, nx, nt, dx, dt, transform=GridMaskInner()):
-        self.nx = nx
-        self.nt = nt
-        self.dx = dx
-        self.dt = dt
-        self.grids = grids
-        self.transform = transform
+    """
+    Dataset for preprocessed grids.
+    
+    Args:
+        processed_grids: List of tuples (full_input, target_grid) where:
+            - full_input: tensor of shape (n_vals + 2, nt, nx) with coordinates already added
+            - target_grid: tensor of shape (n_vals, nt, nx)
+        transform: Optional transform to apply (e.g., GridMaskInner)
+    """
+    def __init__(self, processed_grids, transform=None):
+        self.processed_grids = processed_grids
+        self.transform = transform if transform is not None else GridMaskInner()
 
     def __len__(self):
-        return len(self.grids)
+        return len(self.processed_grids)
 
     def __getitem__(self, idx):
-        if isinstance(self.grids, list):
-            input_grids = []
-            for val in self.grids[idx].values():
-                input_grids.append(torch.from_numpy(self.grids[idx].get_array(val)).to(torch.float32))
-
-            input_grid = torch.stack(input_grids, dim=-1)  # (nt, nx, n_vals)
-        else:
-            input_grid = torch.from_numpy(self.grids[idx]).to(torch.float32).unsqueeze(-1)
-        target_grid = input_grid.clone()
-        nt, nx, _ = input_grid.shape
+        full_input, target_grid = self.processed_grids[idx]
         
-        # Repeat initial condition for all timesteps
+        # Apply transform to separate input and target
+        full_input, target_grid = self.transform(full_input, target_grid)
         
-        # Create coordinate grids that tell the model what time/space to predict
-        t_coords = (torch.arange(nt).float() * self.dt)[:, None].expand(nt, nx).unsqueeze(-1)  # (nt, nx, 1)
-        x_coords = (torch.arange(nx).float() * self.dx)[None, :].expand(nt, nx).unsqueeze(-1)  # (nt, nx, 1)
-        
-        # Stack: (nt, nx, n_vals + 2) where channels are [initial_density_repeated, time, space]
-        full_input = torch.cat([input_grid, t_coords, x_coords], dim=-1).permute(2, 0, 1)
-        target_grid = target_grid.permute(2, 0, 1)
-
-        full_input = self.transform(full_input)
         return full_input, target_grid  # Returns: (n_vals + 2, nt, nx), (n_vals, nt, nx)
