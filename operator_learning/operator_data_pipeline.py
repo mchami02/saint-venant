@@ -84,6 +84,129 @@ def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_rat
     return train_dataset, val_dataset, test_dataset
 
 
+def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max_steps=3, train_ratio=0.8, val_ratio=0.1, random_seed=42):
+    '''
+    Get multi-resolution train and val datasets with the same nx, nt but different dx, dt.
+    
+    Creates n_res x n_res = 25 different resolution combinations:
+    - dx values: linearly distributed between dx and dx * 2
+    - dt values: linearly distributed between dt and dt * 2
+    
+    Note: Both dx and dt are scaled together to maintain CFL condition stability.
+    The resolutions are paired: (dx*scale, dt*scale) for each scale factor.
+    
+    Test dataset uses the base resolution (dx, dt) only.
+    
+    Args:
+        solver: Solver type
+        flux: Flux type
+        n_samples: Number of samples total (distributed across resolutions)
+        nx: Number of spatial grid points (same for all resolutions)
+        nt: Number of time steps (same for all resolutions)
+        dx: Base spatial step size
+        dt: Base time step size
+        n_res: Number of resolution steps in each dimension (default 5, gives 25 total)
+        max_steps: Maximum number of steps for initial conditions
+        train_ratio: Ratio of samples for training
+        val_ratio: Ratio of samples for validation
+        random_seed: Random seed for reproducibility
+    
+    Returns:
+        train_dataset: ConcatDataset of all training datasets at different resolutions
+        val_dataset: ConcatDataset of all validation datasets at different resolutions
+        test_dataset: GridDataset at base resolution
+    '''
+    # Create linearly spaced scale factors between 1 and 2
+    # Both dx and dt scale together to maintain CFL condition
+    dx_scales = np.linspace(1.0, 2.0, n_res)
+    dt_scales = np.linspace(1.0, 2.0, n_res)
+    
+    train_datasets = []
+    val_datasets = []
+    
+    # Samples per resolution for train/val (split from n_samples)
+    samples_per_res = max(1, n_samples // (n_res * n_res))
+    
+    print(f"Creating multi-resolution datasets: {n_res}x{n_res} = {n_res*n_res} resolutions")
+    print(f"  dx range: [{dx:.4f}, {dx*2:.4f}] (5 values)")
+    print(f"  dt range: [{dt:.4f}, {dt*2:.4f}] (5 values)")
+    print(f"  Samples per resolution: {samples_per_res}")
+    
+    successful_resolutions = 0
+    failed_resolutions = []
+    
+    for i, dx_scale in enumerate(dx_scales):
+        for j, dt_scale in enumerate(dt_scales):
+            dx_i = dx * dx_scale
+            dt_j = dt * dt_scale
+            
+            print(f"  Loading resolution ({i+1}/{n_res}, {j+1}/{n_res}): dx={dx_i:.4f}, dt={dt_j:.4f}")
+            
+            try:
+                # Download or generate grids for this resolution
+                grids = download_grids(solver, flux, nx, nt, dx_i, dt_j, max_steps)
+                if grids is None or len(grids) < samples_per_res:
+                    print(f"    Generating {samples_per_res} grids...")
+                    grids = get_nfv_dataset(samples_per_res, nx, nt, dx_i, dt_j, 2, True)
+                    upload_grids(grids, solver, flux, nx, nt, dx_i, dt_j, max_steps)
+                
+                # Shuffle and split
+                grids_idx = np.arange(len(grids))
+                np.random.seed(random_seed + i * n_res + j)  # Different seed per resolution
+                np.random.shuffle(grids_idx)
+                grids_idx = grids_idx[:samples_per_res]
+                
+                train_end = int(train_ratio * len(grids_idx))
+                val_end = int((train_ratio + val_ratio) * len(grids_idx))
+                
+                train_idx = grids_idx[:train_end]
+                val_idx = grids_idx[train_end:val_end]
+                
+                if len(train_idx) > 0:
+                    train_datasets.append(GridDataset(grids[train_idx], nx, nt, dx_i, dt_j))
+                if len(val_idx) > 0:
+                    val_datasets.append(GridDataset(grids[val_idx], nx, nt, dx_i, dt_j))
+                
+                successful_resolutions += 1
+                
+            except Exception as e:
+                print(f"    Warning: Failed to generate grids for dx={dx_i:.4f}, dt={dt_j:.4f}: {e}")
+                failed_resolutions.append((dx_i, dt_j))
+                continue
+    
+    if not train_datasets:
+        raise RuntimeError("Failed to generate any training datasets. Check solver compatibility with the resolution parameters.")
+    
+    # Combine all train and val datasets
+    train_dataset = ConcatDataset(train_datasets)
+    val_dataset = ConcatDataset(val_datasets) if val_datasets else None
+    
+    # Test dataset uses base resolution only
+    print(f"  Loading test dataset at base resolution: dx={dx:.4f}, dt={dt:.4f}")
+    grids = download_grids(solver, flux, nx, nt, dx, dt, max_steps)
+    if grids is None or len(grids) < samples_per_res:
+        grids = get_nfv_dataset(samples_per_res, nx, nt, dx, dt, 2, True)
+        upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps)
+    
+    grids_idx = np.arange(len(grids))
+    np.random.seed(random_seed)
+    np.random.shuffle(grids_idx)
+    # Use remaining samples for test
+    test_start = int((train_ratio + val_ratio) * len(grids_idx[:samples_per_res]))
+    test_idx = grids_idx[test_start:samples_per_res]
+    test_dataset = GridDataset(grids[test_idx], nx, nt, dx, dt)
+    
+    print(f"\nMulti-resolution datasets created:")
+    print(f"  Successful resolutions: {successful_resolutions}/{n_res*n_res}")
+    if failed_resolutions:
+        print(f"  Failed resolutions: {len(failed_resolutions)} (skipped)")
+    print(f"  Train: {len(train_dataset)} samples from {len(train_datasets)} resolutions")
+    print(f"  Val: {len(val_dataset) if val_dataset else 0} samples from {len(val_datasets)} resolutions")
+    print(f"  Test: {len(test_dataset)} samples at base resolution")
+    
+    return train_dataset, val_dataset, test_dataset
+
+
 class GridMaskInner:
     def __init__(self):
         pass

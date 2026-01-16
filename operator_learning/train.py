@@ -5,7 +5,7 @@ import random
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver
-from operator_data_pipeline import get_datasets, get_dataset
+from operator_data_pipeline import get_datasets, get_dataset, get_multi_res_datasets
 from torch.utils.data import DataLoader
 import torch
 import numpy as np
@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
 from loss.pde_loss import PDELoss
 from plot_data import plot_comparison_comet, plot_delta_u_comet
+from test import test_model, run_sanity_check, _unpack_model_output
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -90,7 +91,9 @@ def parse_args():
     parser.add_argument("--loss", type=str, default="l1", help="Loss type")
     parser.add_argument("--plot_every", type=int, default=5, help="Plot comparison every N epochs (0 = only at end)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping (0 = no clipping)")
-    parser.add_argument("--test-high-res", action="store_true", help="Test super-resolution capabilities")
+    parser.add_argument("--test-high-res", action="store_true", help="Test on high resolution grids (same nx,nt but dx/2, dt/2)")
+    parser.add_argument("--test-dims-grid", action="store_true", help="Test on different grid dimensions (same dx,dt but 2x nx, 2x nt)")
+    parser.add_argument("--multi-res", action="store_true", help="Train on multiple resolutions (5x5=25 combinations of dx and dt)")
     return parser.parse_args()
 
 
@@ -178,19 +181,26 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
             else:
                 teacher_forcing_ratio = 0.0
             pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
+            delta_u = None
+            gate_values = []
         else:
-            pred, delta_u, gate_values = model(full_input)  # (B, n_vals, nt, nx)
+            output = model(full_input)  # (B, n_vals, nt, nx)
+            pred, delta_u, gate_values = _unpack_model_output(output)
         
         # Compute loss
         loss = train_pde_loss(pred, targets)
-        d_loss = 1e-1 * torch.mean(delta_u**2)
-        loss += d_loss
-        delta_loss += d_loss.detach().item()
+        
+        # Add delta_u regularization if available
+        if delta_u is not None:
+            d_loss = 1e-1 * torch.mean(delta_u**2)
+            loss += d_loss
+            delta_loss += d_loss.detach().item()
         
         # Compute gate sparsity loss (encourage gates to be selective)
-        g_loss = 3e-3 * compute_gate_loss(gate_values)
-        loss += g_loss
-        gate_loss_accum += g_loss.detach().item()
+        if gate_values:
+            g_loss = 3e-3 * compute_gate_loss(gate_values)
+            loss += g_loss
+            gate_loss_accum += g_loss.detach().item()
         
         loss.backward()
         if args.max_grad_norm > 0:
@@ -213,7 +223,8 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
                 teacher_forcing_ratio = 0.0
                 pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
             else:
-                pred, delta_u, gate_values = model(full_input)  # (B, n_vals, nt, nx)
+                output = model(full_input)  # (B, n_vals, nt, nx)
+                pred, _, _ = _unpack_model_output(output)
             
             loss = val_pde_loss(pred, targets)
 
@@ -234,13 +245,19 @@ def sample_predictions(model, val_loader, args, num_samples=3):
             
             if args.autoregressive:
                 pred = pred_autoregressive(model, targets, 0.0, args)
+                delta_u = None
             else:
-                pred, delta_u, _ = model(full_input)
+                output = model(full_input)
+                pred, delta_u, _ = _unpack_model_output(output)
             
             for i in range(min(num_samples - len(gts), targets.shape[0])):
                 gts.append(targets[i].squeeze(0).cpu().numpy())
                 preds.append(pred[i].squeeze(0).cpu().numpy())
-                delta_us.append(delta_u[i].squeeze(0).cpu().numpy())
+                if delta_u is not None:
+                    delta_us.append(delta_u[i].squeeze(0).cpu().numpy())
+                else:
+                    # Create zero array for models without delta_u
+                    delta_us.append(np.zeros_like(gts[-1]))
             if len(gts) >= num_samples:
                 break
     
@@ -265,7 +282,11 @@ def train_model(model, train_loader, val_loader, args, experiment):
     
     desc = "Training (Autoregressive)" if args.autoregressive else "Training"
     bar = tqdm(range(args.epochs), desc=desc)
-    model.model.freeze_shock_corrector()
+    
+    # Freeze shock corrector if the model has it (e.g., EncoderDecoder)
+    if hasattr(model.model, 'freeze_shock_corrector'):
+        model.model.freeze_shock_corrector()
+    
     for epoch in bar:
         experiment.set_epoch(epoch+1)
         train_loss, val_loss = train_epoch(model, train_loader, val_loader, optimizer, epoch, args, experiment)
@@ -275,11 +296,14 @@ def train_model(model, train_loader, val_loader, args, experiment):
         val_losses.append(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
         experiment.log_metric("train/lr", current_lr)
-        if epoch == 20:
+        
+        # Model-specific training schedule for EncoderDecoder
+        if epoch == 20 and hasattr(model.model, 'unfreeze_shock_corrector'):
             model.model.unfreeze_shock_corrector()
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= 0.3
-            model.model.freeze_encoder()
+            if hasattr(model.model, 'freeze_encoder'):
+                model.model.freeze_encoder()
             print("Unfreezing shock corrector, freezing encoder")
         # Check for improvement
         if val_loss < best_loss * (1 - tolerance):
@@ -315,46 +339,20 @@ def train_model(model, train_loader, val_loader, args, experiment):
     model.load_state_dict(state_dict, strict=False)
     return model
 
-def test_model(model, test_loader, args, experiment, mode="test"):
-    model.eval()
-    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
-    gts = []
-    preds = []
-    
-    with torch.no_grad():
-        for full_input, targets in test_loader:
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            
-            if args.autoregressive:
-                pred = pred_autoregressive(model, targets, 0.0, args)
-            else:
-                pred, _, _ = model(full_input)
-            
-            loss = test_pde_loss(pred, targets)
-            for i in range(targets.shape[0]):
-                gt = targets[i].squeeze(0).detach().cpu().numpy()
-                p = pred[i].squeeze(0).detach().cpu().numpy()
-                gts.append(gt)
-                preds.append(p)
-    
-    test_loss = test_pde_loss.get_loss_value()
-    test_pde_loss.log_loss_values(experiment, mode)
-    print(f"Test Loss ({mode}): {test_loss:.6f}")
-    
-    gts = np.array(gts)[:args.num_plots]
-    preds = np.array(preds)[:args.num_plots]
-    plot_comparison_comet(gts, preds, args.nx, args.nt, args.dx, args.dt, experiment, epoch=args.epochs, mode=mode)
-
 def main():
     args = parse_args()
     print(f"Using device: {device}")
 
-    print("Using CometML for logging")
-    train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
-    if args.test_high_res:
-        high_res_dataset = get_dataset(args.solver, args.flux, args.n_samples, args.nx * 2, args.nt * 2, args.dx / 2, args.dt / 2)
-        high_res_loader = DataLoader(high_res_dataset, batch_size=max(1, args.batch_size // 4), shuffle=False, num_workers=4)
+    print("Loading datasets...")
+    if args.multi_res:
+        # Multi-resolution training: 5x5=25 combinations of dx and dt
+        # dx values: linearly distributed between dx and dx*2
+        # dt values: linearly distributed between dt and dt*2
+        train_dataset, val_dataset, test_dataset = get_multi_res_datasets(
+            args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt, n_res=5
+        )
+    else:
+        train_dataset, val_dataset, test_dataset = get_datasets(args.solver, args.flux, args.n_samples, args.nx, args.nt, args.dx, args.dt)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
@@ -363,6 +361,11 @@ def main():
     if args.model_path is not None:
         model.load_state_dict(torch.load(args.model_path, weights_only=False))
     summary(model)
+    
+    # Run sanity check before training to ensure all code paths work
+    run_sanity_check(model, train_loader, val_loader, args)
+    
+    print("Using CometML for logging")
     experiment = start(api_key=os.getenv("COMET_API_KEY"), project_name="operator-learning-pde", workspace="pde-thesis")
     experiment.log_parameters(vars(args))
     experiment.log_code(folder="loss")
@@ -370,6 +373,7 @@ def main():
     experiment.log_code(file_name="operator_data_pipeline.py")
     experiment.log_code(file_name="model.py")
     experiment.log_code(file_name="train.py")
+    experiment.log_code(file_name="test.py")
     experiment.log_code(file_name="plot_data.py")
 
     model = train_model(model, train_loader, val_loader, args, experiment)
@@ -380,9 +384,15 @@ def main():
         metadata=model.metadata
     )
     
-    test_model(model, test_loader, args, experiment)
-    if args.test_high_res:
-        test_model(model, high_res_loader, args, experiment, mode="test_high_res")
+    # Run all tests with logging
+    test_model(
+        model=model,
+        args=args,
+        experiment=experiment,
+        test_loader=test_loader,
+        test_high_res_flag=args.test_high_res,
+        test_dims_grid=args.test_dims_grid
+    )
     
 
 
