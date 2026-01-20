@@ -127,8 +127,8 @@ def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_rat
     test_processed = preprocess_grids(grids[test_idx], nx, nt, dx, dt)
     
     train_dataset = GridDataset(train_processed)
-    val_dataset = GridDataset(val_processed)
-    test_dataset = GridDataset(test_processed)
+    val_dataset = GridDataset(val_processed, cleaner=None)
+    test_dataset = GridDataset(test_processed, cleaner=None)
 
     return train_dataset, val_dataset, test_dataset
 
@@ -232,7 +232,7 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
     
     # Create single datasets from all processed grids
     train_dataset = GridDataset(all_train_processed)
-    val_dataset = GridDataset(all_val_processed) if all_val_processed else GridDataset([])
+    val_dataset = GridDataset(all_val_processed, cleaner=None) if all_val_processed else GridDataset([], cleaner=None)
     
     # Test dataset uses base resolution only
     print(f"  Loading test dataset at base resolution: dx={dx:.4f}, dt={dt:.4f}")
@@ -248,7 +248,7 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
     test_start = int((train_ratio + val_ratio) * len(grids_idx[:samples_per_res]))
     test_idx = grids_idx[test_start:samples_per_res]
     test_processed = preprocess_grids(grids[test_idx], nx, nt, dx, dt)
-    test_dataset = GridDataset(test_processed)
+    test_dataset = GridDataset(test_processed, cleaner=None)
     
     print(f"\nMulti-resolution datasets created:")
     print(f"  Successful resolutions: {successful_resolutions}/{n_res*n_res}")
@@ -278,7 +278,7 @@ class GridMaskInner:
             masked full_input, target_grid
         """
         full_input = full_input.clone()
-        full_input[:, 1:, 1:-1] = -1
+        full_input[0, 1:, 1:-1] = -1
         return full_input, target_grid
 
 class GridMaskRandom:
@@ -291,6 +291,68 @@ class GridMaskRandom:
         full_input[0, 1:, 1:-1][mask] = -1.0
         return full_input, target_grid
     
+class GridMaskAllButInitial:
+    def __init__(self):
+        pass
+    
+    def __call__(self, full_input, target_grid):
+        full_input = full_input.clone()
+        full_input[0, 1:, :] = -1
+        return full_input, target_grid
+
+
+class ConstCleaner:
+    """
+    Cleaner that filters out grids with too many identical values.
+    
+    This removes grids where the most common value appears more than
+    `max_const_ratio` fraction of the total grid cells.
+    
+    Args:
+        max_const_ratio: Maximum allowed ratio of identical values (default 0.9).
+                        Grids with more than this fraction of identical values are removed.
+    """
+    def __init__(self, max_const_ratio: float = 0.4):
+        self.max_const_ratio = max_const_ratio
+    
+    def __call__(self, processed_grids):
+        """
+        Filter grids that have too many identical values.
+        
+        Args:
+            processed_grids: List of tuples (full_input, target_grid) where:
+                - full_input: tensor of shape (n_vals + 2, nt, nx)
+                - target_grid: tensor of shape (n_vals, nt, nx)
+        
+        Returns:
+            Filtered list of (full_input, target_grid) tuples
+        """
+        if not processed_grids:
+            return processed_grids
+        
+        filtered = []
+        for full_input, target_grid in processed_grids:
+            # Check the target grid (the actual solution values, not coordinates)
+            # target_grid shape: (n_vals, nt, nx)
+            total_cells = target_grid.numel()
+            
+            # Find the most common value and its count
+            flat = target_grid.flatten()
+            # Use bincount for integer-like values or unique for floats
+            unique_vals, counts = torch.unique(flat, return_counts=True)
+            max_count = counts.max().item()
+            
+            const_ratio = max_count / total_cells
+            
+            if const_ratio <= self.max_const_ratio:
+                filtered.append((full_input, target_grid))
+        
+        n_removed = len(processed_grids) - len(filtered)
+        if n_removed > 0:
+            print(f"ConstCleaner: Removed {n_removed}/{len(processed_grids)} grids with >{self.max_const_ratio*100:.0f}% identical values")
+        
+        return filtered
+
 
 class GridDataset(Dataset):
     """
@@ -301,10 +363,13 @@ class GridDataset(Dataset):
             - full_input: tensor of shape (n_vals + 2, nt, nx) with coordinates already added
             - target_grid: tensor of shape (n_vals, nt, nx)
         transform: Optional transform to apply (e.g., GridMaskInner)
+        cleaner: Optional cleaner to filter grids (e.g., ConstCleaner). Set to None to disable.
     """
-    def __init__(self, processed_grids, transform=None):
+    def __init__(self, processed_grids, transform=GridMaskAllButInitial(), cleaner=None):
+        if cleaner is not None:
+            processed_grids = cleaner(processed_grids)
         self.processed_grids = processed_grids
-        self.transform = transform if transform is not None else GridMaskInner()
+        self.transform = transform
 
     def __len__(self):
         return len(self.processed_grids)
