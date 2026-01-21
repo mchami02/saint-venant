@@ -101,30 +101,49 @@ def get_dataset(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, random_see
 
     return dataset
 
-def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, train_ratio=0.8, val_ratio=0.1, random_seed=42):
-    '''
-    Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
-    If available in the repository, download the grids from the repository, otherwise generate them and upload them to the repository
-    '''
-    # Try to download the grids from the repository
+def get_grids(solver, flux, nx, nt, dx, dt, max_steps, n_samples):
     grids = download_grids(solver, flux, nx, nt, dx, dt, max_steps)
     if grids is None or len(grids) < n_samples:
         print(f"No big enough grids available in the repository, generating {n_samples} grids")
         grids = get_nfv_dataset(n_samples, nx, nt, dx, dt, 2, True)
         upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps)
+    return grids
 
-    grids_idx = np.arange(len(grids))
-    np.random.seed(random_seed)
-    np.random.shuffle(grids_idx)
-    grids_idx = grids_idx[:n_samples]
-    train_idx = grids_idx[:int(train_ratio * len(grids_idx))]
-    val_idx = grids_idx[int(train_ratio * len(grids_idx)):int((train_ratio + val_ratio) * len(grids_idx))]
-    test_idx = grids_idx[int((train_ratio + val_ratio) * len(grids_idx)):]
+def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, max_train_steps=3, train_ratio=0.8, val_ratio=0.1, random_seed=42):
+    '''
+    Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
+    If available in the repository, download the grids from the repository, otherwise generate them and upload them to the repository
+    '''
+    n_train = int(train_ratio * n_samples)
+    n_val = int(val_ratio * n_samples)
+    n_test = n_samples - n_train - n_val
     
+    def shuffle_and_select(grids, n, seed):
+        idx = np.arange(len(grids))
+        np.random.seed(seed)
+        np.random.shuffle(idx)
+        return grids[idx[:n]]
+    
+    if max_steps == max_train_steps:
+        grids = get_grids(solver, flux, nx, nt, dx, dt, max_steps, n_samples)
+        grids = shuffle_and_select(grids, n_samples, random_seed)
+        train_grids = grids[:n_train]
+        val_grids = grids[n_train:n_train + n_val]
+        test_grids = grids[n_train + n_val:]
+    else:
+        train_val_grids = get_grids(solver, flux, nx, nt, dx, dt, max_train_steps, n_train + n_val)
+        train_val_grids = shuffle_and_select(train_val_grids, n_train + n_val, random_seed)
+        train_grids = train_val_grids[:n_train]
+        val_grids = train_val_grids[n_train:]
+        
+        test_grids = get_grids(solver, flux, nx, nt, dx, dt, max_steps, n_test)
+        test_grids = shuffle_and_select(test_grids, n_test, random_seed)
+
+
     # Preprocess grids with coordinates
-    train_processed = preprocess_grids(grids[train_idx], nx, nt, dx, dt)
-    val_processed = preprocess_grids(grids[val_idx], nx, nt, dx, dt)
-    test_processed = preprocess_grids(grids[test_idx], nx, nt, dx, dt)
+    train_processed = preprocess_grids(train_grids, nx, nt, dx, dt)
+    val_processed = preprocess_grids(val_grids, nx, nt, dx, dt)
+    test_processed = preprocess_grids(test_grids, nx, nt, dx, dt)
     
     train_dataset = GridDataset(train_processed)
     val_dataset = GridDataset(val_processed, cleaner=None)

@@ -87,7 +87,7 @@ def parse_args():
     parser.add_argument("--autoregressive", action="store_true", help="Train autoregressively with scheduled sampling")
     parser.add_argument("--residuals", action="store_true", help="Predict residuals instead of full solution")
     parser.add_argument("--gamma_decay", type=float, default=1.0, help="Decay factor for gamma in decaying loss")
-    parser.add_argument("--pinn_loss", action="store_true", help="Use PINN loss")
+    parser.add_argument("--pinn_weight", type=float, default=0.0, help="Weight for PINN loss (0 = disabled)")
     parser.add_argument("--loss", type=str, default="mse", help="Loss type")
     parser.add_argument("--plot_every", type=int, default=5, help="Plot comparison every N epochs (0 = only at end)")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping (0 = no clipping)")
@@ -161,7 +161,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
     Model predicts entire spatiotemporal solution in one forward pass.
     """
     model.train()
-    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=args.pinn_loss, subset=0.5)
+    train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=args.pinn_weight, subset=0.5)
     delta_loss = 0.0
     gate_loss_accum = 0.0
     for full_input, targets in tqdm(train_loader, desc="Train epoch", leave=False):
@@ -170,6 +170,10 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
         
         full_input = full_input.to(device)
         targets = targets.to(device)
+        
+        # Enable gradients on input for autograd PINN loss
+        if args.pinn_weight > 0:
+            full_input.requires_grad_(True)
         
         optimizer.zero_grad()
         
@@ -187,8 +191,8 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
             output = model(full_input)  # (B, n_vals, nt, nx)
             pred, delta_u, gate_values = _unpack_model_output(output)
         
-        # Compute loss
-        loss = train_pde_loss(pred, targets)
+        # Compute loss (pass full_input for PINN loss computation)
+        loss = train_pde_loss(pred, targets, full_input)
         
         # Add delta_u regularization if available
         if delta_u is not None:
@@ -211,7 +215,7 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
     train_pde_loss.log_loss_values(experiment, "train")
     experiment.log_metric("train/delta_loss", delta_loss / len(train_loader.dataset))
     experiment.log_metric("train/gate_loss", gate_loss_accum / len(train_loader.dataset))
-    train_pde_loss.show_loss_values()
+    # train_pde_loss.show_loss_values()
     model.eval()
     val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss)
     with torch.no_grad():

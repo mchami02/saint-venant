@@ -51,7 +51,7 @@ def test_same_distri(model, test_loader, args, experiment=None, mode="test"):
         Test loss value
     """
     model.eval()
-    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=0.0)
     gts = []
     preds = []
     
@@ -124,7 +124,7 @@ def test_high_res(model, args, experiment=None, mode="test_high_res"):
     )
     
     model.eval()
-    test_pde_loss = LWRLoss(args.nt, args.nx, high_res_dt, high_res_dx, loss_type=args.loss, pinn_loss=False)
+    test_pde_loss = LWRLoss(args.nt, args.nx, high_res_dt, high_res_dx, loss_type=args.loss, pinn_weight=0.0)
     gts = []
     preds = []
     
@@ -197,7 +197,7 @@ def test_different_dims(model, args, experiment=None, mode="test_diff_dims"):
     )
     
     model.eval()
-    test_pde_loss = LWRLoss(diff_dims_nt, diff_dims_nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
+    test_pde_loss = LWRLoss(diff_dims_nt, diff_dims_nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=0.0)
     gts = []
     preds = []
     
@@ -324,7 +324,7 @@ def run_sanity_check(model, train_loader, val_loader, args):
     
     # Test loss computation
     print("  [3/4] Testing loss computation...")
-    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=False)
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=0.0)
     with torch.no_grad():
         loss = test_pde_loss(pred, targets)
         loss_value = test_pde_loss.get_loss_value()
@@ -339,11 +339,14 @@ def run_sanity_check(model, train_loader, val_loader, args):
     for full_input, targets in train_loader:
         full_input = full_input.to(device)
         targets = targets.to(device)
+        if args.pinn_weight > 0:
+            full_input.requires_grad_(True)
+            
         output = model(full_input)
         pred, delta_u, gate_values = _unpack_model_output(output)
         
-        train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_loss=args.pinn_loss, subset=0.5)
-        loss = train_pde_loss(pred, targets)
+        train_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=args.pinn_weight, subset=0.5)
+        loss = train_pde_loss(pred, targets, full_input)
         loss.backward()
         
         # Check gradients exist
