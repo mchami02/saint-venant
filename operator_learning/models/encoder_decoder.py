@@ -16,7 +16,7 @@ class Tokenizer(nn.Module):
 
 class FourierTokenizer(nn.Module):
     """Tokenizer with Fourier positional encoding for coordinate inputs."""
-    def __init__(self, input_dim: int, hidden_dim: int, num_frequencies: int = 32):
+    def __init__(self, input_dim: int, hidden_dim: int, num_frequencies: int = 4):
         super(FourierTokenizer, self).__init__()
         self.num_frequencies = num_frequencies
         # Fourier features: original + sin/cos of scaled coordinates

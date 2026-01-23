@@ -51,28 +51,27 @@ def test_same_distri(model, test_loader, args, experiment=None, mode="test"):
         Test loss value
     """
     model.eval()
-    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=0.0)
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=args.pinn_weight)
     gts = []
     preds = []
     
-    with torch.no_grad():
-        for full_input, targets in tqdm(test_loader, desc=f"Testing ({mode})", leave=False):
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            
-            if args.autoregressive:
-                from train import pred_autoregressive
-                pred = pred_autoregressive(model, targets, 0.0, args)
-            else:
-                output = model(full_input)
-                pred, _, _ = _unpack_model_output(output)
-            
-            loss = test_pde_loss(pred, targets)
-            for i in range(targets.shape[0]):
-                gt = targets[i].squeeze(0).detach().cpu().numpy()
-                p = pred[i].squeeze(0).detach().cpu().numpy()
-                gts.append(gt)
-                preds.append(p)
+    for full_input, targets in tqdm(test_loader, desc=f"Testing ({mode})", leave=False):
+        full_input = full_input.to(device)
+        targets = targets.to(device)
+        
+        if args.autoregressive:
+            from train import pred_autoregressive
+            pred = pred_autoregressive(model, targets, 0.0, args)
+        else:
+            output = model(full_input)
+            pred, _, _ = _unpack_model_output(output)
+        
+        loss = test_pde_loss(pred, targets)
+        for i in range(targets.shape[0]):
+            gt = targets[i].squeeze(0).detach().cpu().numpy()
+            p = pred[i].squeeze(0).detach().cpu().numpy()
+            gts.append(gt)
+            preds.append(p)
     
     test_loss = test_pde_loss.get_loss_value()
     
@@ -124,28 +123,27 @@ def test_high_res(model, args, experiment=None, mode="test_high_res"):
     )
     
     model.eval()
-    test_pde_loss = LWRLoss(args.nt, args.nx, high_res_dt, high_res_dx, loss_type=args.loss, pinn_weight=0.0)
+    test_pde_loss = LWRLoss(args.nt, args.nx, high_res_dt, high_res_dx, loss_type=args.loss, pinn_weight=args.pinn_weight)
     gts = []
     preds = []
     
-    with torch.no_grad():
-        for full_input, targets in tqdm(high_res_loader, desc=f"Testing ({mode})", leave=False):
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            
-            if args.autoregressive:
-                from train import pred_autoregressive
-                pred = pred_autoregressive(model, targets, 0.0, args)
-            else:
-                output = model(full_input)
-                pred, _, _ = _unpack_model_output(output)
-            
-            loss = test_pde_loss(pred, targets)
-            for i in range(targets.shape[0]):
-                gt = targets[i].squeeze(0).detach().cpu().numpy()
-                p = pred[i].squeeze(0).detach().cpu().numpy()
-                gts.append(gt)
-                preds.append(p)
+    for full_input, targets in tqdm(high_res_loader, desc=f"Testing ({mode})", leave=False):
+        full_input = full_input.to(device)
+        targets = targets.to(device)
+        
+        if args.autoregressive:
+            from train import pred_autoregressive
+            pred = pred_autoregressive(model, targets, 0.0, args)
+        else:
+            output = model(full_input)
+            pred, _, _ = _unpack_model_output(output)
+        
+        loss = test_pde_loss(pred, targets)
+        for i in range(targets.shape[0]):
+            gt = targets[i].squeeze(0).detach().cpu().numpy()
+            p = pred[i].squeeze(0).detach().cpu().numpy()
+            gts.append(gt)
+            preds.append(p)
     
     test_loss = test_pde_loss.get_loss_value()
     
@@ -197,35 +195,34 @@ def test_different_dims(model, args, experiment=None, mode="test_diff_dims"):
     )
     
     model.eval()
-    test_pde_loss = LWRLoss(diff_dims_nt, diff_dims_nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=0.0)
+    test_pde_loss = LWRLoss(diff_dims_nt, diff_dims_nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=args.pinn_weight)
     gts = []
     preds = []
     
-    with torch.no_grad():
-        for full_input, targets in tqdm(diff_dims_loader, desc=f"Testing ({mode})", leave=False):
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            
-            if args.autoregressive:
-                # For autoregressive, we need to use the different nt
-                from train import pred_autoregressive
-                # Create a modified args for the different nt
-                class TempArgs:
-                    def __init__(self, orig_args, new_nt):
-                        self.__dict__.update(orig_args.__dict__)
-                        self.nt = new_nt
-                temp_args = TempArgs(args, diff_dims_nt)
-                pred = pred_autoregressive(model, targets, 0.0, temp_args)
-            else:
-                output = model(full_input)
-                pred, _, _ = _unpack_model_output(output)
-            
-            loss = test_pde_loss(pred, targets)
-            for i in range(targets.shape[0]):
-                gt = targets[i].squeeze(0).detach().cpu().numpy()
-                p = pred[i].squeeze(0).detach().cpu().numpy()
-                gts.append(gt)
-                preds.append(p)
+    for full_input, targets in tqdm(diff_dims_loader, desc=f"Testing ({mode})", leave=False):
+        full_input = full_input.to(device)
+        targets = targets.to(device)
+        
+        if args.autoregressive:
+            # For autoregressive, we need to use the different nt
+            from train import pred_autoregressive
+            # Create a modified args for the different nt
+            class TempArgs:
+                def __init__(self, orig_args, new_nt):
+                    self.__dict__.update(orig_args.__dict__)
+                    self.nt = new_nt
+            temp_args = TempArgs(args, diff_dims_nt)
+            pred = pred_autoregressive(model, targets, 0.0, temp_args)
+        else:
+            output = model(full_input)
+            pred, _, _ = _unpack_model_output(output)
+        
+        loss = test_pde_loss(pred, targets)
+        for i in range(targets.shape[0]):
+            gt = targets[i].squeeze(0).detach().cpu().numpy()
+            p = pred[i].squeeze(0).detach().cpu().numpy()
+            gts.append(gt)
+            preds.append(p)
     
     test_loss = test_pde_loss.get_loss_value()
     
@@ -303,33 +300,34 @@ def run_sanity_check(model, train_loader, val_loader, args):
     
     # Test forward pass with training data
     print("  [1/4] Testing forward pass on training batch...")
-    with torch.no_grad():
-        for full_input, targets in train_loader:
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            output = model(full_input)
-            pred, delta_u, gate_values = _unpack_model_output(output)
-            print(f"        Input shape: {full_input.shape}, Output shape: {pred.shape}")
-            break
+    for full_input, targets in train_loader:
+        full_input = full_input.to(device)
+        targets = targets.to(device)
+        output = model(full_input)
+        pred, delta_u, gate_values = _unpack_model_output(output)
+        print(f"        Input shape: {full_input.shape}, Output shape: {pred.shape}")
+        break
     
     # Test forward pass with validation data
     print("  [2/4] Testing forward pass on validation batch...")
-    with torch.no_grad():
-        for full_input, targets in val_loader:
-            full_input = full_input.to(device)
-            targets = targets.to(device)
-            output = model(full_input)
-            pred, delta_u, gate_values = _unpack_model_output(output)
-            break
+    for full_input, targets in val_loader:
+        full_input = full_input.to(device)
+        targets = targets.to(device)
+        output = model(full_input)
+        pred, delta_u, gate_values = _unpack_model_output(output)
+        break
     
     # Test loss computation
     print("  [3/4] Testing loss computation...")
-    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=0.0)
-    with torch.no_grad():
-        loss = test_pde_loss(pred, targets)
-        loss_value = test_pde_loss.get_loss_value()
-        print(f"        Loss value: {loss_value:.6f}")
-    
+    if args.pinn_weight > 0:
+        full_input.requires_grad_(True)
+        output = model(full_input)  # Recompute with grad enabled
+        pred, _, _ = _unpack_model_output(output)
+    test_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=args.pinn_weight)
+    loss = test_pde_loss(pred, targets, full_input)
+    loss_value = test_pde_loss.get_loss_value()
+    print(f"        Loss value: {loss_value:.6f}")
+    test_pde_loss.show_loss_values()
     # Test backward pass (single step)
     print("  [4/4] Testing backward pass...")
     model.train()

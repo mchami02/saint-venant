@@ -319,6 +319,30 @@ class GridMaskAllButInitial:
         full_input[0, 1:, :] = -1
         return full_input, target_grid
 
+class OffsetCoordinates:
+    def __init__(self, offset_range=10.0, random_seed=42):
+        self.offset_range = offset_range
+        self.rng = np.random.default_rng(random_seed)
+
+    def __call__(self, full_input, target_grid):
+        full_input = full_input.clone()
+        offset_t = self.rng.uniform(-self.offset_range, self.offset_range)
+        offset_x = self.rng.uniform(-self.offset_range, self.offset_range)
+        full_input[1:, :] += offset_t
+        full_input[2:, :] += offset_x
+        return full_input, target_grid
+
+class NoisyCoordinates:
+    def __init__(self, noise_level=0.01, random_seed=42):
+        self.noise_level = noise_level
+        self.rng = np.random.default_rng(random_seed)
+
+    def __call__(self, full_input, target_grid):
+        full_input = full_input.clone()
+        full_input[1:, :] += self.rng.normal(0, self.noise_level, size=(full_input.shape[1], full_input.shape[2]))
+        full_input[2:, :] += self.rng.normal(0, self.noise_level, size=(full_input.shape[1], full_input.shape[2]))
+        return full_input, target_grid
+
 
 class ConstCleaner:
     """
@@ -384,7 +408,7 @@ class GridDataset(Dataset):
         transform: Optional transform to apply (e.g., GridMaskInner)
         cleaner: Optional cleaner to filter grids (e.g., ConstCleaner). Set to None to disable.
     """
-    def __init__(self, processed_grids, transform=GridMaskAllButInitial(), cleaner=None):
+    def __init__(self, processed_grids, transform=[GridMaskAllButInitial(), NoisyCoordinates() , OffsetCoordinates()], cleaner=None):
         if cleaner is not None:
             processed_grids = cleaner(processed_grids)
         self.processed_grids = processed_grids
@@ -396,7 +420,7 @@ class GridDataset(Dataset):
     def __getitem__(self, idx):
         full_input, target_grid = self.processed_grids[idx]
         
-        # Apply transform to separate input and target
-        full_input, target_grid = self.transform(full_input, target_grid)
+        for transform in self.transform:
+            full_input, target_grid = transform(full_input, target_grid)
         
         return full_input, target_grid  # Returns: (n_vals + 2, nt, nx), (n_vals, nt, nx)

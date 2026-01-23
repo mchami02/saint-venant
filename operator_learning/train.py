@@ -217,20 +217,19 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
     experiment.log_metric("train/gate_loss", gate_loss_accum / len(train_loader.dataset))
     # train_pde_loss.show_loss_values()
     model.eval()
-    val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss)
-    with torch.no_grad():
-        for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
-            full_input = full_input.to(device)
-            targets = targets.to(device)
+    val_pde_loss = LWRLoss(args.nt, args.nx, args.dt, args.dx, loss_type=args.loss, pinn_weight=args.pinn_weight)
+    for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
+        full_input = full_input.to(device)
+        targets = targets.to(device)
 
-            if args.autoregressive:
-                teacher_forcing_ratio = 0.0
-                pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
-            else:
-                output = model(full_input)  # (B, n_vals, nt, nx)
-                pred, _, _ = _unpack_model_output(output)
-            
-            loss = val_pde_loss(pred, targets)
+        if args.autoregressive:
+            teacher_forcing_ratio = 0.0
+            pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
+        else:
+            output = model(full_input)  # (B, n_vals, nt, nx)
+            pred, _, _ = _unpack_model_output(output)
+        
+        loss = val_pde_loss(pred, targets, full_input)
 
     val_loss = val_pde_loss.get_loss_value()
     val_pde_loss.log_loss_values(experiment, "val")
@@ -385,8 +384,6 @@ def main():
         test_high_res_flag=args.test_high_res,
         test_dims_grid=args.test_dims_grid
     )
-    
-
 
 
 if __name__ == "__main__":
