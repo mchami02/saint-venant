@@ -141,13 +141,17 @@ def create_model(args, device):
         model = OperatorModel(EncoderDecoder,
             hidden_dim=64,
             layers_encoder=2,
-            layers_decoder_attention=2,
-            layers_decoder_gcn=0,
-            nt=args.nt,
-            nx=args.nx,
-            dx=args.dx,
-            dt=args.dt,
-            device=device
+            decoder_type="axial",
+            layers_decoder=2,
+            layers_gnn=0,
+        )
+    elif args.model == "EncoderDecoderCross":
+        model = OperatorModel(EncoderDecoder,
+            hidden_dim=64,
+            layers_encoder=2,
+            decoder_type="cross",
+            layers_decoder=2,
+            layers_gnn=0,
         )
     else:
         raise ValueError(f"Model {args.model} not supported")

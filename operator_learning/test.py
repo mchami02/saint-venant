@@ -59,6 +59,9 @@ def test_same_distri(model, test_loader, args, experiment=None, mode="test"):
         full_input = full_input.to(device)
         targets = targets.to(device)
         
+        if args.pinn_weight > 0:
+            full_input.requires_grad_(True)
+        
         if args.autoregressive:
             from train import pred_autoregressive
             pred = pred_autoregressive(model, targets, 0.0, args)
@@ -66,7 +69,7 @@ def test_same_distri(model, test_loader, args, experiment=None, mode="test"):
             output = model(full_input)
             pred, _, _ = _unpack_model_output(output)
         
-        loss = test_pde_loss(pred, targets)
+        loss = test_pde_loss(pred, targets, full_input)
         for i in range(targets.shape[0]):
             gt = targets[i].squeeze(0).detach().cpu().numpy()
             p = pred[i].squeeze(0).detach().cpu().numpy()
@@ -131,6 +134,9 @@ def test_high_res(model, args, experiment=None, mode="test_high_res"):
         full_input = full_input.to(device)
         targets = targets.to(device)
         
+        if args.pinn_weight > 0:
+            full_input.requires_grad_(True)
+        
         if args.autoregressive:
             from train import pred_autoregressive
             pred = pred_autoregressive(model, targets, 0.0, args)
@@ -138,7 +144,7 @@ def test_high_res(model, args, experiment=None, mode="test_high_res"):
             output = model(full_input)
             pred, _, _ = _unpack_model_output(output)
         
-        loss = test_pde_loss(pred, targets)
+        loss = test_pde_loss(pred, targets, full_input)
         for i in range(targets.shape[0]):
             gt = targets[i].squeeze(0).detach().cpu().numpy()
             p = pred[i].squeeze(0).detach().cpu().numpy()
@@ -203,6 +209,9 @@ def test_different_dims(model, args, experiment=None, mode="test_diff_dims"):
         full_input = full_input.to(device)
         targets = targets.to(device)
         
+        if args.pinn_weight > 0:
+            full_input.requires_grad_(True)
+        
         if args.autoregressive:
             # For autoregressive, we need to use the different nt
             from train import pred_autoregressive
@@ -217,7 +226,7 @@ def test_different_dims(model, args, experiment=None, mode="test_diff_dims"):
             output = model(full_input)
             pred, _, _ = _unpack_model_output(output)
         
-        loss = test_pde_loss(pred, targets)
+        loss = test_pde_loss(pred, targets, full_input)
         for i in range(targets.shape[0]):
             gt = targets[i].squeeze(0).detach().cpu().numpy()
             p = pred[i].squeeze(0).detach().cpu().numpy()

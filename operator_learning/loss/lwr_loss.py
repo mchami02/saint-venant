@@ -142,50 +142,35 @@ def autograd_pinn_loss(pred, gt, input_tensor, dt, dx, vmax=1.0, rhomax=1.0,
     full_shock_mask[:, :, -1] = True  # Exclude right boundary
     valid_mask = ~full_shock_mask  # (B, T, X)
     
-    # Find all valid (batch, t, x) indices
-    valid_indices = valid_mask.nonzero(as_tuple=False)  # (N_valid, 3) where columns are [b, t, x]
-    n_valid = valid_indices.shape[0]
+    # Tensor of all valid cells
+    valid_cells = pred_squeezed[valid_mask]  # (N_valid,)
+    n_valid = valid_cells.shape[0]
     
     if n_valid == 0:
         return torch.tensor(0.0, device=device, requires_grad=True)
-    
-    # Sample n_samples triplets from valid indices
-    n_samples = min(n_samples, n_valid)
-    sample_perm = torch.randperm(n_valid, device=device)[:n_samples]
-    sampled_indices = valid_indices[sample_perm]  # (n_samples, 3)
-    
-    # Compute LOCAL gradient for each sampled cell
-    residuals_sq = []
-    
-    for k in range(n_samples):
-        bi = sampled_indices[k, 0].item()
-        ti = sampled_indices[k, 1].item()
-        xi = sampled_indices[k, 2].item()
-        
-        # Compute gradient of pred at this specific (batch, t, x) cell
-        grad_input = torch.autograd.grad(
-            outputs=pred_squeezed[bi, ti, xi],
-            inputs=input_tensor,
-            create_graph=False,
-            retain_graph=True
-        )[0]  # (B, C, T, X)
-        # Extract LOCAL gradients at this cell
-        grad_t = grad_input[bi, -2, ti, xi]  # ∂pred[bi,ti,xi]/∂t[bi,ti,xi]
-        grad_x = grad_input[bi, -1, ti, xi]  # ∂pred[bi,ti,xi]/∂x[bi,ti,xi]
+            
+    # Compute gradient of sum of valid cells (grad of sum = sum of grads)
+    grad_input = torch.autograd.grad(
+        outputs=valid_cells.sum(),
+        inputs=input_tensor,
+        create_graph=False,
+        retain_graph=True
+    )[0]  # (B, C, T, X)
 
-        # Compute ∂Q/∂x using chain rule
-        pred_val = pred_squeezed[bi, ti, xi]
-        dQ_drho_val = dQ_drho(pred_val, vmax=vmax, rhomax=rhomax)
-        grad_q_x = dQ_drho_val * grad_x
+    # Extract gradients at valid positions for t and x channels
+    grad_t = grad_input[:, -2, :, :][valid_mask]  # (N_valid,)
+    grad_x = grad_input[:, -1, :, :][valid_mask]  # (N_valid,)
+
+    # Compute ∂Q/∂x using chain rule
+    pred_val = valid_cells
+    dQ_drho_val = dQ_drho(pred_val, vmax=vmax, rhomax=rhomax)
+    grad_q_x = dQ_drho_val * grad_x
+    
+    # PDE residual at each cell: ∂ρ/∂t + ∂Q/∂x = 0
+    cell_residual = grad_t + grad_q_x
         
-        # PDE residual at this cell: ∂ρ/∂t + ∂Q/∂x = 0
-        cell_residual = grad_t + grad_q_x
-        residuals_sq.append(cell_residual ** 2)
-    
-    # Average over all sampled cells
-    loss = torch.stack(residuals_sq).mean()
-    
-    return loss
+    # Mean squared residual divided by number of cells
+    return (cell_residual ** 2).sum() / n_valid
 
 
 class LWRLoss(PDELoss):

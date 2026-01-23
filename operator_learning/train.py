@@ -221,10 +221,12 @@ def train_epoch(model, train_loader, val_loader, optimizer, epoch,args, experime
     for full_input, targets in tqdm(val_loader, desc="Val epoch", leave=False):
         full_input = full_input.to(device)
         targets = targets.to(device)
-
+        if args.pinn_weight > 0:
+            full_input.requires_grad_(True)
         if args.autoregressive:
             teacher_forcing_ratio = 0.0
             pred = pred_autoregressive(model, targets, teacher_forcing_ratio, args)
+            delta_u = None
         else:
             output = model(full_input)  # (B, n_vals, nt, nx)
             pred, _, _ = _unpack_model_output(output)
