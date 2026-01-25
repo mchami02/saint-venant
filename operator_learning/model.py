@@ -1,18 +1,14 @@
 from neuralop.models import FNO
-from deepxde.nn.pytorch import DeepONetCartesianProd
 from models.fno_wrapper import fno_custom_freqs
 from models.wno import WNO2d
 from models.lno import LNOWrapper
 from models.deeponet import DeepONetWrapper
 from models.encoder_decoder import EncoderDecoder
-# from models.gnn_attention import MaskedGridPredictor
 from models.fno_cnn import FNOCNNWrapper
 from models.fno_denoiser import FNODenoiserWrapper
-# DeepXDE sets torch default device to cuda, but this breaks DataLoader with num_workers > 0
-# Reset it to None/cpu to avoid generator device mismatch
+from models.moe_fno import MoEFNO
 import torch
 torch.set_default_device(None)
-
 
 class OperatorModel(torch.nn.Module):
     def __init__(self, model, **kwargs):
@@ -152,6 +148,19 @@ def create_model(args, device):
             decoder_type="cross",
             layers_decoder=2,
             layers_gnn=0,
+        )
+    elif args.model == "MOEFNO":
+        model = OperatorModel(MoEFNO,
+            n_modes=(16, 8),
+            hidden_channels=32,
+            n_experts=2,
+            in_channels=3,
+            out_channels=1,
+            n_layers=4,
+            router_hidden_dim=32,
+            router_num_layers=2,
+            router_num_heads=4,
+            load_balance_weight=0.01,
         )
     else:
         raise ValueError(f"Model {args.model} not supported")

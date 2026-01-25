@@ -1,7 +1,8 @@
-from numerical_methods import GridGenerator, Godunov, Greenshields, Triangular, LWRRiemannSolver, Grid
+from numerical_methods import GridGenerator
 from joblib import Memory
 from tqdm import tqdm
 from torch.utils.data import Dataset
+from typing import Tuple
 import torch
 import numpy as np
 from nfv.initial_conditions import PiecewiseConstant
@@ -269,7 +270,7 @@ def get_multi_res_datasets(solver, flux, n_samples, nx, nt, dx, dt, n_res=5, max
     test_processed = preprocess_grids(grids[test_idx], nx, nt, dx, dt)
     test_dataset = GridDataset(test_processed, cleaner=None)
     
-    print(f"\nMulti-resolution datasets created:")
+    print("\nMulti-resolution datasets created:")
     print(f"  Successful resolutions: {successful_resolutions}/{n_res*n_res}")
     if failed_resolutions:
         print(f"  Failed resolutions: {len(failed_resolutions)} (skipped)")
@@ -397,7 +398,7 @@ class ConstCleaner:
         return filtered
 
 
-class GridDataset(Dataset):
+class GridDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
     """
     Dataset for preprocessed grids.
     
@@ -417,7 +418,7 @@ class GridDataset(Dataset):
     def __len__(self):
         return len(self.processed_grids)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         full_input, target_grid = self.processed_grids[idx]
         
         for transform in self.transform:
