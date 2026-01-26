@@ -27,6 +27,7 @@ dependencies = [
     "huggingface-hub>=1.1.7",
     "dotenv>=0.9.9",
     "datasets>=4.4.1",
+    "ruff>=0.14.14",
 ]
 
 [dependency-groups]
@@ -46,6 +47,18 @@ conflicts = [
       { group = "def" },
     ],
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+exclude = ["venv", ".venv", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
 
 
 [project.scripts]
