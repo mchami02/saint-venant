@@ -2,13 +2,23 @@
 Mixture of Experts FNO (MoE-FNO)
 
 A Mixture of Experts architecture using FNO as expert networks.
-Implements hard routing where each input is processed by a single expert.
+Implements soft top-k routing where each input is processed by 
+a weighted combination of experts for smoother expert transitions.
 """
 
+import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, Optional
+
+# Suppress neuralop metadata warning when creating multiple FNO instances
+warnings.filterwarnings(
+    "ignore", 
+    message="Attempting to update metadata for a module with metadata already in self.state_dict()",
+    module="neuralop.models.base_model"
+)
+
 from neuralop.models import FNO
 
 from .encoder import Encoder
@@ -16,11 +26,11 @@ from .encoder import Encoder
 
 class Router(nn.Module):
     """
-    Router network for hard expert selection.
+    Router network with soft top-k expert selection.
     
     Uses a Transformer encoder to extract global features, followed by
-    a linear layer to produce expert logits. Hard routing is achieved 
-    via argmax during inference and Gumbel-Softmax during training.
+    a linear layer to produce expert logits. Soft routing uses a
+    temperature-scaled softmax over the top-k experts for smooth blending.
     """
     
     def __init__(
@@ -30,6 +40,7 @@ class Router(nn.Module):
         hidden_dim: int = 64,
         num_encoder_layers: int = 2,
         num_heads: int = 4,
+        top_k: int = 2,
     ):
         """
         Initialize the router.
@@ -40,10 +51,12 @@ class Router(nn.Module):
             hidden_dim: Hidden dimension for the encoder
             num_encoder_layers: Number of transformer encoder layers
             num_heads: Number of attention heads
+            top_k: Number of top experts to use per sample (for soft blending)
         """
         super().__init__()
         
         self.n_experts = n_experts
+        self.top_k = min(top_k, n_experts)
         
         # Transformer encoder to extract global features from input
         self.encoder = Encoder(
@@ -60,20 +73,21 @@ class Router(nn.Module):
         self, 
         x: torch.Tensor, 
         temperature: float = 1.0,
-        hard: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute routing weights for each input based on initial condition.
         
+        Uses soft top-k routing: selects top-k experts and applies softmax
+        over their logits to get smooth blending weights.
+        
         Args:
             x: Input tensor of shape (B, C, H, W) where H is time and W is space
-            temperature: Temperature for Gumbel-Softmax (lower = harder)
-            hard: If True, use hard routing (argmax). If False, use soft routing.
+            temperature: Temperature for softmax (lower = sharper routing)
             
         Returns:
-            routing_weights: One-hot or soft routing weights of shape (B, n_experts)
-            expert_indices: Selected expert indices of shape (B,)
-            router_logits: Raw logits for load balancing loss of shape (B, n_experts)
+            routing_weights: Soft routing weights of shape (B, n_experts)
+            top_k_indices: Indices of top-k experts per sample of shape (B, top_k)
+            router_logits: Raw logits of shape (B, n_experts)
         """
         B, C, H, W = x.shape
         
@@ -87,36 +101,37 @@ class Router(nn.Module):
         # Extract features using transformer encoder
         features = self.encoder(x_seq)  # (B, W, hidden_dim)
         
-        # Global average pooling over spatial dimension
-        features = features.mean(dim=1)  # (B, hidden_dim)
+        # Global max pooling over spatial dimension
+        features = features.max(dim=1).values  # (B, hidden_dim)
         
         # Compute expert logits
         router_logits = self.fc(features)  # (B, n_experts)
         
-        if hard and not self.training:
-            # Hard routing during inference: use argmax
-            expert_indices = router_logits.argmax(dim=-1)  # (B,)
-            routing_weights = F.one_hot(expert_indices, num_classes=self.n_experts).float()
-        else:
-            # During training: use Gumbel-Softmax for differentiable hard routing
-            routing_weights = F.gumbel_softmax(router_logits, tau=temperature, hard=hard)
-            expert_indices = routing_weights.argmax(dim=-1)
+        # Get top-k experts
+        top_k_logits, top_k_indices = torch.topk(router_logits, self.top_k, dim=-1)  # (B, top_k)
         
-        return routing_weights, expert_indices, router_logits
+        # Apply temperature-scaled softmax to top-k logits for smooth blending
+        top_k_weights = F.softmax(top_k_logits / temperature, dim=-1)  # (B, top_k)
+        
+        # Scatter top-k weights into full routing weight tensor
+        routing_weights = torch.zeros_like(router_logits)  # (B, n_experts)
+        routing_weights.scatter_(dim=-1, index=top_k_indices, src=top_k_weights)
+        
+        return routing_weights, top_k_indices, router_logits
 
 
 class MoEFNO(nn.Module):
     """
     Mixture of Experts FNO.
     
-    Uses multiple FNO experts with a learned router for hard routing.
-    Each input sample is processed by exactly one expert based on
-    the router's decision.
+    Uses multiple FNO experts with a learned router for soft top-k routing.
+    Each input sample is processed by a weighted combination of the top-k
+    experts, enabling smoother expert transitions and better gradient flow.
     
     Features:
-    - Hard routing via Gumbel-Softmax during training
-    - Load balancing auxiliary loss to encourage expert utilization
-    - Efficient batched computation when samples share the same expert
+    - Soft top-k routing with temperature-controlled blending
+    - Weighted combination of expert outputs for smooth transitions
+    - No load balancing loss - experts specialize naturally
     """
     
     def __init__(
@@ -130,7 +145,7 @@ class MoEFNO(nn.Module):
         router_hidden_dim: int = 64,
         router_num_layers: int = 2,
         router_num_heads: int = 4,
-        load_balance_weight: float = 0.01,
+        top_k: int = 2,
     ):
         """
         Initialize the MoE-FNO model.
@@ -145,12 +160,12 @@ class MoEFNO(nn.Module):
             router_hidden_dim: Hidden dimension for the router's transformer encoder
             router_num_layers: Number of transformer encoder layers in the router
             router_num_heads: Number of attention heads in the router
-            load_balance_weight: Weight for the load balancing auxiliary loss
+            top_k: Number of top experts to blend per sample (default: 2)
         """
         super().__init__()
         
         self.n_experts = n_experts
-        self.load_balance_weight = load_balance_weight
+        self.top_k = min(top_k, n_experts)
         
         # Router network with transformer encoder
         self.router = Router(
@@ -159,6 +174,7 @@ class MoEFNO(nn.Module):
             hidden_dim=router_hidden_dim,
             num_encoder_layers=router_num_layers,
             num_heads=router_num_heads,
+            top_k=self.top_k,
         )
         
         # Create FNO experts
@@ -173,45 +189,6 @@ class MoEFNO(nn.Module):
             for _ in range(n_experts)
         ])
     
-    def compute_load_balance_loss(
-        self, 
-        router_logits: torch.Tensor,
-        expert_indices: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute load balancing auxiliary loss.
-        
-        Encourages uniform expert utilization by penalizing imbalanced
-        routing. Uses the formulation from Switch Transformer paper.
-        
-        Args:
-            router_logits: Router logits of shape (B, n_experts)
-            expert_indices: Selected expert indices of shape (B,)
-            
-        Returns:
-            Load balancing loss scalar
-        """
-        batch_size = router_logits.size(0)
-        
-        # Fraction of samples routed to each expert
-        # f_i = (1/B) * sum_j 1(expert_j == i)
-        expert_counts = torch.bincount(
-            expert_indices, 
-            minlength=self.n_experts
-        ).float()
-        fraction_routed = expert_counts / batch_size  # (n_experts,)
-        
-        # Average routing probability for each expert
-        # P_i = (1/B) * sum_j softmax(router_logits_j)_i
-        router_probs = F.softmax(router_logits, dim=-1)  # (B, n_experts)
-        avg_prob = router_probs.mean(dim=0)  # (n_experts,)
-        
-        # Load balance loss: n_experts * sum(f_i * P_i)
-        # This is minimized when routing is uniform
-        load_balance_loss = self.n_experts * (fraction_routed * avg_prob).sum()
-        
-        return load_balance_loss
-    
     def forward(
         self, 
         x: torch.Tensor,
@@ -219,80 +196,94 @@ class MoEFNO(nn.Module):
         return_routing_info: bool = False,
     ) -> torch.Tensor | Tuple[torch.Tensor, dict]:
         """
-        Forward pass through MoE-FNO.
+        Forward pass through MoE-FNO with soft top-k routing.
+        
+        Each sample is processed by the top-k experts, and outputs are
+        combined using the routing weights for smooth blending.
         
         Args:
             x: Input tensor of shape (B, in_channels, H, W)
-            temperature: Temperature for Gumbel-Softmax routing
+            temperature: Temperature for softmax routing (lower = sharper)
             return_routing_info: If True, return additional routing information
             
         Returns:
             output: Output tensor of shape (B, out_channels, H, W)
             routing_info: (optional) Dictionary containing:
-                - expert_indices: Which expert processed each sample
-                - routing_weights: Routing weights
-                - load_balance_loss: Auxiliary loss for load balancing
+                - top_k_indices: Which top-k experts processed each sample
+                - routing_weights: Soft routing weights for all experts
+                - router_logits: Raw router logits
         """
         batch_size = x.size(0)
         
         # Get routing decisions
-        routing_weights, expert_indices, router_logits = self.router(
-            x, temperature=temperature, hard=True
+        routing_weights, top_k_indices, router_logits = self.router(
+            x, temperature=temperature
         )
         
         # Initialize output tensor
         output = torch.zeros_like(self.experts[0](x[:1])).repeat(batch_size, 1, 1, 1)
         output = output.to(x.device)
         
-        # Process samples through their assigned experts
-        # Group samples by expert for efficient batched computation
+        # Process through each expert and accumulate weighted outputs
+        # Only process experts that have non-zero weights for at least one sample
         for expert_idx in range(self.n_experts):
-            # Find samples assigned to this expert
-            mask = expert_indices == expert_idx
-            if not mask.any():
+            # Get the routing weight for this expert for all samples
+            expert_weight = routing_weights[:, expert_idx]  # (B,)
+            
+            # Find samples that use this expert (non-zero weight)
+            active_mask = expert_weight > 0
+            if not active_mask.any():
                 continue
             
-            # Get indices of samples for this expert
-            sample_indices = mask.nonzero(as_tuple=True)[0]
+            # Get indices and weights of active samples
+            active_indices = active_mask.nonzero(as_tuple=True)[0]
+            active_weights = expert_weight[active_indices]  # (n_active,)
             
             # Batch process through expert
-            expert_input = x[sample_indices]
-            expert_output = self.experts[expert_idx](expert_input)
+            expert_input = x[active_indices]
+            expert_output = self.experts[expert_idx](expert_input)  # (n_active, C, H, W)
             
-            # Place outputs in correct positions
-            output[sample_indices] = expert_output
+            # Weight the expert output and accumulate
+            # Reshape weights for broadcasting: (n_active,) -> (n_active, 1, 1, 1)
+            weighted_output = expert_output * active_weights.view(-1, 1, 1, 1)
+            
+            # Accumulate into output at the correct positions
+            output[active_indices] = output[active_indices] + weighted_output
         
         if return_routing_info:
-            load_balance_loss = self.compute_load_balance_loss(
-                router_logits, expert_indices
-            )
-            
             routing_info = {
-                'expert_indices': expert_indices,
+                'top_k_indices': top_k_indices,
                 'routing_weights': routing_weights,
                 'router_logits': router_logits,
-                'load_balance_loss': load_balance_loss,
             }
             return output, routing_info
         
         return output
     
-    def get_expert_usage_stats(self, expert_indices: torch.Tensor) -> dict:
+    def get_expert_usage_stats(self, routing_weights: torch.Tensor) -> dict:
         """
-        Compute expert usage statistics.
+        Compute expert usage statistics from soft routing weights.
         
         Args:
-            expert_indices: Expert indices from a batch of shape (B,)
+            routing_weights: Soft routing weights of shape (B, n_experts)
             
         Returns:
             Dictionary with usage statistics per expert
         """
-        counts = torch.bincount(expert_indices, minlength=self.n_experts)
-        total = counts.sum().item()
+        # Sum of routing weights per expert (soft usage measure)
+        weight_sums = routing_weights.sum(dim=0)  # (n_experts,)
+        total_weight = weight_sums.sum().item()
+        
+        # Count how many samples have each expert in their top-k
+        active_counts = (routing_weights > 0).sum(dim=0)  # (n_experts,)
+        
+        # Compute entropy of the weight distribution
+        weight_probs = weight_sums / (total_weight + 1e-8)
+        entropy = -(weight_probs * torch.log(weight_probs + 1e-8)).sum().item()
         
         return {
-            'counts': counts.tolist(),
-            'fractions': (counts.float() / total).tolist() if total > 0 else [0] * self.n_experts,
-            'entropy': -(F.softmax(counts.float(), dim=0) * 
-                        F.log_softmax(counts.float() + 1e-8, dim=0)).sum().item(),
+            'weight_sums': weight_sums.tolist(),
+            'weight_fractions': (weight_sums / (total_weight + 1e-8)).tolist(),
+            'active_counts': active_counts.tolist(),
+            'entropy': entropy,
         }
