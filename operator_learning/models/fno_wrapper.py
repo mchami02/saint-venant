@@ -1,9 +1,8 @@
+
 import torch
-import torch.nn as nn
-from typing import Optional, Tuple
-from neuralop.models import FNO
 from neuralop.layers.spectral_convolution import SpectralConv
-from neuralop.layers.fno_block import FNOBlocks
+from neuralop.models import FNO
+
 
 class SpectralConvSparse(SpectralConv):
     """
@@ -217,8 +216,8 @@ class SpectralConvSparse(SpectralConv):
         
         # Resolution scaling
         if self.resolution_scaling_factor is not None and output_shape is None:
-            mode_sizes = tuple([round(s * r) for (s, r) in 
-                               zip(mode_sizes, self.resolution_scaling_factor)])
+            mode_sizes = tuple([round(s * r) for (s, r) in
+                               zip(mode_sizes, self.resolution_scaling_factor, strict=False)])
         if output_shape is not None:
             mode_sizes = output_shape
         

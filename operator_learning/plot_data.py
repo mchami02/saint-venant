@@ -2,7 +2,9 @@
 
 import argparse
 import tempfile
+
 import matplotlib
+
 matplotlib.use('Agg')  # Use non-interactive backend (thread-safe, no GUI)
 import matplotlib.pyplot as plt
 import numpy as np
@@ -48,7 +50,7 @@ def _create_comparison_animation(gt, pred, nx, nt, dx, dt, sample_idx, skip_fram
     line_gt, = axes[0].plot(x, gt[0], 'b-', linewidth=2)
     line_pred, = axes[1].plot(x, pred[0], 'r-', linewidth=2)
     
-    for ax, title in zip(axes, [f'Ground Truth (Sample {sample_idx+1})', f'Prediction (Sample {sample_idx+1})']):
+    for ax, title in zip(axes, [f'Ground Truth (Sample {sample_idx+1})', f'Prediction (Sample {sample_idx+1})'], strict=False):
         ax.set_xlim(0, nx * dx)
         ax.set_ylim(y_min - y_margin, y_max + y_margin)
         ax.set_xlabel('Position x')
@@ -138,64 +140,6 @@ def _create_delta_u_animation(gt, delta_u, nx, nt, dx, dt, sample_idx, skip_fram
     return anim, fig
 
 
-def plot_delta_u_comet(ground_truth, delta_u, nx, nt, dx, dt, experiment, epoch, test=False):
-    """
-    Create comparison plots (ground truth, delta u) and upload to Comet.
-    Also creates animated GIFs showing the evolution through time.
-    
-    Args:
-        ground_truth: (B, nt, nx) or (nt, nx) array
-        delta_u: (B, nt, nx) or (nt, nx) array
-        nx, nt: Grid dimensions
-        dx, dt: Grid spacing
-        experiment: Comet experiment object
-        epoch: Current epoch number
-        test: Whether this is a test plot
-    """
-    ground_truth = np.asarray(ground_truth)
-    delta_u = np.asarray(delta_u)
-    
-    # Handle 2D input by adding batch dimension
-    if ground_truth.ndim == 2:
-        ground_truth = ground_truth[np.newaxis, ...]
-        delta_u = delta_u[np.newaxis, ...]
-    
-    B = ground_truth.shape[0]
-    
-    # Create static comparison plots
-    fig, axes = plt.subplots(B, 2, figsize=(12, 5 * B))
-    if B == 1:
-        axes = axes.reshape(1, -1)
-    
-    extent = [0, nx * dx, 0, nt * dt]
-    
-    for b in range(B):
-        # Ground Truth
-        im1 = axes[b, 0].imshow(ground_truth[b], extent=extent, aspect='auto', 
-                                 origin='lower', cmap='jet', vmin=0, vmax=1)
-        axes[b, 0].set_xlabel('Space x')
-        axes[b, 0].set_ylabel('Time t')
-        axes[b, 0].set_title(f'Ground Truth (Sample {b+1})')
-        plt.colorbar(im1, ax=axes[b, 0], label='Value')
-        
-        # Delta U
-        du_min, du_max = delta_u[b].min(), delta_u[b].max()
-        du_abs_max = max(abs(du_min), abs(du_max))
-        im2 = axes[b, 1].imshow(delta_u[b], extent=extent, aspect='auto',
-                                 origin='lower', cmap='RdBu_r', vmin=-du_abs_max, vmax=du_abs_max)
-        axes[b, 1].set_xlabel('Space x')
-        axes[b, 1].set_ylabel('Time t')
-        axes[b, 1].set_title(f'Delta U (Sample {b+1})')
-        plt.colorbar(im2, ax=axes[b, 1], label='Δu')
-    
-    plt.tight_layout()
-    if not test:
-        experiment.log_figure(figure_name="delta_u_plot", figure=fig, step=epoch)
-    else:
-        experiment.log_figure(figure_name="test_delta_u_plot", figure=fig, step=epoch)
-
-    plt.close(fig)
-    
 def plot_comparison_comet(ground_truth, prediction, nx, nt, dx, dt, experiment, epoch, mode):
     """
     Create comparison plots (ground truth, prediction, difference) and upload to Comet.

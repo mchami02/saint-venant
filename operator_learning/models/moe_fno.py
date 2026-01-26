@@ -7,10 +7,10 @@ a weighted combination of experts for smoother expert transitions.
 """
 
 import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional
 
 # Suppress neuralop metadata warning when creating multiple FNO instances
 warnings.filterwarnings(
@@ -73,7 +73,7 @@ class Router(nn.Module):
         self, 
         x: torch.Tensor, 
         temperature: float = 1.0,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute routing weights for each input based on initial condition.
         
@@ -136,7 +136,7 @@ class MoEFNO(nn.Module):
     
     def __init__(
         self,
-        n_modes: Tuple[int, ...],
+        n_modes: tuple[int, ...],
         hidden_channels: int,
         n_experts: int,
         in_channels: int = 1,
@@ -194,7 +194,7 @@ class MoEFNO(nn.Module):
         x: torch.Tensor,
         temperature: float = 1.0,
         return_routing_info: bool = False,
-    ) -> torch.Tensor | Tuple[torch.Tensor, dict]:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Forward pass through MoE-FNO with soft top-k routing.
         

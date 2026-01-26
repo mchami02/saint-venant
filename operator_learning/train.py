@@ -1,24 +1,29 @@
+import argparse
+import os
+import random
+from concurrent.futures import ThreadPoolExecutor
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 from comet_ml import start
 from comet_ml.integration.pytorch import log_model
-import argparse
-import random
-from typing import Any
-from concurrent.futures import ThreadPoolExecutor
-from numerical_methods import Godunov, Greenshields, Triangular, LWRRiemannSolver, SVERiemannSolver
-from operator_data_pipeline import get_datasets, get_dataset, get_multi_res_datasets
-from torch.utils.data import DataLoader
-import torch
-import numpy as np
-from tqdm import tqdm
-import torch.nn as nn
-import os
-from model import create_model
-from torchinfo import summary
-import matplotlib.pyplot as plt
 from loss.lwr_loss import LWRLoss
-from loss.pde_loss import PDELoss
+from model import create_model
+from operator_data_pipeline import get_datasets, get_multi_res_datasets
 from plot_data import plot_comparison_comet, plot_delta_u_comet
-from test import test_model, run_sanity_check, _unpack_model_output
+from test import _unpack_model_output, run_sanity_check, test_model
+from torch.utils.data import DataLoader
+from torchinfo import summary
+from tqdm import tqdm
+
+from numerical_methods import (
+    Godunov,
+    Greenshields,
+    LWRRiemannSolver,
+    SVERiemannSolver,
+    Triangular,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 

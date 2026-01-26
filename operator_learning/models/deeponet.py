@@ -1,5 +1,6 @@
-from deepxde.nn.pytorch import DeepONetCartesianProd, DeepONet
 import torch
+from deepxde.nn.pytorch import DeepONetCartesianProd
+
 
 class DeepONetWrapper(DeepONetCartesianProd):
     def __init__(self, nt, nx, dt, dx, n_features, *args, **kwargs):

@@ -11,10 +11,10 @@ distinct regions that may require different modeling approaches.
 """
 
 import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional, List, Union
 
 # Suppress neuralop metadata warning when creating multiple FNO instances
 warnings.filterwarnings(
@@ -24,6 +24,7 @@ warnings.filterwarnings(
 )
 
 from neuralop.models import FNO
+
 from .encoder import Encoder
 
 
@@ -73,8 +74,8 @@ class FrontPredictor(nn.Module):
     def forward(
         self, 
         encoded_features: torch.Tensor,
-        x_coords: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x_coords: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Predict fronts from encoded initial condition.
         
@@ -258,9 +259,9 @@ class WaveFrontRouter(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        query_t: Optional[torch.Tensor] = None,
-        query_x: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, dict]:
+        query_t: torch.Tensor | None = None,
+        query_x: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, dict]:
         """
         Compute routing weights for query points based on wave front regions.
         
@@ -319,7 +320,7 @@ class WaveFrontRouter(nn.Module):
         x: torch.Tensor,
         t_query: float,
         x_query: float,
-    ) -> Tuple[int, torch.Tensor]:
+    ) -> tuple[int, torch.Tensor]:
         """
         Get the expert routing for a single query point.
         
@@ -427,7 +428,7 @@ class WaveFrontFNO(nn.Module):
         self,
         x: torch.Tensor,
         return_routing_info: bool = False,
-    ) -> torch.Tensor | Tuple[torch.Tensor, dict]:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Forward pass through the wave front MoE model.
         
@@ -484,7 +485,7 @@ class WaveFrontFNO(nn.Module):
         x: torch.Tensor,
         top_k: int = 1,
         return_routing_info: bool = False,
-    ) -> torch.Tensor | Tuple[torch.Tensor, dict]:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Efficient forward pass that only runs top-k experts per location.
         

@@ -7,13 +7,13 @@ This module provides different testing scenarios:
 - test_different_dims: Test on different grid dimensions (same dx, dt but different nx, nt)
 """
 
-import torch
 import numpy as np
-from torch.utils.data import DataLoader
-from tqdm import tqdm
+import torch
 from loss.lwr_loss import LWRLoss
 from operator_data_pipeline import get_dataset
 from plot_data import plot_comparison_comet
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 
@@ -69,24 +69,24 @@ def test_same_distri(model, test_loader, args, experiment=None, mode="test"):
             output = model(full_input)
             pred, _, _ = _unpack_model_output(output)
         
-        loss = test_pde_loss(pred, targets, full_input)
+        test_pde_loss(pred, targets, full_input)
         for i in range(targets.shape[0]):
             gt = targets[i].squeeze(0).detach().cpu().numpy()
             p = pred[i].squeeze(0).detach().cpu().numpy()
             gts.append(gt)
             preds.append(p)
-    
+
     test_loss = test_pde_loss.get_loss_value()
-    
+
     # Log metrics and plots only if experiment is provided
     if experiment is not None:
         test_pde_loss.log_loss_values(experiment, mode)
         print(f"Test Loss ({mode}): {test_loss:.6f}")
-        
+
         gts_np = np.array(gts)[:args.num_plots]
         preds_np = np.array(preds)[:args.num_plots]
         plot_comparison_comet(gts_np, preds_np, args.nx, args.nt, args.dx, args.dt, experiment, epoch=args.epochs, mode=mode)
-    
+
     return test_loss
 
 
@@ -144,20 +144,20 @@ def test_high_res(model, args, experiment=None, mode="test_high_res"):
             output = model(full_input)
             pred, _, _ = _unpack_model_output(output)
         
-        loss = test_pde_loss(pred, targets, full_input)
+        test_pde_loss(pred, targets, full_input)
         for i in range(targets.shape[0]):
             gt = targets[i].squeeze(0).detach().cpu().numpy()
             p = pred[i].squeeze(0).detach().cpu().numpy()
             gts.append(gt)
             preds.append(p)
-    
+
     test_loss = test_pde_loss.get_loss_value()
-    
+
     # Log metrics and plots only if experiment is provided
     if experiment is not None:
         test_pde_loss.log_loss_values(experiment, mode)
         print(f"Test Loss ({mode}): {test_loss:.6f}")
-        
+
         gts_np = np.array(gts)[:args.num_plots]
         preds_np = np.array(preds)[:args.num_plots]
         plot_comparison_comet(gts_np, preds_np, args.nx, args.nt, high_res_dx, high_res_dt, experiment, epoch=args.epochs, mode=mode)
@@ -226,20 +226,20 @@ def test_different_dims(model, args, experiment=None, mode="test_diff_dims"):
             output = model(full_input)
             pred, _, _ = _unpack_model_output(output)
         
-        loss = test_pde_loss(pred, targets, full_input)
+        test_pde_loss(pred, targets, full_input)
         for i in range(targets.shape[0]):
             gt = targets[i].squeeze(0).detach().cpu().numpy()
             p = pred[i].squeeze(0).detach().cpu().numpy()
             gts.append(gt)
             preds.append(p)
-    
+
     test_loss = test_pde_loss.get_loss_value()
-    
+
     # Log metrics and plots only if experiment is provided
     if experiment is not None:
         test_pde_loss.log_loss_values(experiment, mode)
         print(f"Test Loss ({mode}): {test_loss:.6f}")
-        
+
         gts_np = np.array(gts)[:args.num_plots]
         preds_np = np.array(preds)[:args.num_plots]
         plot_comparison_comet(gts_np, preds_np, diff_dims_nx, diff_dims_nt, args.dx, args.dt, experiment, epoch=args.epochs, mode=mode)
@@ -361,7 +361,7 @@ def run_sanity_check(model, train_loader, val_loader, args):
         if not has_grads:
             raise RuntimeError("No gradients computed during backward pass!")
         
-        print(f"        Backward pass successful, gradients computed")
+        print("        Backward pass successful, gradients computed")
         break
     
     model.eval()

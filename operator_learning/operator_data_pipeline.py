@@ -1,15 +1,16 @@
-from numerical_methods import GridGenerator
-from joblib import Memory
-from tqdm import tqdm
-from torch.utils.data import Dataset
-from typing import Tuple
-import torch
+
 import numpy as np
-from nfv.initial_conditions import PiecewiseConstant
-from nfv.flows import Greenshield
-from nfv.solvers import LaxHopf
-from nfv.problem import Problem
+import torch
 from hf_grids import download_grids, upload_grids
+from joblib import Memory
+from nfv.flows import Greenshield
+from nfv.initial_conditions import PiecewiseConstant
+from nfv.problem import Problem
+from nfv.solvers import LaxHopf
+from torch.utils.data import Dataset
+from tqdm import tqdm
+
+from numerical_methods import GridGenerator
 
 mem = Memory(location='.cache')
 
@@ -437,7 +438,7 @@ class ICCleaner:
             cleaned.append((full_input, target_grid))
         return cleaned
 
-class GridDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
+class GridDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     """
     Dataset for preprocessed grids.
     
@@ -448,7 +449,11 @@ class GridDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
         transform: Optional transform to apply (e.g., GridMaskInner)
         cleaner: Optional cleaner to filter grids (e.g., ConstCleaner). Set to None to disable.
     """
-    def __init__(self, processed_grids, transform=[GridMaskAllButInitial()], cleaner=ICCleaner()):
+    def __init__(self, processed_grids, transform=None, cleaner=None):
+        if cleaner is None:
+            cleaner = ICCleaner()
+        if transform is None:
+            transform = [GridMaskAllButInitial()]
         if cleaner is not None:
             processed_grids = cleaner(processed_grids)
         self.processed_grids = processed_grids
@@ -457,7 +462,7 @@ class GridDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
     def __len__(self):
         return len(self.processed_grids)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         full_input, target_grid = self.processed_grids[idx]
         
         for transform in self.transform:

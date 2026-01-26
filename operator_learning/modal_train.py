@@ -14,8 +14,9 @@ Usage:
 Note: Modal will automatically provision GPU resources and handle all dependencies.
 """
 
-import modal
 from pathlib import Path
+
+import modal
 
 # Get the directory where this script is located
 script_dir = Path(__file__).parent.resolve()

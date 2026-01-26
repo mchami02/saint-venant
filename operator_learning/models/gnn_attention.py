@@ -1,11 +1,12 @@
-import torch
-from torch import nn
-from einops import rearrange, repeat
-import numpy as np
-from torch.nn.init import xavier_uniform_, constant_, xavier_normal_, orthogonal_
-from torch.utils.checkpoint import checkpoint
-import torch.nn.functional as F
 import dgl.function as fn
+import numpy as np
+import torch
+import torch.nn.functional as F
+from einops import rearrange, repeat
+from torch import nn
+from torch.nn.init import orthogonal_, xavier_uniform_
+from torch.utils.checkpoint import checkpoint
+
 
 def rotate_half(x):
     x = rearrange(x, '... (j d) -> ... j d', j = 2)
@@ -174,7 +175,6 @@ class CrossLinearAttention(nn.Module):
         # x (z^T z)
         # x [b, n1, d]
         # z [b, n2, d]
-        n1 = x.shape[1]   # x [b, n1, d]
         n2 = z.shape[1]   # z [b, n2, d]
 
         q = self.to_q(x)
@@ -424,7 +424,7 @@ class ShallowWater2DDecoder(nn.Module):
                                               z_pos=input_pos)
         h = self.expand_feat(h)
 
-        for step in range(forward_steps//self.out_step):
+        for _ in range(forward_steps//self.out_step):
             if self.rolling_checkpoint and self.training:
                 h = checkpoint(self.propagate, h, propagate_pos)
                 h_out = checkpoint(self.decode, h)
@@ -496,7 +496,6 @@ class MultiHeadAttentionLayer(nn.Module):
     def forward(self, h, pos=None, g=None):
 
         bs, N, C = h.shape
-        device = h.device
         assert C == self.in_dim
 
         assert g
@@ -603,7 +602,7 @@ class InputEncoderLayer(nn.Module):
             self.norm1 = nn.Identity()
             self.norm2 = nn.Identity()
         else:
-            raise ValueError('Norm type {} not supported'.format(self.norm_type))
+            raise ValueError(f'Norm type {self.norm_type} not supported')
 
         self.attention = MultiHeadAttentionLayer(in_dim=in_dim,
                                                  out_dim=out_dim//num_heads,
@@ -648,7 +647,7 @@ class InputEncoderLayer(nn.Module):
         elif self.norm_type in ['group']:
             raise NotImplementedError
         else:
-            raise ValueError('Norm type {} not supported'.format(self.norm_type))
+            raise ValueError(f'Norm type {self.norm_type} not supported')
 
         h_in2 = h.clone()  # for second residual connection
         
@@ -668,16 +667,12 @@ class InputEncoderLayer(nn.Module):
         elif self.norm_type in ['group']:
             raise NotImplementedError
         else:
-            raise ValueError('Norm type {} not supported'.format(self.norm_type))
+            raise ValueError(f'Norm type {self.norm_type} not supported')
 
         return h.view(bs, -1, self.out_channels)
         
     def __repr__(self):
-        return '{}(in_channels={}, out_channels={}, heads={}, residual={})'.format(self.__class__.__name__,
-                                                                                   self.in_channels,
-                                                                                   self.out_channels,
-                                                                                   self.num_heads,
-                                                                                   self.residual)
+        return f'{self.__class__.__name__}(in_channels={self.in_channels}, out_channels={self.out_channels}, heads={self.num_heads}, residual={self.residual})'
 
 class PDEEncoder(nn.Module):
     """
@@ -1157,8 +1152,7 @@ class MaskedGridPredictor(nn.Module):
             pred_grid: (B, out_channels, nt, nx) - predicted full grid
         """
         B = masked_grid.shape[0]
-        device = masked_grid.device
-        
+
         # Extract observed points
         obs_values, obs_pos = self.extract_observed_points(masked_grid)
         # obs_values: (B, N_obs, C)
@@ -1238,9 +1232,6 @@ class ShallowWater2DEncoder(nn.Module):
         self.to_out = nn.Linear(self.hidden_dim_enc, self.hidden_dim_enc_out, bias=False)
 
     def forward(self, h, input_pos=None, g=None):
-
-        bs = h.shape[0]
-
         # Embedding
         h = self.proj_h(h)  # (B, N, D) -> (B, N, D')
 

@@ -1,12 +1,12 @@
+import math
+from functools import reduce
+from math import ceil
+
 import torch
-from einops import rearrange
 import torch.nn as nn
 import torch.nn.functional as F
-from math import ceil
-from functools import reduce
-from einops import einsum
-from torch import nn
-import math
+from einops import einsum, rearrange
+
 
 def moore_penrose_iter_pinv(x, iters = 6):
     device = x.device
@@ -16,12 +16,12 @@ def moore_penrose_iter_pinv(x, iters = 6):
     row = abs_x.sum(dim = -2)
     z = rearrange(x, '... i j -> ... j i') / (torch.max(col) * torch.max(row))
 
-    I = torch.eye(x.shape[-1], device = device)
-    I = rearrange(I, 'i j -> () i j')
+    eye = torch.eye(x.shape[-1], device = device)
+    eye = rearrange(eye, 'i j -> () i j')
 
     for _ in range(iters):
         xz = x @ z
-        z = 0.25 * z @ (13 * I - (xz @ (15 * I - (xz @ (7 * I - xz)))))
+        z = 0.25 * z @ (13 * eye - (xz @ (15 * eye - (xz @ (7 * eye - xz)))))
 
     return z
 
@@ -106,7 +106,7 @@ class NystromAttention(nn.Module):
             self.res_conv = nn.Conv2d(heads, heads, (kernel_size, 1), padding = (padding, 0), groups = heads, bias = False)
 
     def forward(self, x, mask = None, return_attn = False):
-        b, n, _, h, m, iters, eps = *x.shape, self.heads, self.num_landmarks, self.pinv_iterations, self.eps
+        _b, n, _, h, m, iters, eps = *x.shape, self.heads, self.num_landmarks, self.pinv_iterations, self.eps
 
         # pad so that sequence can be evenly divided into m landmarks
 
@@ -133,16 +133,16 @@ class NystromAttention(nn.Module):
 
         # generate landmarks by sum reduction, and then calculate mean using the mask
 
-        l = ceil(n / m)
+        lm_size = ceil(n / m)
         landmark_einops_eq = '... (n l) d -> ... n d'
-        q_landmarks = reduce(q, landmark_einops_eq, 'sum', l = l)
-        k_landmarks = reduce(k, landmark_einops_eq, 'sum', l = l)
+        q_landmarks = reduce(q, landmark_einops_eq, 'sum', l = lm_size)
+        k_landmarks = reduce(k, landmark_einops_eq, 'sum', l = lm_size)
 
         # calculate landmark mask, and also get sum of non-masked elements in preparation for masked mean
 
-        divisor = l
+        divisor = lm_size
         if mask is not None:
-            mask_landmarks_sum = reduce(mask, '... (n l) -> ... n', 'sum', l = l)
+            mask_landmarks_sum = reduce(mask, '... (n l) -> ... n', 'sum', l = lm_size)
             divisor = mask_landmarks_sum[..., None] + eps
             mask_landmarks = mask_landmarks_sum > 0
 

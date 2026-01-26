@@ -1,15 +1,16 @@
-from neuralop.models import FNO
-from models.fno_wrapper import fno_custom_freqs
-from models.wno import WNO2d
-from models.lno import LNOWrapper
+import torch
 from models.deeponet import DeepONetWrapper
 from models.encoder_decoder import EncoderDecoder
 from models.fno_cnn import FNOCNNWrapper
 from models.fno_denoiser import FNODenoiserWrapper
+from models.fno_wrapper import fno_custom_freqs
+from models.lno import LNOWrapper
 from models.moe_fno import MoEFNO
-from models.wave_front_router import WaveFrontFNO
 from models.wave_front_pred import WaveFront
-import torch
+from models.wave_front_router import WaveFrontFNO
+from models.wno import WNO2d
+from neuralop.models import FNO
+
 torch.set_default_device(None)
 
 class OperatorModel(torch.nn.Module):

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+
 from operator_learning.loss.pde_loss import PDELoss
 
 
@@ -190,7 +191,7 @@ class LWRLoss(PDELoss):
             jump_threshold: Threshold for gradient jump in shock detection
                 (higher = fewer cells excluded, default 0.3)
         """
-        super(LWRLoss, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.pinn_method = pinn_method
         self.curvature_threshold = curvature_threshold
         self.jump_threshold = jump_threshold

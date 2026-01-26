@@ -13,19 +13,20 @@ The visualization shows:
 """
 
 import argparse
-import torch
-import torch.nn as nn
-import numpy as np
+import os
+
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm, Normalize
-from operator_data_pipeline import GridDataset
+import numpy as np
+import torch
+from matplotlib.colors import LogNorm
 from model import create_model
-from numerical_methods import Godunov, Greenshields, LWRRiemannSolver
+from nfv.flows import Greenshield
 from nfv.initial_conditions import Riemann
 from nfv.problem import Problem
-from nfv.flows import Greenshield
 from nfv.solvers import LaxHopf
-import os
+from operator_data_pipeline import GridDataset
+
+from numerical_methods import Godunov, Greenshields, LWRRiemannSolver
 
 # Device setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -69,7 +70,7 @@ class SpectralCaptureHook:
     
     def register_hooks(self, model):
         """Register forward hooks on all SpectralConv layers."""
-        for i, conv in enumerate(model.fno_blocks.convs):
+        for conv in model.fno_blocks.convs:
             handle = conv.register_forward_hook(self.hook_fn)
             self.handles.append(handle)
         print(f"Registered hooks on {len(self.handles)} SpectralConv layers")
@@ -113,7 +114,6 @@ def plot_spectral_visualization(model, sample_input, sample_target, save_path="r
     
     # Get data
     spectral_inputs = hook.spectral_inputs
-    spectral_outputs = hook.spectral_outputs
     n_layers = len(spectral_inputs)
     spectral_weights = extract_spectral_weights(model)
     
@@ -132,8 +132,7 @@ def plot_spectral_visualization(model, sample_input, sample_target, save_path="r
     # ============================================
     # Column 0: Spatial domain comparison
     # ============================================
-    
-    input_np = sample_input[0, 0].cpu().numpy()
+
     output_np = output[0, 0].cpu().numpy()
     target_np = sample_target[0, 0].cpu().numpy()
     error_np = np.abs(output_np - target_np)
@@ -309,8 +308,8 @@ def plot_before_after_spectrum(model, sample_input, sample_target, save_path="re
     
     with torch.no_grad():
         sample_input = sample_input.to(device)
-        output = model(sample_input)
-    
+        model(sample_input)
+
     spectral_inputs = hook.spectral_inputs
     spectral_outputs = hook.spectral_outputs
     n_layers = len(spectral_inputs)
@@ -533,19 +532,19 @@ def visualize_sample(model, sample_input, sample_target, output_folder):
     """Generate all visualizations for a single sample."""
     os.makedirs(output_folder, exist_ok=True)
     
-    print(f"\n  Creating main spectral visualization...")
+    print("\n  Creating main spectral visualization...")
     plot_spectral_visualization(model, sample_input, sample_target, 
                                  f"{output_folder}/spectral_viz.png")
     
-    print(f"  Creating detailed spectrum visualization...")
+    print("  Creating detailed spectrum visualization...")
     plot_detailed_spectrum(model, sample_input, sample_target, 
                            f"{output_folder}/spectral_detailed.png")
     
-    print(f"  Creating before/after comparison...")
+    print("  Creating before/after comparison...")
     plot_before_after_spectrum(model, sample_input, sample_target, 
                                 f"{output_folder}/spectral_before_after.png")
     
-    print(f"  Creating spectral evolution visualization...")
+    print("  Creating spectral evolution visualization...")
     plot_spectral_evolution(model, sample_input, sample_target, 
                             f"{output_folder}/spectral_evolution.png")
 
@@ -597,7 +596,7 @@ def main():
             visualize_sample(model, sample_input, sample_target, output_folder)
         
         print("\n" + "="*60)
-        print(f"All Riemann visualizations created!")
+        print("All Riemann visualizations created!")
         print("="*60)
     
     else:

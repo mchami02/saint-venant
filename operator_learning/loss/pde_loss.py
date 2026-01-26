@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 
+
 def decaying_loss(pred, targets, nt):
     '''
     Make the loss decay over the timesteps predicted
     The loss is L=∑_{k=1}^K w_k ∥u^t+k - u^{t+k}∥_2^2 where w_k = gamma^(k-1)'''
-    timesteps = torch.arange(1, nt, device=pred.device, dtype=pred.dtype)
     weights = torch.linspace(1, 0, nt-1, device=pred.device, dtype=pred.dtype)  # shape: (nt-1,)
     mse = (pred[:, :, 1:] - targets[:, :, 1:]).pow(2).mean(dim=(0, 1)).mean(dim=-1)  # shape: (nt-1,)
     loss = (weights * mse).sum()
@@ -41,7 +41,7 @@ class PDELoss(torch.nn.Module):
             pinn_weight: weight for PINN loss component (0.0 = no PINN loss, >0 = weighted PINN loss)
             subset: fraction of spatial points to use for loss computation
         """
-        super(PDELoss, self).__init__()
+        super().__init__()
         self.nt = nt
         self.nx = nx
         self.dt = dt

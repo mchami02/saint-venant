@@ -13,11 +13,10 @@ point falls into relative to the detected fronts.
 Supports multiple fronts for piecewise constant initial conditions.
 """
 
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional, List
-
 from neuralop.models import FNO
 
 
@@ -131,7 +130,7 @@ class FrontDetector(nn.Module):
         # Neural network for predicting front speeds
         self.speed_predictor = FrontSpeedPredictor(hidden_dim)
     
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         '''
         Takes as input the initial conditions of shape (B, C, X) where:
         - Channel 0: density values
@@ -147,7 +146,6 @@ class FrontDetector(nn.Module):
         Only keeps top max_fronts discontinuities per batch item.
         '''
         B, C, X = x.shape
-        device = x.device
         K = self.max_fronts
         
         # Get density values (channel 0)
@@ -288,7 +286,7 @@ class RegionIndexer(nn.Module):
         self.front_threshold = front_threshold
         self.sharpness = sharpness  # Controls sigmoid sharpness for soft routing
 
-    def forward(self, front_params: torch.Tensor, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, front_params: torch.Tensor, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         '''
         Takes as input the front parameters and the coordinates of the query points.
         Returns SOFT region weights that are differentiable w.r.t. front speeds.
@@ -413,7 +411,6 @@ class WaveFront(nn.Module):
         front_params, front_count = self.front_detector(x[:, :, 0, :])
         
         # Extract front info
-        front2_conf = front_params[:, 2, :]    # (B, K)
         uL = front_params[:, 3, :]             # (B, K)
         uR = front_params[:, 4, :]             # (B, K)
         front_coords = front_params[:, 5, :]   # (B, K)
@@ -534,7 +531,7 @@ if __name__ == "__main__":
     print(f"  - Expected: ({B}, {T}, {X})")
     print(f"Is Riemann soft shape: {is_riemann_soft.shape}")  # Should be (B, T, X)
     print(f"Is Riemann soft range: [{is_riemann_soft.min():.3f}, {is_riemann_soft.max():.3f}]")
-    print(f"Unique region indices per sample:")
+    print("Unique region indices per sample:")
     for b in range(B):
         unique_regions = torch.unique(region_idx[b])
         print(f"  Sample {b}: {unique_regions.tolist()}")

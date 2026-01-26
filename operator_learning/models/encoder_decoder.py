@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-
-from models.encoder import Encoder
 from models.axial_decoder import AxialDecoder
 from models.cross_decoder import CrossDecoder
+from models.encoder import Encoder
 from models.shock_gnn import ShockGNN
 
 
