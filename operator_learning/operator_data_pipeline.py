@@ -110,7 +110,7 @@ def get_grids(solver, flux, nx, nt, dx, dt, max_steps, n_samples):
         upload_grids(grids, solver, flux, nx, nt, dx, dt, max_steps)
     return grids
 
-def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=3, max_train_steps=3, train_ratio=0.8, val_ratio=0.1, random_seed=42):
+def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=2, max_train_steps=2, train_ratio=0.8, val_ratio=0.1, random_seed=42):
     '''
     Get the train, val and test datasets for the given solver, n_samples, nx, nt, dx, dt
     If available in the repository, download the grids from the repository, otherwise generate them and upload them to the repository
@@ -398,6 +398,45 @@ class ConstCleaner:
         return filtered
 
 
+
+class ICCleaner:
+    """
+    Cleaner that removes isolated cells in initial conditions.
+    
+    A cell is considered isolated if its value differs from both its left and 
+    right neighbors. Such cells are replaced with the value of the neighbor
+    they are numerically closest to.
+    """
+    def __init__(self):
+        pass
+
+    def __call__(self, processed_grids):
+        cleaned = []
+        for full_input, target_grid in processed_grids:
+            full_input = full_input.clone()
+            ic = full_input[0, 0, :]  # Initial condition: shape (nx,)
+            nx = ic.shape[0]
+            
+            # Check each cell (except boundary cells)
+            for i in range(1, nx - 1):
+                left_val = ic[i - 1]
+                curr_val = ic[i]
+                right_val = ic[i + 1]
+                
+                # Check if current cell differs from both neighbors
+                if curr_val != left_val and curr_val != right_val:
+                    # Replace with the value of the closest neighbor
+                    left_dist = abs(curr_val - left_val)
+                    right_dist = abs(curr_val - right_val)
+                    
+                    if left_dist <= right_dist:
+                        ic[i] = left_val
+                    else:
+                        ic[i] = right_val
+            
+            cleaned.append((full_input, target_grid))
+        return cleaned
+
 class GridDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
     """
     Dataset for preprocessed grids.
@@ -409,7 +448,7 @@ class GridDataset(Dataset[Tuple[torch.Tensor, torch.Tensor]]):
         transform: Optional transform to apply (e.g., GridMaskInner)
         cleaner: Optional cleaner to filter grids (e.g., ConstCleaner). Set to None to disable.
     """
-    def __init__(self, processed_grids, transform=[GridMaskAllButInitial(), NoisyCoordinates() , OffsetCoordinates()], cleaner=None):
+    def __init__(self, processed_grids, transform=[GridMaskAllButInitial()], cleaner=ICCleaner()):
         if cleaner is not None:
             processed_grids = cleaner(processed_grids)
         self.processed_grids = processed_grids

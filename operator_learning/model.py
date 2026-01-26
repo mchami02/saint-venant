@@ -7,6 +7,8 @@ from models.encoder_decoder import EncoderDecoder
 from models.fno_cnn import FNOCNNWrapper
 from models.fno_denoiser import FNODenoiserWrapper
 from models.moe_fno import MoEFNO
+from models.wave_front_router import WaveFrontFNO
+from models.wave_front_pred import WaveFront
 import torch
 torch.set_default_device(None)
 
@@ -153,14 +155,35 @@ def create_model(args, device):
         model = OperatorModel(MoEFNO,
             n_modes=(16, 8),
             hidden_channels=32,
-            n_experts=2,
+            n_experts=8,
             in_channels=3,
             out_channels=1,
             n_layers=4,
             router_hidden_dim=32,
             router_num_layers=2,
             router_num_heads=4,
-            load_balance_weight=0.01,
+            top_k=2,
+        )
+    elif args.model == "WaveFrontFNO":
+        model = OperatorModel(WaveFrontFNO,
+            n_experts=5,
+            n_modes=(16, 8),
+            n_layers=4,
+            hidden_dim=32,
+            in_channels=3,
+            num_encoder_layers=2,
+            num_heads=8,
+            max_fronts=5,
+            boundary_sharpness=10.0,
+        )
+    elif args.model == "WaveFront":
+        model = OperatorModel(WaveFront,
+            n_modes=(16, 8),
+            hidden_dim=32,
+            in_channels=3,
+            out_channels=1,
+            n_layers=4,
+            front_threshold=0.5,
         )
     else:
         raise ValueError(f"Model {args.model} not supported")
