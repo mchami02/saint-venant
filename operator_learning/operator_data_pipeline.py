@@ -449,14 +449,12 @@ class GridDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         transform: Optional transform to apply (e.g., GridMaskInner)
         cleaner: Optional cleaner to filter grids (e.g., ConstCleaner). Set to None to disable.
     """
-    def __init__(self, processed_grids, transform=GridMaskAllButInitial(), cleaner=ICCleaner()):
+    def __init__(self, processed_grids, transform=[GridMaskAllButInitial()], cleaner=ICCleaner()):
         if cleaner is not None:
             processed_grids = cleaner(processed_grids)
         self.processed_grids = processed_grids
         if transform is not None:
-            self.transform = [transform]
-        else:
-            self.transform = []
+            self.transform = transform
 
     def __len__(self):
         return len(self.processed_grids)
