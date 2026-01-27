@@ -184,7 +184,6 @@ def create_model(args, device):
             in_channels=3,
             out_channels=1,
             n_layers=4,
-            front_threshold=0.5,
         )
     else:
         raise ValueError(f"Model {args.model} not supported")

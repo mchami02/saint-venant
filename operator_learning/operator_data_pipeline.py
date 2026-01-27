@@ -148,8 +148,8 @@ def get_datasets(solver, flux, n_samples, nx, nt, dx, dt, max_steps=2, max_train
     test_processed = preprocess_grids(test_grids, nx, nt, dx, dt)
     
     train_dataset = GridDataset(train_processed)
-    val_dataset = GridDataset(val_processed, cleaner=None)
-    test_dataset = GridDataset(test_processed, cleaner=None)
+    val_dataset = GridDataset(val_processed)
+    test_dataset = GridDataset(test_processed)
 
     return train_dataset, val_dataset, test_dataset
 
@@ -449,15 +449,14 @@ class GridDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         transform: Optional transform to apply (e.g., GridMaskInner)
         cleaner: Optional cleaner to filter grids (e.g., ConstCleaner). Set to None to disable.
     """
-    def __init__(self, processed_grids, transform=None, cleaner=None):
-        if cleaner is None:
-            cleaner = ICCleaner()
-        if transform is None:
-            transform = [GridMaskAllButInitial()]
+    def __init__(self, processed_grids, transform=GridMaskAllButInitial(), cleaner=ICCleaner()):
         if cleaner is not None:
             processed_grids = cleaner(processed_grids)
         self.processed_grids = processed_grids
-        self.transform = transform
+        if transform is not None:
+            self.transform = [transform]
+        else:
+            self.transform = []
 
     def __len__(self):
         return len(self.processed_grids)

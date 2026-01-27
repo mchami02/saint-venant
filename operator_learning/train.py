@@ -357,7 +357,9 @@ def main():
     
     model = create_model(args, device)
     if args.model_path is not None:
-        model.load_state_dict(torch.load(args.model_path, weights_only=False))
+        state_dict = torch.load('operator.pth', weights_only=False)
+        state_dict = {k: v for k, v in state_dict.items() if k != '_metadata'}
+        model.load_state_dict(state_dict)
     summary(model)
     
     # Run sanity check before training to ensure all code paths work
