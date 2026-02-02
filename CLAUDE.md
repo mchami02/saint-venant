@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**IMPORTANT**: After completing any task that modifies a folder's structure (adding/removing files), update the corresponding `structure.md` file to reflect the changes. If no `structure.md` exists in that folder, create one.
+
 ## Project Overview
 
 A research project for solving 1D shallow water (Saint-Venant) equations using both traditional finite volume numerical methods and machine learning-based neural operators. The codebase supports two equation systems:
@@ -61,6 +63,13 @@ uv run ruff format .
 3. **learner/** - Simpler sequential encoder-predictor model
    - `model.py`: SVEModel with separate h/u prediction heads
    - `data_pipeline.py`: AutoRegressiveDataset for sequential prediction
+
+4. **wavefront_learning/** - Discontinuity-based learning (shock trajectories)
+   - `train.py`: Training script with W&B integration
+   - `models/shock_trajectory_net.py`: DeepONet-like model for trajectory prediction
+   - `losses/rankine_hugoniot.py`: Physics-based unsupervised loss (Rankine-Hugoniot)
+   - Uses exact discontinuity points as input instead of discretized grids
+   - See `wavefront_learning/CLAUDE.md` for detailed documentation
 
 ### Data flow
 
