@@ -15,7 +15,12 @@ from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger, log_epoch_metrics
 from loss import LOSSES, get_loss
 from model import MODELS, get_model, load_model, save_model
-from plotter import plot_comparison_wandb, plot_trajectory_wandb
+from plotter import (
+    plot_comparison_wandb,
+    plot_hybrid_predictions_wandb,
+    plot_trajectory_on_grid_wandb,
+    plot_trajectory_wandb,
+)
 from test import test_model
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -79,7 +84,9 @@ def parse_args() -> argparse.Namespace:
 def detach_output(pred):
     """Detach model output (handles both tensor and dict)."""
     if isinstance(pred, dict):
-        return {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in pred.items()}
+        return {
+            k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in pred.items()
+        }
     return pred.detach()
 
 
@@ -152,14 +159,17 @@ def train_epoch(
     all_components = []
 
     for batch_input, batch_target in tqdm(train_loader, desc="Training", leave=False):
-        loss, pred, components = train_step(model, batch_input, batch_target, loss_fn, optimizer)
+        loss, _pred, components = train_step(
+            model, batch_input, batch_target, loss_fn, optimizer
+        )
         total_loss += loss
         all_components.append(components)
 
     avg_loss = total_loss / len(train_loader)
     # Average loss components
     avg_metrics = {
-        key: np.mean([c[key] for c in all_components]) for key in all_components[0].keys()
+        key: np.mean([c[key] for c in all_components])
+        for key in all_components[0].keys()
     }
 
     return avg_loss, avg_metrics
@@ -207,7 +217,8 @@ def validate_epoch(
 
     avg_loss = total_loss / len(val_loader)
     avg_metrics = {
-        key: np.mean([c[key] for c in all_components]) for key in all_components[0].keys()
+        key: np.mean([c[key] for c in all_components])
+        for key in all_components[0].keys()
     }
 
     return avg_loss, avg_metrics
@@ -270,15 +281,21 @@ def sample_trajectory_predictions(
         num_samples: Number of samples to collect.
 
     Returns:
-        Dict with 'positions', 'existence', 'discontinuities', 'masks', 'times'
+        Dict with 'positions', 'existence', 'discontinuities', 'masks', 'times', 'grids'
         as numpy arrays, or None if not a trajectory model.
+        For HybridDeepONet, also includes 'output_grid', 'region_densities', 'region_weights'.
     """
     model.eval()
     positions_list = []
     existence_list = []
     disc_list = []
     mask_list = []
+    grids_list = []
+    output_grid_list = []
+    region_densities_list = []
+    region_weights_list = []
     times = None
+    is_hybrid = False
 
     with torch.no_grad():
         for batch_input, batch_target in val_loader:
@@ -296,6 +313,10 @@ def sample_trajectory_predictions(
             if not isinstance(pred, dict) or "positions" not in pred:
                 return None
 
+            # Check if this is a HybridDeepONet
+            if "output_grid" in pred:
+                is_hybrid = True
+
             # Get times from input
             if times is None:
                 t_coords = batch_input["t_coords"]  # (B, 1, nt, nx)
@@ -307,6 +328,20 @@ def sample_trajectory_predictions(
                 existence_list.append(pred["existence"][i].cpu().numpy())
                 disc_list.append(batch_input["discontinuities"][i].cpu().numpy())
                 mask_list.append(batch_input["disc_mask"][i].cpu().numpy())
+                # Store the ground truth grid for overlay plotting
+                grids_list.append(batch_target[i].squeeze(0).cpu().numpy())
+
+                # HybridDeepONet specific outputs
+                if is_hybrid:
+                    output_grid_list.append(
+                        pred["output_grid"][i].squeeze(0).cpu().numpy()
+                    )
+                    region_densities_list.append(
+                        pred["region_densities"][i].cpu().numpy()
+                    )
+                    region_weights_list.append(
+                        pred["region_weights"][i].cpu().numpy()
+                    )
 
             if len(positions_list) >= num_samples:
                 break
@@ -314,13 +349,23 @@ def sample_trajectory_predictions(
     if not positions_list:
         return None
 
-    return {
+    result = {
         "positions": np.array(positions_list),
         "existence": np.array(existence_list),
         "discontinuities": np.array(disc_list),
         "masks": np.array(mask_list),
         "times": times,
+        "grids": np.array(grids_list),
     }
+
+    # Add HybridDeepONet specific outputs
+    if is_hybrid:
+        result["output_grid"] = np.array(output_grid_list)
+        result["region_densities"] = np.array(region_densities_list)
+        result["region_weights"] = np.array(region_weights_list)
+        result["is_hybrid"] = True
+
+    return result
 
 
 def train_model(
@@ -369,31 +414,140 @@ def train_model(
         if logger is not None:
             log_epoch_metrics(logger, epoch + 1, train_loss, val_loss, current_lr)
             logger.log_metrics(
-                {f"train/{k}": v for k, v in train_metrics.items()},
+                {f"train/loss/{k}": v for k, v in train_metrics.items()},
                 step=epoch + 1,
             )
             logger.log_metrics(
-                {f"val/{k}": v for k, v in val_metrics.items()},
+                {f"val/loss/{k}": v for k, v in val_metrics.items()},
                 step=epoch + 1,
             )
 
-            # Plot every 10 epochs
-            if (epoch + 1) % 10 == 0:
+            # Plot every 5 epochs
+            if (epoch + 1) % 5 == 0:
                 # Try trajectory predictions first (for ShockNet-like models)
-                traj_data = sample_trajectory_predictions(model, val_loader, num_samples=2)
+                # Plot training samples
+                traj_data_train = sample_trajectory_predictions(
+                    model, train_loader, num_samples=2
+                )
+                if traj_data_train is not None:
+                    # Check if this is HybridDeepONet
+                    if traj_data_train.get("is_hybrid", False):
+                        plot_hybrid_predictions_wandb(
+                            traj_data_train["grids"],
+                            traj_data_train["output_grid"],
+                            traj_data_train["positions"],
+                            traj_data_train["existence"],
+                            traj_data_train["discontinuities"],
+                            traj_data_train["masks"],
+                            traj_data_train["region_densities"],
+                            traj_data_train["region_weights"],
+                            traj_data_train["times"],
+                            args.nx,
+                            args.nt,
+                            args.dx,
+                            args.dt,
+                            logger,
+                            epoch + 1,
+                            mode="train",
+                        )
+                    else:
+                        plot_trajectory_wandb(
+                            traj_data_train["positions"],
+                            traj_data_train["existence"],
+                            traj_data_train["discontinuities"],
+                            traj_data_train["masks"],
+                            traj_data_train["times"],
+                            logger,
+                            epoch + 1,
+                            mode="train",
+                        )
+                        # Also plot trajectory overlay on grid
+                        plot_trajectory_on_grid_wandb(
+                            traj_data_train["grids"],
+                            traj_data_train["positions"],
+                            traj_data_train["existence"],
+                            traj_data_train["discontinuities"],
+                            traj_data_train["masks"],
+                            traj_data_train["times"],
+                            args.nx,
+                            args.nt,
+                            args.dx,
+                            args.dt,
+                            logger,
+                            epoch + 1,
+                            mode="train",
+                        )
+
+                # Plot validation samples
+                traj_data = sample_trajectory_predictions(
+                    model, val_loader, num_samples=2
+                )
                 if traj_data is not None:
-                    plot_trajectory_wandb(
-                        traj_data["positions"],
-                        traj_data["existence"],
-                        traj_data["discontinuities"],
-                        traj_data["masks"],
-                        traj_data["times"],
-                        logger,
-                        epoch + 1,
-                        mode="val",
-                    )
+                    # Check if this is HybridDeepONet
+                    if traj_data.get("is_hybrid", False):
+                        plot_hybrid_predictions_wandb(
+                            traj_data["grids"],
+                            traj_data["output_grid"],
+                            traj_data["positions"],
+                            traj_data["existence"],
+                            traj_data["discontinuities"],
+                            traj_data["masks"],
+                            traj_data["region_densities"],
+                            traj_data["region_weights"],
+                            traj_data["times"],
+                            args.nx,
+                            args.nt,
+                            args.dx,
+                            args.dt,
+                            logger,
+                            epoch + 1,
+                            mode="val",
+                        )
+                    else:
+                        plot_trajectory_wandb(
+                            traj_data["positions"],
+                            traj_data["existence"],
+                            traj_data["discontinuities"],
+                            traj_data["masks"],
+                            traj_data["times"],
+                            logger,
+                            epoch + 1,
+                            mode="val",
+                        )
+                        # Also plot trajectory overlay on grid
+                        plot_trajectory_on_grid_wandb(
+                            traj_data["grids"],
+                            traj_data["positions"],
+                            traj_data["existence"],
+                            traj_data["discontinuities"],
+                            traj_data["masks"],
+                            traj_data["times"],
+                            args.nx,
+                            args.nt,
+                            args.dx,
+                            args.dt,
+                            logger,
+                            epoch + 1,
+                            mode="val",
+                        )
                 else:
-                    # Standard grid-based models
+                    # Standard grid-based models - plot both train and val
+                    gts_train, preds_train = sample_predictions(
+                        model, train_loader, num_samples=2
+                    )
+                    if gts_train is not None:
+                        plot_comparison_wandb(
+                            gts_train,
+                            preds_train,
+                            args.nx,
+                            args.nt,
+                            args.dx,
+                            args.dt,
+                            logger,
+                            epoch + 1,
+                            mode="train",
+                        )
+
                     gts, preds = sample_predictions(model, val_loader, num_samples=2)
                     if gts is not None:
                         plot_comparison_wandb(
@@ -504,7 +658,8 @@ def main():
         logger.log_metrics({"model/parameters": num_params})
 
     # Train
-    model = train_model(model, train_loader, val_loader, args, logger)
+    if args.epochs > 0:
+        model = train_model(model, train_loader, val_loader, args, logger)
 
     # Final test
     print("\nRunning final evaluation on test set...")
@@ -519,6 +674,7 @@ def main():
         nt=args.nt,
         dx=args.dx,
         dt=args.dt,
+        epoch=args.epochs + 1,  # Log after final training epoch
     )
 
     # Log final model

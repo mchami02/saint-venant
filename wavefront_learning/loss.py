@@ -2,12 +2,13 @@
 
 import torch
 import torch.nn as nn
-
+from losses.hybrid_loss import HybridDeepONetLoss
 from losses.rankine_hugoniot import RankineHugoniotLoss
+
 # Registry of available loss functions
 LOSSES = {
     "rankine_hugoniot": RankineHugoniotLoss,
-    # "mse": nn.MSELoss,
+    "hybrid": HybridDeepONetLoss,
 }
 
 

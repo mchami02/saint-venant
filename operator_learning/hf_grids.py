@@ -1,11 +1,13 @@
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from huggingface_hub import HfApi, hf_hub_download
 
-load_dotenv()
+# Load HF_TOKEN from root-level .env
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # Get token from environment variable (set via `export HF_TOKEN=...` or `huggingface-cli login`)
 api = HfApi(token=os.environ.get("HF_TOKEN"))

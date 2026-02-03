@@ -11,7 +11,12 @@ import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger
-from plotter import plot_comparison_wandb, plot_trajectory_wandb
+from plotter import (
+    plot_comparison_wandb,
+    plot_hybrid_predictions_wandb,
+    plot_trajectory_on_grid_wandb,
+    plot_trajectory_wandb,
+)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -60,6 +65,7 @@ def test_model(
     dx: float = 0.02,
     dt: float = 0.004,
     num_plots: int = 3,
+    epoch: int = 0,  # noqa: ARG001 - kept for API compat, now unused
 ) -> dict[str, float]:
     """Evaluate model on test dataset.
 
@@ -81,18 +87,26 @@ def test_model(
     all_targets = []
     batch_metrics = []
     is_trajectory_model = False
+    is_hybrid_model = False
 
     # For trajectory models: collect data for plotting
     traj_positions = []
     traj_existence = []
     traj_discontinuities = []
     traj_masks = []
+    traj_grids = []
     traj_times = None
+
+    # For HybridDeepONet: additional outputs
+    hybrid_output_grids = []
+    hybrid_region_densities = []
+    hybrid_region_weights = []
 
     with torch.no_grad():
         for batch_input, batch_target in tqdm(test_loader, desc="Testing"):
             # Store original batch_input for trajectory data
             batch_input_orig = batch_input
+            batch_target_orig = batch_target
 
             # Move to device
             if isinstance(batch_input, dict):
@@ -110,7 +124,14 @@ def test_model(
             # Handle trajectory models (dict output)
             if isinstance(pred, dict):
                 is_trajectory_model = True
-                if loss_fn is not None:
+
+                # Check if HybridDeepONet
+                if "output_grid" in pred:
+                    is_hybrid_model = True
+                    # Compute grid-based metrics for HybridDeepONet
+                    grid_metrics = compute_metrics(pred["output_grid"], batch_target)
+                    batch_metrics.append(grid_metrics)
+                elif loss_fn is not None:
                     _, components = loss_fn(pred, batch_input, batch_target)
                     batch_metrics.append(components)
 
@@ -120,8 +141,26 @@ def test_model(
                     for i in range(min(num_plots - len(traj_positions), batch_size)):
                         traj_positions.append(pred["positions"][i].cpu().numpy())
                         traj_existence.append(pred["existence"][i].cpu().numpy())
-                        traj_discontinuities.append(batch_input_orig["discontinuities"][i].cpu().numpy())
-                        traj_masks.append(batch_input_orig["disc_mask"][i].cpu().numpy())
+                        traj_discontinuities.append(
+                            batch_input_orig["discontinuities"][i].cpu().numpy()
+                        )
+                        traj_masks.append(
+                            batch_input_orig["disc_mask"][i].cpu().numpy()
+                        )
+                        traj_grids.append(batch_target_orig[i].squeeze(0).cpu().numpy())
+
+                        # HybridDeepONet specific
+                        if is_hybrid_model:
+                            hybrid_output_grids.append(
+                                pred["output_grid"][i].squeeze(0).cpu().numpy()
+                            )
+                            hybrid_region_densities.append(
+                                pred["region_densities"][i].cpu().numpy()
+                            )
+                            hybrid_region_weights.append(
+                                pred["region_weights"][i].cpu().numpy()
+                            )
+
                     if traj_times is None:
                         t_coords = batch_input_orig["t_coords"]
                         traj_times = t_coords[0, 0, :, 0].cpu().numpy()
@@ -138,7 +177,8 @@ def test_model(
     # Aggregate metrics
     if batch_metrics:
         avg_metrics = {
-            key: np.mean([m[key] for m in batch_metrics]) for key in batch_metrics[0].keys()
+            key: np.mean([m[key] for m in batch_metrics])
+            for key in batch_metrics[0].keys()
         }
     else:
         avg_metrics = {}
@@ -150,11 +190,32 @@ def test_model(
         print(f"  {key}: {value:.6f}")
     print("-" * 40)
 
-    # Log to W&B if logger provided
+    # Log to W&B if logger provided (use summary for test metrics)
     if logger is not None:
-        logger.log_metrics({f"test/{k}": v for k, v in avg_metrics.items()})
+        logger.log_summary({f"test/{k}": v for k, v in avg_metrics.items()})
 
-        if is_trajectory_model and traj_positions:
+        if is_hybrid_model and traj_positions:
+            # Plot HybridDeepONet comprehensive visualization
+            plot_hybrid_predictions_wandb(
+                np.array(traj_grids),
+                np.array(hybrid_output_grids),
+                np.array(traj_positions),
+                np.array(traj_existence),
+                np.array(traj_discontinuities),
+                np.array(traj_masks),
+                np.array(hybrid_region_densities),
+                np.array(hybrid_region_weights),
+                traj_times,
+                nx,
+                nt,
+                dx,
+                dt,
+                logger,
+                epoch=None,
+                mode="test",
+                use_summary=False,
+            )
+        elif is_trajectory_model and traj_positions:
             # Plot trajectory for trajectory models
             plot_trajectory_wandb(
                 np.array(traj_positions),
@@ -163,14 +224,43 @@ def test_model(
                 np.array(traj_masks),
                 traj_times,
                 logger,
-                epoch=0,
+                epoch=None,
                 mode="test",
+                use_summary=False,
+            )
+            # Also plot trajectory overlay on grid
+            plot_trajectory_on_grid_wandb(
+                np.array(traj_grids),
+                np.array(traj_positions),
+                np.array(traj_existence),
+                np.array(traj_discontinuities),
+                np.array(traj_masks),
+                traj_times,
+                nx,
+                nt,
+                dx,
+                dt,
+                logger,
+                epoch=None,
+                mode="test",
+                use_summary=False,
             )
         elif not is_trajectory_model and all_targets:
             # Plot comparison for standard models
             gts = np.array(all_targets[:num_plots])
             preds = np.array(all_preds[:num_plots])
-            plot_comparison_wandb(gts, preds, nx, nt, dx, dt, logger, epoch=0, mode="test")
+            plot_comparison_wandb(
+                gts,
+                preds,
+                nx,
+                nt,
+                dx,
+                dt,
+                logger,
+                epoch=None,
+                mode="test",
+                use_summary=False,
+            )
 
     return avg_metrics
 
@@ -216,7 +306,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Data arguments (with defaults matching training)
-    parser.add_argument("--n_samples", type=int, default=200, help="Number of test samples")
+    parser.add_argument(
+        "--n_samples", type=int, default=200, help="Number of test samples"
+    )
     parser.add_argument("--nx", type=int, default=50, help="Number of spatial points")
     parser.add_argument("--nt", type=int, default=250, help="Number of time steps")
     parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
@@ -224,7 +316,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
 
     # Output arguments
-    parser.add_argument("--num_plots", type=int, default=3, help="Number of samples to plot")
+    parser.add_argument(
+        "--num_plots", type=int, default=3, help="Number of samples to plot"
+    )
     parser.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
 
     return parser.parse_args()
@@ -255,7 +349,9 @@ def main():
     model_name = model_config.get("model", "fno")
 
     if model_name not in MODELS:
-        print(f"Warning: Model '{model_name}' not found in registry. Available: {list(MODELS.keys())}")
+        print(
+            f"Warning: Model '{model_name}' not found in registry. Available: {list(MODELS.keys())}"
+        )
         print("Please ensure your model is registered in model.py")
         return
 

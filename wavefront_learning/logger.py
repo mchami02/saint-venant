@@ -1,10 +1,15 @@
 """Logging utilities for wavefront learning using Weights & Biases."""
 
 from argparse import Namespace
+from pathlib import Path
 
 import numpy as np
 import torch
 import wandb
+from dotenv import load_dotenv
+
+# Load WANDB_API_KEY from local .env
+load_dotenv(Path(__file__).parent / ".env")
 
 
 class WandbLogger:
@@ -37,6 +42,18 @@ class WandbLogger:
                 config=config_dict,
                 tags=tags,
             )
+
+            # Log source code (exclude patterns from .gitignore)
+            if self.run is not None:
+                self.run.log_code(
+                    root=".",
+                    include_fn=lambda path: (
+                        path.endswith(".py")
+                        and "__pycache__" not in path
+                        and ".venv" not in path
+                        and "wandb/" not in path
+                    ),
+                )
 
     def log_metrics(
         self,
@@ -95,6 +112,41 @@ class WandbLogger:
         if not self.enabled or self.run is None:
             return
         wandb.log({key: wandb.Image(figure)}, step=step)
+
+    def log_summary(self, metrics: dict[str, float]) -> None:
+        """Log metrics to run summary (final/aggregate values).
+
+        Args:
+            metrics: Dictionary of metric names to values.
+        """
+        if not self.enabled or self.run is None:
+            return
+        for key, value in metrics.items():
+            wandb.run.summary[key] = value
+
+    def log_summary_image(self, key: str, image, caption: str | None = None) -> None:
+        """Log an image to run summary.
+
+        Args:
+            key: Image key/name.
+            image: Image data (PIL, numpy, matplotlib figure, or path).
+            caption: Optional image caption.
+        """
+        if not self.enabled or self.run is None:
+            return
+        wandb.run.summary[key] = wandb.Image(image, caption=caption)
+
+    def log_summary_video(self, key: str, path: str, fps: int = 20) -> None:
+        """Log a video file to run summary.
+
+        Args:
+            key: Video key/name.
+            path: Path to video file.
+            fps: Frames per second.
+        """
+        if not self.enabled or self.run is None:
+            return
+        wandb.run.summary[key] = wandb.Video(path, fps=fps, format="gif")
 
     def log_video(
         self,

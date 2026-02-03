@@ -65,7 +65,8 @@ Use `--no_wandb` flag to disable logging.
 **Fully Implemented:**
 - `data.py` - Full data pipeline with discontinuity extraction
 - `logger.py` - W&B logging utilities
-- `plotter.py` - Visualization (grid comparisons + trajectory plots)
+- `plotter.py` - Backwards-compat shim (imports from `plotting/`)
+- `plotting/` - Visualization subpackage (grid comparisons + trajectory plots)
 - `train.py` - Training loop with early stopping, LR scheduling, periodic plotting
 - `test.py` - Evaluation with metrics and visualization
 - `model.py` - Model factory with ShockNet registered
@@ -95,6 +96,10 @@ MODELS = {
     "my_model": MyModel,
 }
 ```
+
+## Code Style Guidelines
+
+- **File size limit**: Keep files under 600 lines. If a file grows beyond this, split it into logical modules.
 
 ## Dependencies
 
