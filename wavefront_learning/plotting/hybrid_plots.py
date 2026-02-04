@@ -135,10 +135,7 @@ def _create_comparison_table(
     masks: np.ndarray,
     region_weights: np.ndarray,
     times: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
     logger,
     num_samples: int = 5,
     mode: str = "test",
@@ -153,14 +150,14 @@ def _create_comparison_table(
         masks: Validity masks (B, D).
         region_weights: Region assignments (B, K, nt, nx).
         times: Query times (T,).
-        nx, nt: Grid dimensions.
-        dx, dt: Grid spacing.
+        grid_config: Dict with {nx, nt, dx, dt}.
         logger: WandbLogger instance.
         num_samples: Maximum number of samples to include.
     """
     if logger is None or not logger.enabled:
         return
 
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
     B = min(ground_truths.shape[0], num_samples)
     K = region_weights.shape[1]
     extent = _get_extent(nx, nt, dx, dt)
@@ -206,19 +203,8 @@ def _create_comparison_table(
 
 
 def plot_hybrid_predictions_wandb(
-    ground_truths: np.ndarray,
-    predictions: np.ndarray,
-    positions: np.ndarray,
-    existence: np.ndarray,
-    discontinuities: np.ndarray,
-    masks: np.ndarray,
-    region_densities: np.ndarray,
-    region_weights: np.ndarray,
-    times: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    traj_data: dict,
+    grid_config: dict,
     logger,
     epoch: int,
     mode: str = "val",
@@ -231,22 +217,34 @@ def plot_hybrid_predictions_wandb(
         - test/hybrid_comparison_table: W&B table with GT, Pred, MSE, Region columns
 
     Args:
-        ground_truths: Ground truth grids of shape (B, nt, nx).
-        predictions: Predicted grids of shape (B, nt, nx).
-        positions: Predicted positions of shape (B, D, T).
-        existence: Predicted existence of shape (B, D, T).
-        discontinuities: Initial discontinuities of shape (B, D, 3).
-        masks: Validity masks of shape (B, D).
-        region_densities: Per-region predictions of shape (B, K, nt, nx).
-        region_weights: Region assignments of shape (B, K, nt, nx).
-        times: Query times of shape (T,) or (B, T).
-        nx, nt: Grid dimensions.
-        dx, dt: Grid spacing.
+        traj_data: Dict containing:
+            - grids: Ground truth grids of shape (B, nt, nx).
+            - output_grid: Predicted grids of shape (B, nt, nx).
+            - positions: Predicted positions of shape (B, D, T).
+            - existence: Predicted existence of shape (B, D, T).
+            - discontinuities: Initial discontinuities of shape (B, D, 3).
+            - masks: Validity masks of shape (B, D).
+            - region_densities: Per-region predictions of shape (B, K, nt, nx).
+            - region_weights: Region assignments of shape (B, K, nt, nx).
+            - times: Query times of shape (T,) or (B, T).
+        grid_config: Dict with {nx, nt, dx, dt}.
         logger: WandbLogger instance.
         epoch: Current epoch.
         mode: Mode string for logging prefix.
         use_summary: If True, log to summary instead of step-based logging.
     """
+    # Extract from traj_data
+    ground_truths = traj_data["grids"]
+    predictions = traj_data["output_grid"]
+    positions = traj_data["positions"]
+    existence = traj_data["existence"]
+    masks = traj_data["masks"]
+    region_weights = traj_data["region_weights"]
+    times = traj_data["times"]
+
+    # Extract from grid_config
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+
     B = positions.shape[0]
 
     # Handle times shape
@@ -266,10 +264,7 @@ def plot_hybrid_predictions_wandb(
         masks,
         region_weights,
         times_1d,
-        nx,
-        nt,
-        dx,
-        dt,
+        grid_config,
         logger,
         num_samples=5,
         mode=mode,

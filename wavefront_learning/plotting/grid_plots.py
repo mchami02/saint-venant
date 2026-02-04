@@ -26,10 +26,7 @@ except ImportError:
 def plot_prediction_comparison(
     ground_truth: np.ndarray,
     prediction: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
     title: str | None = None,
 ) -> Figure:
     """Plot ground truth vs prediction comparison as heatmaps.
@@ -37,15 +34,13 @@ def plot_prediction_comparison(
     Args:
         ground_truth: Ground truth array of shape (nt, nx).
         prediction: Prediction array of shape (nt, nx).
-        nx: Number of spatial points.
-        nt: Number of time steps.
-        dx: Spatial step size.
-        dt: Time step size.
+        grid_config: Dict with {nx, nt, dx, dt}.
         title: Optional plot title.
 
     Returns:
         Matplotlib figure with comparison plot.
     """
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
     difference = np.abs(prediction - ground_truth)
     extent = _get_extent(nx, nt, dx, dt)
 
@@ -106,24 +101,19 @@ def plot_prediction_comparison(
 def plot_error_map(
     ground_truth: np.ndarray,
     prediction: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
 ) -> Figure:
     """Plot spatial-temporal error map.
 
     Args:
         ground_truth: Ground truth array of shape (nt, nx).
         prediction: Prediction array of shape (nt, nx).
-        nx: Number of spatial points.
-        nt: Number of time steps.
-        dx: Spatial step size.
-        dt: Time step size.
+        grid_config: Dict with {nx, nt, dx, dt}.
 
     Returns:
         Matplotlib figure with error heatmap.
     """
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
     error = np.abs(prediction - ground_truth)
     extent = _get_extent(nx, nt, dx, dt)
 
@@ -141,10 +131,7 @@ def plot_error_map(
 def plot_comparison_wandb(
     ground_truth: np.ndarray,
     prediction: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
     logger,
     epoch: int,
     mode: str = "val",
@@ -155,13 +142,13 @@ def plot_comparison_wandb(
     Args:
         ground_truth: (B, nt, nx) or (nt, nx) array.
         prediction: (B, nt, nx) or (nt, nx) array.
-        nx, nt: Grid dimensions.
-        dx, dt: Grid spacing.
+        grid_config: Dict with {nx, nt, dx, dt}.
         logger: WandbLogger instance.
         epoch: Current epoch.
         mode: Mode string for logging prefix.
         use_summary: If True, log to summary instead of step-based logging.
     """
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
     ground_truth = np.asarray(ground_truth)
     prediction = np.asarray(prediction)
 
@@ -256,10 +243,7 @@ def plot_grid_comparison(
     positions: np.ndarray,
     existence: np.ndarray,
     times: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
     sample_idx: int = 0,
 ) -> Figure:
     """Plot ground truth vs prediction grid with trajectory overlay.
@@ -270,13 +254,13 @@ def plot_grid_comparison(
         positions: Predicted positions of shape (D, T).
         existence: Predicted existence of shape (D, T).
         times: Query times of shape (T,).
-        nx, nt: Grid dimensions.
-        dx, dt: Grid spacing.
+        grid_config: Dict with {nx, nt, dx, dt}.
         sample_idx: Sample index for title.
 
     Returns:
         Matplotlib figure with comparison plots.
     """
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
     difference = np.abs(prediction - ground_truth)
     extent = _get_extent(nx, nt, dx, dt)
 

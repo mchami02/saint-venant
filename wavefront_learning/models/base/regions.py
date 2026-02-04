@@ -3,103 +3,12 @@
 This module provides trunk networks for predicting density values in each
 region between shock waves. The regions are defined by the predicted shock
 trajectories, with K = D + 1 regions for D discontinuities.
-
-Architecture:
-    SpaceTimeEncoder: Encodes (t, x) coordinate pairs using Fourier features
-    RegionTrunk: Combines branch embedding with space-time encoding to predict
-        density at each (t, x) point within a specific region
 """
 
 import torch
 import torch.nn as nn
 
-from models.shock_trajectory_net import FourierFeatures, ResidualBlock
-
-
-class SpaceTimeEncoder(nn.Module):
-    """Encodes (t, x) coordinate pairs using Fourier features.
-
-    Uses separate Fourier encodings for time and space coordinates,
-    then concatenates and projects to output dimension.
-
-    Args:
-        hidden_dim: Hidden dimension of the MLP.
-        output_dim: Output dimension (latent space dimension).
-        num_frequencies_t: Number of Fourier frequency bands for time.
-        num_frequencies_x: Number of Fourier frequency bands for space.
-        num_layers: Number of MLP layers.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 128,
-        output_dim: int = 128,
-        num_frequencies_t: int = 16,
-        num_frequencies_x: int = 16,
-        num_layers: int = 3,
-    ):
-        super().__init__()
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_frequencies_t, include_input=True
-        )
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_frequencies_x, include_input=True
-        )
-
-        # Input dimension: fourier_t + fourier_x
-        input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
-
-        layers = []
-        in_dim = input_dim
-        for i in range(num_layers):
-            out_dim = output_dim if i == num_layers - 1 else hidden_dim
-            layers.append(nn.Linear(in_dim, out_dim))
-            if i < num_layers - 1:
-                layers.append(nn.GELU())
-                layers.append(nn.LayerNorm(out_dim))
-            in_dim = out_dim
-
-        self.mlp = nn.Sequential(*layers)
-        self.output_dim = output_dim
-
-    def forward(
-        self,
-        t_coords: torch.Tensor,
-        x_coords: torch.Tensor,
-    ) -> torch.Tensor:
-        """Encode (t, x) coordinate pairs.
-
-        Args:
-            t_coords: Time coordinates of shape (B, nt, nx) or (B*nt*nx,).
-            x_coords: Space coordinates of shape (B, nt, nx) or (B*nt*nx,).
-
-        Returns:
-            Encoded coordinates of shape (B, nt, nx, output_dim) or
-            (B*nt*nx, output_dim).
-        """
-        original_shape = t_coords.shape
-        is_3d = t_coords.dim() == 3
-
-        if is_3d:
-            B, nt, nx = original_shape
-            t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
-            x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        else:
-            t_flat = t_coords
-            x_flat = x_coords
-
-        # Fourier encode time and space separately
-        t_encoded = self.fourier_t(t_flat)  # (B*nt*nx, fourier_t_dim)
-        x_encoded = self.fourier_x(x_flat)  # (B*nt*nx, fourier_x_dim)
-
-        # Concatenate and project
-        combined = torch.cat([t_encoded, x_encoded], dim=-1)
-        output = self.mlp(combined)  # (B*nt*nx, output_dim)
-
-        if is_3d:
-            output = output.reshape(B, nt, nx, -1)
-
-        return output
+from .blocks import ResidualBlock
 
 
 class RegionTrunk(nn.Module):

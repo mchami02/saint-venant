@@ -34,10 +34,7 @@ def test_model(
     device: torch.device,
     logger: WandbLogger | None = None,
     loss_fn: nn.Module | None = None,
-    nx: int = 50,
-    nt: int = 250,
-    dx: float = 0.02,
-    dt: float = 0.004,
+    grid_config: dict | None = None,
     num_plots: int = 3,
     epoch: int = 0,  # noqa: ARG001 - kept for API compat, now unused
 ) -> dict[str, float]:
@@ -49,12 +46,16 @@ def test_model(
         device: Computation device.
         logger: Optional WandbLogger for logging results.
         loss_fn: Optional loss function for trajectory models.
-        nx, nt, dx, dt: Grid parameters for plotting.
+        grid_config: Dict with {nx, nt, dx, dt} for plotting. Defaults provided if None.
         num_plots: Number of samples to plot.
 
     Returns:
         Dictionary of evaluation metrics.
     """
+    # Default grid_config if not provided
+    if grid_config is None:
+        grid_config = {"nx": 50, "nt": 250, "dx": 0.02, "dt": 0.004}
+
     model.eval()
 
     all_preds = []
@@ -106,7 +107,8 @@ def test_model(
                     grid_metrics = compute_metrics(pred["output_grid"], batch_target)
                     batch_metrics.append(grid_metrics)
                 elif loss_fn is not None:
-                    _, components = loss_fn(pred, batch_input, batch_target)
+                    # Use new signature: (input_dict, output_dict, target)
+                    _, components = loss_fn(batch_input, pred, batch_target)
                     batch_metrics.append(components)
 
                 # Collect trajectory data for plotting (only first few samples)
@@ -169,34 +171,40 @@ def test_model(
         logger.log_summary({f"test/metrics/{k}": v for k, v in avg_metrics.items()})
 
         if is_hybrid_model and traj_positions:
+            # Build traj_data dict for hybrid model
+            traj_data = {
+                "grids": np.array(traj_grids),
+                "output_grid": np.array(hybrid_output_grids),
+                "positions": np.array(traj_positions),
+                "existence": np.array(traj_existence),
+                "discontinuities": np.array(traj_discontinuities),
+                "masks": np.array(traj_masks),
+                "region_densities": np.array(hybrid_region_densities),
+                "region_weights": np.array(hybrid_region_weights),
+                "times": traj_times,
+            }
             # Plot HybridDeepONet comprehensive visualization
             plot_hybrid_predictions_wandb(
-                np.array(traj_grids),
-                np.array(hybrid_output_grids),
-                np.array(traj_positions),
-                np.array(traj_existence),
-                np.array(traj_discontinuities),
-                np.array(traj_masks),
-                np.array(hybrid_region_densities),
-                np.array(hybrid_region_weights),
-                traj_times,
-                nx,
-                nt,
-                dx,
-                dt,
+                traj_data,
+                grid_config,
                 logger,
                 epoch=None,
                 mode="test",
                 use_summary=False,
             )
         elif is_trajectory_model and traj_positions:
+            # Build traj_data dict for trajectory model
+            traj_data = {
+                "grids": np.array(traj_grids),
+                "positions": np.array(traj_positions),
+                "existence": np.array(traj_existence),
+                "discontinuities": np.array(traj_discontinuities),
+                "masks": np.array(traj_masks),
+                "times": traj_times,
+            }
             # Plot trajectory for trajectory models
             plot_trajectory_wandb(
-                np.array(traj_positions),
-                np.array(traj_existence),
-                np.array(traj_discontinuities),
-                np.array(traj_masks),
-                traj_times,
+                traj_data,
                 logger,
                 epoch=None,
                 mode="test",
@@ -204,16 +212,8 @@ def test_model(
             )
             # Also plot trajectory overlay on grid
             plot_trajectory_on_grid_wandb(
-                np.array(traj_grids),
-                np.array(traj_positions),
-                np.array(traj_existence),
-                np.array(traj_discontinuities),
-                np.array(traj_masks),
-                traj_times,
-                nx,
-                nt,
-                dx,
-                dt,
+                traj_data,
+                grid_config,
                 logger,
                 epoch=None,
                 mode="test",
@@ -226,10 +226,7 @@ def test_model(
             plot_comparison_wandb(
                 gts,
                 preds,
-                nx,
-                nt,
-                dx,
-                dt,
+                grid_config,
                 logger,
                 epoch=None,
                 mode="test",
@@ -304,15 +301,12 @@ def run_sanity_check(
 
     model.train()
 
-    # Get loss function - build kwargs based on loss type
-    loss_kwargs = {}
-    if args.loss == "hybrid":
-        loss_kwargs = {
-            "dt": args.dt,
-            "dx": args.dx,
-            "smooth_loss_type": args.smooth_loss_type,
-        }
-    loss_fn = get_loss(args.loss, **loss_kwargs)
+    # Get loss function - build kwargs for losses that need dt/dx
+    loss_kwargs = {
+        "pde_residual": {"dt": args.dt, "dx": args.dx},
+        "rh_residual": {"dt": args.dt},
+    }
+    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
 
     # [1/4] Forward pass on training batch
     print("\n[1/4] Testing forward pass on training batch...")
@@ -375,7 +369,8 @@ def run_sanity_check(
     try:
         # Re-run forward pass for fresh computation graph
         pred = model(batch_input)
-        loss, components = loss_fn(pred, batch_input, batch_target)
+        # Use new signature: (input_dict, output_dict, target)
+        loss, components = loss_fn(batch_input, pred, batch_target)
         print(f"  Loss value: {loss.item():.6f}")
         print(f"  Loss components: {list(components.keys())}")
         for k, v in components.items():
@@ -437,15 +432,12 @@ def run_profiler(
     print("Running profiler...")
     print("=" * 50)
 
-    # Get loss function - build kwargs based on loss type
-    loss_kwargs = {}
-    if args.loss == "hybrid":
-        loss_kwargs = {
-            "dt": args.dt,
-            "dx": args.dx,
-            "smooth_loss_type": args.smooth_loss_type,
-        }
-    loss_fn = get_loss(args.loss, **loss_kwargs)
+    # Get loss function - build kwargs for losses that need dt/dx
+    loss_kwargs = {
+        "pde_residual": {"dt": args.dt, "dx": args.dx},
+        "rh_residual": {"dt": args.dt},
+    }
+    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
@@ -498,7 +490,8 @@ def run_profiler(
             # Training step
             optimizer.zero_grad()
             pred = model(batch_input)
-            loss, _ = loss_fn(pred, batch_input, batch_target)
+            # Use new signature: (input_dict, output_dict, target)
+            loss, _ = loss_fn(batch_input, pred, batch_target)
             loss.backward()
             optimizer.step()
 
@@ -578,6 +571,9 @@ def main():
     """Main entry point for standalone testing."""
     args = parse_args()
 
+    # Create grid_config dict for plotting functions
+    grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+
     print(f"Using device: {device}")
     print(f"Loading model from: {args.model_path}")
 
@@ -649,10 +645,7 @@ def main():
         test_loader=test_loader,
         device=device,
         logger=logger,
-        nx=args.nx,
-        nt=args.nt,
-        dx=args.dx,
-        dt=args.dt,
+        grid_config=grid_config,
         num_plots=args.num_plots,
     )
 

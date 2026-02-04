@@ -4,17 +4,99 @@ This document describes the neural network architectures and loss functions used
 
 ## Table of Contents
 
-1. [Models](#models)
+1. [Models Overview](#models-overview)
+   - [Directory Structure](#directory-structure)
+   - [Base Components](#base-components)
+2. [Main Models](#main-models)
    - [ShockTrajectoryNet](#shocktrajectorynet)
    - [HybridDeepONet](#hybriddeepopnet)
-2. [Losses](#losses)
-   - [RankineHugoniotLoss](#rankinehugoniotloss)
-   - [PDEResidualLoss](#pderesidualloss)
-   - [HybridDeepONetLoss](#hybriddeepopnetloss)
+3. [Losses](#losses)
+   - [Unified Loss Interface](#unified-loss-interface)
+   - [Flux Functions](#flux-functions)
+   - [Individual Losses](#individual-losses)
+     - [MSELoss](#mseloss)
+     - [ICLoss](#icloss)
+     - [TrajectoryConsistencyLoss](#trajectoryconsistencyloss)
+     - [BoundaryLoss](#boundaryloss)
+     - [CollisionLoss](#collisionloss)
+     - [ExistenceRegularizationLoss](#existenceregularizationloss)
+     - [SupervisedTrajectoryLoss](#supervisedtrajectoryloss)
+     - [PDEResidualLoss](#pderesidualloss)
+     - [RHResidualLoss](#rhresidualloss)
+   - [CombinedLoss](#combinedloss)
+   - [Loss Presets](#loss-presets)
 
 ---
 
-## Models
+## Models Overview
+
+### Directory Structure
+
+The models package is organized with main models at the top level and reusable building blocks in a `base/` subdirectory:
+
+```
+models/
+├── __init__.py              # Exports main models and BaseWavefrontModel
+├── shock_trajectory_net.py  # ShockTrajectoryNet + build_shock_net()
+├── hybrid_deeponet.py       # HybridDeepONet + build_hybrid_deeponet()
+└── base/                    # Reusable building blocks
+    ├── __init__.py          # Re-exports all base components
+    ├── base_model.py        # BaseWavefrontModel (abstract base class)
+    ├── encoders.py          # FourierFeatures, TimeEncoder, DiscontinuityEncoder, SpaceTimeEncoder
+    ├── decoders.py          # TrajectoryDecoder
+    ├── blocks.py            # ResidualBlock
+    ├── regions.py           # RegionTrunk, RegionTrunkSet
+    └── assemblers.py        # GridAssembler
+```
+
+### Base Components
+
+All base components are located in `models/base/` and can be imported from there:
+
+```python
+from wavefront_learning.models.base import (
+    FourierFeatures,
+    TimeEncoder,
+    DiscontinuityEncoder,
+    SpaceTimeEncoder,
+    TrajectoryDecoder,
+    ResidualBlock,
+    RegionTrunk,
+    RegionTrunkSet,
+    GridAssembler,
+    BaseWavefrontModel,
+)
+```
+
+| File | Components | Description |
+|------|------------|-------------|
+| `base_model.py` | `BaseWavefrontModel` | Abstract base class for wavefront models |
+| `encoders.py` | `FourierFeatures`, `TimeEncoder`, `DiscontinuityEncoder`, `SpaceTimeEncoder` | Input encoding modules |
+| `decoders.py` | `TrajectoryDecoder` | Decodes trajectories from branch/trunk embeddings |
+| `blocks.py` | `ResidualBlock` | Residual MLP block with LayerNorm |
+| `regions.py` | `RegionTrunk`, `RegionTrunkSet` | Density prediction for inter-shock regions |
+| `assemblers.py` | `GridAssembler` | Assembles grid from region predictions with soft boundaries |
+
+#### Dependency Graph
+
+```
+base/blocks.py        (no deps - leaf)
+base/assemblers.py    (no deps - leaf)
+base/base_model.py    (no deps - leaf)
+base/encoders.py      (self-contained - FourierFeatures used by SpaceTimeEncoder)
+base/decoders.py      → imports blocks.ResidualBlock
+base/regions.py       → imports blocks.ResidualBlock
+base/__init__.py      → imports all above
+     ↓
+shock_trajectory_net.py  → imports from base
+hybrid_deeponet.py       → imports from base
+     ↓
+models/__init__.py       → imports main models
+```
+
+---
+
+## Main Models
 
 ### ShockTrajectoryNet
 
@@ -56,6 +138,8 @@ A DeepONet-style architecture for predicting shock (discontinuity) trajectories 
 
 ##### FourierFeatures
 
+**Location**: `models/base/encoders.py`
+
 Positional encoding for scalar inputs using sinusoidal features.
 
 **Formula**:
@@ -66,6 +150,8 @@ where $L$ = `num_frequencies` (default: 32).
 **Output dimension**: $2L$ (or $2L + 1$ if including original input)
 
 ##### DiscontinuityEncoder (Branch Network)
+
+**Location**: `models/base/encoders.py`
 
 Encodes variable-length discontinuity sequences using transformer self-attention.
 
@@ -98,6 +184,8 @@ Output: (B, D, output_dim)
 
 ##### TimeEncoder (Trunk Network)
 
+**Location**: `models/base/encoders.py`
+
 Encodes query times for trajectory prediction.
 
 **Architecture**:
@@ -121,6 +209,8 @@ Output: (B, T, output_dim)
 - `num_layers`: 3
 
 ##### TrajectoryDecoder
+
+**Location**: `models/base/decoders.py`
 
 Predicts shock positions and existence probabilities from branch and trunk embeddings.
 
@@ -227,7 +317,7 @@ Combined model that predicts both shock trajectories AND full solution grids by 
 
 ##### SpaceTimeEncoder
 
-**Location**: `models/region_trunk.py`
+**Location**: `models/base/encoders.py`
 
 Encodes $(t, x)$ coordinate pairs for region density prediction.
 
@@ -260,7 +350,7 @@ Output: (B, nt, nx, output_dim)
 
 ##### RegionTrunk
 
-**Location**: `models/region_trunk.py`
+**Location**: `models/base/regions.py`
 
 Predicts density values for a single region between shocks.
 
@@ -288,11 +378,15 @@ Output: (B, nt, nx) ∈ [0, 1]
 
 ##### RegionTrunkSet
 
+**Location**: `models/base/regions.py`
+
 Set of $K = \text{max\_discontinuities} + 1$ region trunks, one for each region.
 
 **Output**: $(B, K, n_t, n_x)$ - stacked per-region density predictions
 
 ##### GridAssembler
+
+**Location**: `models/base/assemblers.py`
 
 Assembles the final solution grid from per-region predictions using soft sigmoid boundaries.
 
@@ -343,213 +437,393 @@ where $\rho_k$ is the density prediction from region trunk $k$.
 
 ## Losses
 
-### RankineHugoniotLoss
+### Unified Loss Interface
 
-**Location**: `losses/rankine_hugoniot.py`
+**Location**: `losses/base.py`
 
-Unsupervised physics-based loss for shock trajectory prediction using Rankine-Hugoniot jump conditions.
+All losses inherit from `BaseLoss` and follow a unified interface:
 
-#### Physical Background
+```python
+def forward(
+    self,
+    input_dict: dict[str, torch.Tensor],
+    output_dict: dict[str, torch.Tensor],
+    target: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, float]]:
+```
 
-For the LWR traffic flow equation with Greenshields flux:
-$$f(\rho) = \rho(1 - \rho)$$
+**Arguments**:
+- `input_dict`: Dictionary of input tensors (discontinuities, coords, masks, etc.)
+- `output_dict`: Dictionary of model outputs (positions, existence, grids, etc.)
+- `target`: Ground truth tensor (typically the target grid)
 
-The **Rankine-Hugoniot condition** states that the shock speed is:
-$$s = \frac{f(\rho_R) - f(\rho_L)}{\rho_R - \rho_L}$$
+**Returns**:
+- `loss`: Scalar loss tensor
+- `components`: Dictionary of named loss component values as floats
 
-For Greenshields flux, this simplifies to:
-$$s = \frac{\rho_R(1-\rho_R) - \rho_L(1-\rho_L)}{\rho_R - \rho_L} = 1 - \rho_L - \rho_R$$
+---
 
-The **analytical trajectory** is therefore:
-$$x(t) = x_0 + s \cdot t = x_0 + (1 - \rho_L - \rho_R) \cdot t$$
+### Flux Functions
 
-#### Loss Components
+**Location**: `losses/flux.py`
 
-##### 1. Trajectory Consistency Loss
+Centralized flux functions for LWR traffic flow with Greenshields flux.
+
+#### greenshields_flux
+
+$$f(\rho) = \rho (1 - \rho)$$
+
+```python
+def greenshields_flux(rho: torch.Tensor) -> torch.Tensor
+```
+
+#### greenshields_flux_derivative
+
+$$f'(\rho) = 1 - 2\rho$$
+
+```python
+def greenshields_flux_derivative(rho: torch.Tensor) -> torch.Tensor
+```
+
+#### compute_shock_speed
+
+From Rankine-Hugoniot condition:
+
+$$s = \frac{f(\rho_R) - f(\rho_L)}{\rho_R - \rho_L} = 1 - \rho_L - \rho_R$$
+
+```python
+def compute_shock_speed(rho_L: torch.Tensor, rho_R: torch.Tensor) -> torch.Tensor
+```
+
+---
+
+### Individual Losses
+
+#### MSELoss
+
+**Location**: `losses/mse.py`
+
+Mean squared error loss for grid predictions.
+
+**Formula**:
+$$\mathcal{L}_{MSE} = \frac{1}{n_t \cdot n_x} \sum_{t,x} \left( \rho_{pred}(t, x) - \rho_{target}(t, x) \right)^2$$
+
+**Required outputs**: `output_grid`
+
+**Components returned**: `{"mse": float}`
+
+---
+
+#### ICLoss
+
+**Location**: `losses/ic.py`
+
+Initial condition loss - penalizes deviation from target at $t=0$.
+
+**Formula**:
+$$\mathcal{L}_{IC} = \frac{1}{n_x} \sum_{x} \left( \rho_{pred}(0, x) - \rho_{target}(0, x) \right)^2$$
+
+**Required outputs**: `output_grid`
+
+**Components returned**: `{"ic": float}`
+
+---
+
+#### TrajectoryConsistencyLoss
+
+**Location**: `losses/trajectory_consistency.py`
 
 Enforces that predicted trajectories match the analytical Rankine-Hugoniot solution.
 
+**Analytical trajectory**:
+$$x_{analytical}(t) = x_0 + s \cdot t = x_0 + (1 - \rho_L - \rho_R) \cdot t$$
+
+**Loss formula**:
 $$\mathcal{L}_{traj} = \frac{1}{|\mathcal{V}|} \sum_{(b,d,t) \in \mathcal{V}} \left( x_{pred}^{(b,d)}(t) - x_{analytical}^{(b,d)}(t) \right)^2$$
 
-where:
-- $\mathcal{V}$ is the set of valid (batch, discontinuity, time) indices
-- $x_{analytical}^{(b,d)}(t) = x_0^{(b,d)} + (1 - \rho_L^{(b,d)} - \rho_R^{(b,d)}) \cdot t$
+where $\mathcal{V}$ is the set of valid (batch, discontinuity, time) indices weighted by `disc_mask`.
 
-##### 2. Boundary Loss
+**Required inputs**: `discontinuities`, `t_coords`, `disc_mask`
+**Required outputs**: `positions`
+
+**Components returned**: `{"trajectory": float}`
+
+---
+
+#### BoundaryLoss
+
+**Location**: `losses/boundary.py`
 
 Penalizes shocks that exist outside the domain $[0, 1]$.
 
+**Formula**:
 $$\mathcal{L}_{bound} = \frac{1}{N} \sum_{b,d,t} \mathbb{1}_{outside}(x_{pred}^{(b,d,t)}) \cdot \left(e^{(b,d,t)}\right)^2$$
 
 where:
 - $\mathbb{1}_{outside}(x) = 1$ if $x < 0$ or $x > 1$, else $0$
 - $e^{(b,d,t)}$ is the existence probability
 
-##### 3. Collision Loss
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `domain_min` | 0.0 | Minimum domain boundary |
+| `domain_max` | 1.0 | Maximum domain boundary |
 
-Prevents simultaneous existence of overlapping shocks.
+**Required inputs**: `disc_mask`
+**Required outputs**: `positions`, `existence`
 
-$$\mathcal{L}_{coll} = \frac{1}{N_{pairs}} \sum_{i < j} \mathbb{1}_{colliding}(x_i, x_j) \cdot e_i \cdot e_j$$
-
-where:
-- $\mathbb{1}_{colliding}(x_i, x_j) = 1$ if $|x_i - x_j| < \epsilon_{collision}$ (default: 0.02)
-
-##### 4. Existence Regularization
-
-Prevents existence from collapsing to trivial solutions.
-
-$$\mathcal{L}_{reg} = \left( \bar{e} - 0.5 \right)^2$$
-
-where $\bar{e}$ is the mean existence probability across all valid shocks.
-
-#### Combined Loss
-
-$$\mathcal{L}_{total} = w_{traj} \cdot \mathcal{L}_{traj} + w_{bound} \cdot \mathcal{L}_{bound} + w_{coll} \cdot \mathcal{L}_{coll} + w_{reg} \cdot \mathcal{L}_{reg}$$
-
-**Default weights**:
-- $w_{traj} = 1.0$
-- $w_{bound} = 1.0$
-- $w_{coll} = 0.5$
-- $w_{reg} = 0.1$
+**Components returned**: `{"boundary": float}`
 
 ---
 
-### PDEResidualLoss
+#### CollisionLoss
+
+**Location**: `losses/collision.py`
+
+Prevents simultaneous existence of overlapping shocks (encourages shock merging).
+
+**Formula**:
+$$\mathcal{L}_{coll} = \frac{1}{N_{pairs}} \sum_{i < j} \mathbb{1}_{colliding}(x_i, x_j) \cdot e_i \cdot e_j$$
+
+where $\mathbb{1}_{colliding}(x_i, x_j) = 1$ if $|x_i - x_j| < \epsilon_{collision}$.
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `collision_threshold` | 0.02 | Distance threshold for collision detection |
+
+**Required inputs**: `disc_mask`
+**Required outputs**: `positions`, `existence`
+
+**Components returned**: `{"collision": float}`
+
+---
+
+#### ExistenceRegularizationLoss
+
+**Location**: `losses/existence_regularization.py`
+
+Prevents existence from collapsing to trivial solutions (all 0s or all 1s).
+
+**Formula**:
+$$\mathcal{L}_{reg} = \left( \bar{e} - \mu_{target} \right)^2$$
+
+where $\bar{e}$ is the mean existence probability across all valid shocks and $\mu_{target}$ is the target mean.
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `target_mean` | 0.5 | Target mean existence value |
+
+**Required inputs**: `disc_mask`
+**Required outputs**: `existence`
+
+**Components returned**: `{"existence_reg": float}`
+
+---
+
+#### SupervisedTrajectoryLoss
+
+**Location**: `losses/supervised_trajectory.py`
+
+Supervised loss for trajectory prediction when ground truth is available.
+
+**Formula**:
+$$\mathcal{L}_{sup} = w_{pos} \cdot \mathcal{L}_{pos} + w_{exist} \cdot \mathcal{L}_{exist}$$
+
+where:
+$$\mathcal{L}_{pos} = \frac{1}{|\mathcal{V}|} \sum_{(b,d,t) \in \mathcal{V}} \left( x_{pred} - x_{target} \right)^2$$
+$$\mathcal{L}_{exist} = \frac{1}{|\mathcal{V}|} \sum_{(b,d,t) \in \mathcal{V}} BCE(e_{pred}, e_{target})$$
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `position_weight` | 1.0 | Weight for position MSE |
+| `existence_weight` | 1.0 | Weight for existence BCE |
+
+**Required inputs**: `disc_mask`, `target_positions`, `target_existence`
+**Required outputs**: `positions`, `existence`
+
+**Components returned**: `{"position": float, "existence": float}`
+
+---
+
+#### PDEResidualLoss
 
 **Location**: `losses/pde_residual.py`
 
 Physics-informed loss enforcing the conservation law in smooth regions (away from shocks).
 
-#### Physical Background
-
-In smooth regions, the LWR equation must satisfy:
+**Physical equation**:
 $$\frac{\partial \rho}{\partial t} + \frac{\partial f(\rho)}{\partial x} = 0$$
 
-where $f(\rho) = \rho(1 - \rho)$.
+**Residual computation** (central finite differences):
+$$R(t, x) = \frac{\rho(t+\Delta t, x) - \rho(t-\Delta t, x)}{2\Delta t} + \frac{f(\rho(t, x+\Delta x)) - f(\rho(t, x-\Delta x))}{2\Delta x}$$
 
-#### PDE Residual Computation
+**Shock masking**:
+Points within `shock_buffer` distance from predicted shocks are excluded:
+$$\text{mask}(t, x) = \prod_{d=1}^{D} \left[ 1 - \mathbb{1}_{|x - x_d(t)| < \delta} \cdot \mathbb{1}_{e_d(t) > 0.5} \cdot m_d \right]$$
 
-Using central finite differences on interior points:
-
-$$\frac{\partial \rho}{\partial t} \approx \frac{\rho(t+\Delta t, x) - \rho(t-\Delta t, x)}{2 \Delta t}$$
-
-$$\frac{\partial f}{\partial x} \approx \frac{f(\rho(t, x+\Delta x)) - f(\rho(t, x-\Delta x))}{2 \Delta x}$$
-
-**Residual**:
-$$R(t, x) = \frac{\partial \rho}{\partial t} + \frac{\partial f}{\partial x}$$
-
-#### Shock Masking
-
-The PDE residual is only valid in smooth regions. Near shocks, we apply a mask:
-
-$$\text{mask}(t, x) = \prod_{d=1}^{D} \left[ 1 - \mathbb{1}_{|x - x_d(t)| < \delta} \cdot e_d(t) \cdot m_d \right]$$
-
-where $\delta = 0.05$ is the shock buffer distance.
-
-#### Loss Formula
-
+**Loss formula**:
 $$\mathcal{L}_{PDE} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R(t, x)^2 \cdot \text{mask}(t, x)$$
 
-where $\mathcal{I}$ is the set of interior grid points.
+**Optional IC loss** (if `ic_weight > 0`):
+$$\mathcal{L}_{total} = \mathcal{L}_{PDE} + w_{IC} \cdot \mathcal{L}_{IC}$$
 
-**Default parameters**:
-- $\Delta t = 0.004$
-- $\Delta x = 0.02$
-- $\delta = 0.05$
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dt` | 0.004 | Time step size |
+| `dx` | 0.02 | Spatial step size |
+| `shock_buffer` | 0.05 | Buffer around shocks for masking |
+| `ic_weight` | 0.0 | Weight for IC loss (0 = disabled) |
+
+**Required inputs**: `x_coords`, `disc_mask`
+**Required outputs**: `output_grid`, `positions`, `existence`
+
+**Components returned**: `{"pde_residual": float, "ic": float (if enabled), "total": float}`
 
 ---
 
-### HybridDeepONetLoss
+#### RHResidualLoss
 
-**Location**: `losses/hybrid_loss.py`
+**Location**: `losses/rh_residual.py`
 
-Combined multi-scale loss for training HybridDeepONet with supervised grid matching and physics constraints.
-
-#### Loss Components
-
-##### 1. Grid MSE Loss
-
-Supervised loss comparing predicted grid to target.
-
-$$\mathcal{L}_{grid} = \frac{1}{n_t \cdot n_x} \sum_{t,x} \left( \rho_{pred}(t, x) - \rho_{target}(t, x) \right)^2$$
-
-##### 2. Rankine-Hugoniot Residual Loss
-
-Enforces Rankine-Hugoniot conditions using the model's own predictions (not analytical trajectories).
+Rankine-Hugoniot residual loss computed from sampled densities. Verifies that the predicted shock velocity satisfies the RH condition using density values sampled from different sources.
 
 **Shock velocity** (from predicted positions):
 $$\dot{x}_d(t) = \frac{x_d(t + \Delta t) - x_d(t - \Delta t)}{2 \Delta t}$$
 
 **Density sampling at shocks**:
-- $\rho^-_d(t) = \rho_{region_d}(t, x_d(t) - \epsilon)$ (left of shock)
-- $\rho^+_d(t) = \rho_{region_{d+1}}(t, x_d(t) + \epsilon)$ (right of shock)
-
-where $\epsilon = 0.01$.
+- $\rho^-_d(t)$: density at $x = x_d(t) - \epsilon$ (left of shock)
+- $\rho^+_d(t)$: density at $x = x_d(t) + \epsilon$ (right of shock)
 
 **Rankine-Hugoniot residual**:
 $$R_{RH}^{(d)}(t) = \dot{x}_d(t) \cdot (\rho^+_d - \rho^-_d) - (f(\rho^+_d) - f(\rho^-_d))$$
 
-**Loss**:
+This should be zero if the shock velocity satisfies the RH condition.
+
+**Loss formula**:
 $$\mathcal{L}_{RH} = \frac{1}{|\mathcal{V}|} \sum_{(d,t) \in \mathcal{V}} e_d(t) \cdot \left( R_{RH}^{(d)}(t) \right)^2$$
 
-##### 3. Smooth Region Loss (Configurable)
+**Sampling Modes**:
 
-The loss for smooth regions can be configured via the `smooth_loss_type` parameter:
+| Mode | Density Source | Use Case |
+|------|----------------|----------|
+| `per_region` | Sample $\rho^-$ from `region_densities[d]`, $\rho^+$ from `region_densities[d+1]` | Training HybridDeepONet. Gets unblended density values. |
+| `pred` | Sample both from `output_grid` | Testing RH on assembled (blended) prediction. |
+| `gt` | Sample both from `target` grid | Testing if predicted trajectories match GT physics. |
 
-###### Mode 1: `pde_residual` (default) - Unsupervised Physics
+**Why `per_region` for training**: The `output_grid` is assembled using soft sigmoid boundaries that blend region densities near shocks. Sampling from `output_grid` would give blended values, not the true left/right densities. `per_region` mode samples directly from each region's prediction before blending.
 
-Same as [PDEResidualLoss](#pderesidualloss), applied to the output grid. Enforces the conservation law in regions away from shocks:
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dt` | 0.004 | Time step size for velocity computation |
+| `epsilon` | 0.01 | Offset for density sampling near shocks |
+| `mode` | `"per_region"` | Sampling mode: `"per_region"`, `"pred"`, or `"gt"` |
 
-$$\mathcal{L}_{smooth} = \frac{1}{|\mathcal{S}|} \sum_{(t,x) \in \mathcal{S}} \left( \frac{\partial \rho}{\partial t} + \frac{\partial f(\rho)}{\partial x} \right)^2$$
+**Required inputs**: `x_coords`, `disc_mask`
+**Required outputs** (depends on mode):
+- `per_region`: `positions`, `existence`, `region_densities`
+- `pred`: `positions`, `existence`, `output_grid`
+- `gt`: `positions`, `existence` (uses `target` argument)
 
-where $\mathcal{S}$ is the set of smooth region points (masked by `create_shock_mask()`).
+**Components returned**: `{"rh_residual": float}`
 
-###### Mode 2: `supervised` - Supervised MSE in Smooth Regions
+---
 
-Computes MSE between prediction and target only in smooth regions, excluding points near shocks:
+### CombinedLoss
 
-$$\mathcal{L}_{smooth} = \frac{1}{|\mathcal{S}|} \sum_{(t,x) \in \mathcal{S}} \left( \rho_{pred}(t, x) - \rho_{target}(t, x) \right)^2$$
+**Location**: `loss.py`
 
-The smooth region mask is computed using `create_shock_mask()` from `pde_residual.py`, which identifies points that are at least `shock_buffer` distance away from all predicted shock positions.
+Combines multiple loss functions with configurable weights.
 
-**Usage**:
-```bash
-# Default: PDE residual (unsupervised physics)
-python train.py --model HybridDeepONet --loss hybrid
-
-# Supervised MSE in smooth regions
-python train.py --model HybridDeepONet --loss hybrid --smooth_loss_type supervised
+```python
+class CombinedLoss(BaseLoss):
+    def __init__(
+        self,
+        losses: dict[str, tuple[nn.Module, float]] | list[tuple[nn.Module, float]],
+    ):
 ```
 
-##### 4. Existence Regularization
+**Usage**:
+```python
+# From dict
+loss = CombinedLoss({
+    "mse": (MSELoss(), 1.0),
+    "ic": (ICLoss(), 10.0),
+})
 
-Same as in [RankineHugoniotLoss](#rankinehugoniotloss):
-$$\mathcal{L}_{reg} = \left( \bar{e} - 0.5 \right)^2$$
+# From preset
+loss = CombinedLoss.from_preset("shock_net")
 
-#### Combined Loss
+# From custom config
+loss = CombinedLoss.from_config([
+    ("trajectory", 1.0),
+    ("boundary", 0.5),
+])
+```
 
-$$\mathcal{L}_{total} = w_{grid} \cdot \mathcal{L}_{grid} + w_{RH} \cdot \mathcal{L}_{RH} + w_{smooth} \cdot \mathcal{L}_{smooth} + w_{reg} \cdot \mathcal{L}_{reg}$$
+**Forward pass**:
+$$\mathcal{L}_{total} = \sum_{i} w_i \cdot \mathcal{L}_i$$
 
-**Default weights**:
-- $w_{grid} = 1.0$ (primary supervised term)
-- $w_{RH} = 1.0$ (physics at shocks)
-- $w_{smooth} = 0.1$ (smooth region loss - PDE or supervised)
-- $w_{reg} = 0.01$ (weak regularization)
+**Components returned**: Each individual loss name maps to its value, plus `"total"`.
 
-#### Configuration Parameters
+---
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `grid_weight` | float | 1.0 | Weight for full grid MSE |
-| `rh_weight` | float | 1.0 | Weight for RH residual |
-| `smooth_weight` | float | 0.1 | Weight for smooth region loss |
-| `reg_weight` | float | 0.01 | Weight for existence regularization |
-| `ic_weight` | float | 10.0 | Weight for IC loss (within PDE loss) |
-| `smooth_loss_type` | str | "pde_residual" | "pde_residual" or "supervised" |
-| `dt` | float | 0.004 | Time step size |
-| `dx` | float | 0.02 | Spatial step size |
-| `shock_buffer` | float | 0.05 | Buffer around shocks for masking |
-| `epsilon` | float | 0.01 | Offset for density sampling in RH |
+### Loss Presets
+
+**Location**: `loss.py`
+
+Pre-configured loss combinations for common use cases.
+
+#### shock_net Preset
+
+For trajectory-only models (ShockNet).
+
+| Loss | Weight |
+|------|--------|
+| `trajectory` | 1.0 |
+| `boundary` | 1.0 |
+| `collision` | 0.5 |
+| `existence_reg` | 0.1 |
+
+**Total loss**:
+$$\mathcal{L} = \mathcal{L}_{traj} + \mathcal{L}_{bound} + 0.5 \cdot \mathcal{L}_{coll} + 0.1 \cdot \mathcal{L}_{reg}$$
+
+#### hybrid Preset
+
+For HybridDeepONet (trajectory + grid prediction).
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+| `rh_residual` | 1.0 |
+| `pde_residual` | 0.1 |
+| `ic` | 10.0 |
+| `existence_reg` | 0.01 |
+
+**Total loss**:
+$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{RH} + 0.1 \cdot \mathcal{L}_{PDE} + 10 \cdot \mathcal{L}_{IC} + 0.01 \cdot \mathcal{L}_{reg}$$
+
+#### Using Presets
+
+```python
+from loss import get_loss
+
+# Use preset directly
+loss = get_loss("shock_net")
+
+# Use preset with custom kwargs for individual losses
+loss = get_loss("hybrid", loss_kwargs={
+    "pde_residual": {"dt": 0.004, "dx": 0.02},
+    "rh_residual": {"dt": 0.004},
+})
+
+# Backwards compatibility: "rankine_hugoniot" maps to "shock_net"
+loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
+```
 
 ---
 
@@ -560,11 +834,17 @@ $$\mathcal{L}_{total} = w_{grid} \cdot \mathcal{L}_{grid} + w_{RH} \cdot \mathca
 | ShockTrajectoryNet | Discontinuities $(B, D, 3)$ | Positions, Existence $(B, D, T)$ | Pure trajectory prediction |
 | HybridDeepONet | Discontinuities + coordinates | Trajectories + Full grid | Combined trajectory + solution |
 
-| **Loss** | **Type** | **Key Physics** |
-|----------|----------|-----------------|
-| RankineHugoniotLoss | Unsupervised | Analytical RH trajectories |
-| PDEResidualLoss | Physics-informed | Conservation in smooth regions |
-| HybridDeepONetLoss | Semi-supervised | Multi-scale: RH + PDE + supervision |
+| **Loss** | **Location** | **Key Physics** | **Use Case** |
+|----------|--------------|-----------------|--------------|
+| MSELoss | `losses/mse.py` | Grid supervision | Grid matching |
+| ICLoss | `losses/ic.py` | Initial condition | IC accuracy |
+| TrajectoryConsistencyLoss | `losses/trajectory_consistency.py` | Analytical RH trajectories | Trajectory models |
+| BoundaryLoss | `losses/boundary.py` | Domain constraints | All models |
+| CollisionLoss | `losses/collision.py` | Shock merging | Multi-shock models |
+| ExistenceRegularizationLoss | `losses/existence_regularization.py` | Prevent trivial solutions | All models |
+| SupervisedTrajectoryLoss | `losses/supervised_trajectory.py` | Direct supervision | When GT available |
+| PDEResidualLoss | `losses/pde_residual.py` | Conservation in smooth regions | Grid models |
+| RHResidualLoss | `losses/rh_residual.py` | RH at shocks (from densities) | Hybrid models |
 
 ### Key Design Principles
 
@@ -580,3 +860,5 @@ $$\mathcal{L}_{total} = w_{grid} \cdot \mathcal{L}_{grid} + w_{RH} \cdot \mathca
 4. **Fourier Features**: Exponentially-spaced sinusoidal encoding enables MLPs to learn high-frequency shock dynamics
 
 5. **Transformer Branch**: Self-attention handles interactions between variable numbers of shocks
+
+6. **Modular Loss Design**: One file per loss enables easy composition and testing

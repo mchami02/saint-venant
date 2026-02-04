@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger, log_epoch_metrics
-from loss import LOSSES, get_loss
+from loss import LOSS_PRESETS, LOSSES, get_loss
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
 from plotter import (
@@ -55,9 +55,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--loss",
         type=str,
-        default="rankine_hugoniot",
-        choices=list(LOSSES.keys()),
-        help="Loss function",
+        default="shock_net",
+        choices=list(LOSSES.keys()) + list(LOSS_PRESETS.keys()),
+        help="Loss function or preset (shock_net, hybrid, or individual losses)",
     )
 
     # Training parameters
@@ -71,15 +71,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nt", type=int, default=250, help="Time steps")
     parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
     parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
-
-    # Loss configuration
-    parser.add_argument(
-        "--smooth_loss_type",
-        type=str,
-        choices=["pde_residual", "supervised"],
-        default="pde_residual",
-        help="Loss type for smooth regions: 'pde_residual' (physics) or 'supervised' (MSE)",
-    )
 
     # Output
     parser.add_argument(
@@ -141,8 +132,8 @@ def train_step(
         batch_input,
     )
 
-    # Compute loss
-    loss, components = loss_fn(pred, batch_input, batch_target)
+    # Compute loss (input_dict, output_dict, target)
+    loss, components = loss_fn(batch_input, pred, batch_target)
 
     # Backward pass
     loss.backward()
@@ -244,7 +235,8 @@ def validate_epoch(
 
             # Forward pass
             pred = model(batch_input)
-            loss, components = loss_fn(pred, batch_input, batch_target)
+            # Compute loss (input_dict, output_dict, target)
+            loss, components = loss_fn(batch_input, pred, batch_target)
 
             total_loss += loss.item()
             all_components.append(components)
@@ -419,6 +411,7 @@ def train_model(
     val_loader: DataLoader,
     args: argparse.Namespace,
     logger: WandbLogger | None = None,
+    grid_config: dict | None = None,
 ) -> nn.Module:
     """Full training loop with early stopping.
 
@@ -428,19 +421,20 @@ def train_model(
         val_loader: Validation data loader.
         args: Training arguments.
         logger: Optional W&B logger.
+        grid_config: Dict with {nx, nt, dx, dt} for plotting.
 
     Returns:
         Trained model (best checkpoint).
     """
+    # Build grid_config if not provided
+    if grid_config is None:
+        grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
     # Configure loss function with additional parameters
-    loss_kwargs = {}
-    if args.loss == "hybrid":
-        loss_kwargs = {
-            "dt": args.dt,
-            "dx": args.dx,
-            "smooth_loss_type": args.smooth_loss_type,
-        }
-    loss_fn = get_loss(args.loss, **loss_kwargs)
+    loss_kwargs = {
+        "pde_residual": {"dt": args.dt, "dx": args.dx},
+        "rh_residual": {"dt": args.dt},
+    }
+    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
@@ -502,46 +496,23 @@ def train_model(
                     # Check if this is HybridDeepONet
                     if traj_data_train.get("is_hybrid", False):
                         plot_hybrid_predictions_wandb(
-                            traj_data_train["grids"],
-                            traj_data_train["output_grid"],
-                            traj_data_train["positions"],
-                            traj_data_train["existence"],
-                            traj_data_train["discontinuities"],
-                            traj_data_train["masks"],
-                            traj_data_train["region_densities"],
-                            traj_data_train["region_weights"],
-                            traj_data_train["times"],
-                            args.nx,
-                            args.nt,
-                            args.dx,
-                            args.dt,
+                            traj_data_train,
+                            grid_config,
                             logger,
                             epoch + 1,
                             mode="train",
                         )
                     else:
                         plot_trajectory_wandb(
-                            traj_data_train["positions"],
-                            traj_data_train["existence"],
-                            traj_data_train["discontinuities"],
-                            traj_data_train["masks"],
-                            traj_data_train["times"],
+                            traj_data_train,
                             logger,
                             epoch + 1,
                             mode="train",
                         )
                         # Also plot trajectory overlay on grid
                         plot_trajectory_on_grid_wandb(
-                            traj_data_train["grids"],
-                            traj_data_train["positions"],
-                            traj_data_train["existence"],
-                            traj_data_train["discontinuities"],
-                            traj_data_train["masks"],
-                            traj_data_train["times"],
-                            args.nx,
-                            args.nt,
-                            args.dx,
-                            args.dt,
+                            traj_data_train,
+                            grid_config,
                             logger,
                             epoch + 1,
                             mode="train",
@@ -555,46 +526,23 @@ def train_model(
                     # Check if this is HybridDeepONet
                     if traj_data.get("is_hybrid", False):
                         plot_hybrid_predictions_wandb(
-                            traj_data["grids"],
-                            traj_data["output_grid"],
-                            traj_data["positions"],
-                            traj_data["existence"],
-                            traj_data["discontinuities"],
-                            traj_data["masks"],
-                            traj_data["region_densities"],
-                            traj_data["region_weights"],
-                            traj_data["times"],
-                            args.nx,
-                            args.nt,
-                            args.dx,
-                            args.dt,
+                            traj_data,
+                            grid_config,
                             logger,
                             epoch + 1,
                             mode="val",
                         )
                     else:
                         plot_trajectory_wandb(
-                            traj_data["positions"],
-                            traj_data["existence"],
-                            traj_data["discontinuities"],
-                            traj_data["masks"],
-                            traj_data["times"],
+                            traj_data,
                             logger,
                             epoch + 1,
                             mode="val",
                         )
                         # Also plot trajectory overlay on grid
                         plot_trajectory_on_grid_wandb(
-                            traj_data["grids"],
-                            traj_data["positions"],
-                            traj_data["existence"],
-                            traj_data["discontinuities"],
-                            traj_data["masks"],
-                            traj_data["times"],
-                            args.nx,
-                            args.nt,
-                            args.dx,
-                            args.dt,
+                            traj_data,
+                            grid_config,
                             logger,
                             epoch + 1,
                             mode="val",
@@ -608,10 +556,7 @@ def train_model(
                         plot_comparison_wandb(
                             gts_train,
                             preds_train,
-                            args.nx,
-                            args.nt,
-                            args.dx,
-                            args.dt,
+                            grid_config,
                             logger,
                             epoch + 1,
                             mode="train",
@@ -622,10 +567,7 @@ def train_model(
                         plot_comparison_wandb(
                             gts,
                             preds,
-                            args.nx,
-                            args.nt,
-                            args.dx,
-                            args.dt,
+                            grid_config,
                             logger,
                             epoch + 1,
                             mode="val",
@@ -665,6 +607,9 @@ def train_model(
 def main():
     """Main entry point for training."""
     args = parse_args()
+
+    # Create grid_config dict for plotting functions
+    grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
 
     print(f"Using device: {device}")
     print(f"Model: {args.model}")
@@ -740,28 +685,22 @@ def main():
 
     # Train
     if args.epochs > 0:
-        model = train_model(model, train_loader, val_loader, args, logger)
+        model = train_model(model, train_loader, val_loader, args, logger, grid_config)
 
     # Final test
     print("\nRunning final evaluation on test set...")
-    loss_kwargs = {}
-    if args.loss == "hybrid":
-        loss_kwargs = {
-            "dt": args.dt,
-            "dx": args.dx,
-            "smooth_loss_type": args.smooth_loss_type,
-        }
-    loss_fn = get_loss(args.loss, **loss_kwargs)
+    loss_kwargs = {
+        "pde_residual": {"dt": args.dt, "dx": args.dx},
+        "rh_residual": {"dt": args.dt},
+    }
+    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
     test_model(
         model=model,
         test_loader=test_loader,
         device=device,
         logger=logger,
         loss_fn=loss_fn,
-        nx=args.nx,
-        nt=args.nt,
-        dx=args.dx,
-        dt=args.dt,
+        grid_config=grid_config,
         epoch=args.epochs + 1,  # Log after final training epoch
     )
 

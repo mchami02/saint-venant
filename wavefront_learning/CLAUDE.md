@@ -2,7 +2,12 @@
 
 This file provides guidance for Claude Code when working with the `wavefront_learning/` directory.
 
-**IMPORTANT**: After completing any task that modifies the folder structure (adding/removing files), update `structure.md` to reflect the changes.
+**IMPORTANT**: After completing any task that modifies the folder structure (adding/removing files), update `Structure.md` to reflect the changes.
+
+**IMPORTANT**: After modifying models or losses (adding new ones, changing architecture, or modifying loss formulas), update `ARCHITECTURE.md` with:
+- Architecture diagrams and component descriptions for models
+- Mathematical formulas and loss component definitions for losses
+- Default weights and configuration parameters
 
 ## Module Purpose
 
@@ -82,9 +87,39 @@ Use `--no_wandb` flag to disable logging.
 
 ## Available Losses
 
-| Loss | Description | Type |
-|------|-------------|------|
-| **rankine_hugoniot** | Enforces Rankine-Hugoniot jump conditions | Unsupervised physics |
+Individual losses (in `losses/`):
+| Loss | Description |
+|------|-------------|
+| `mse` | Grid MSE loss |
+| `ic` | Initial condition matching |
+| `trajectory` | Trajectory consistency (analytical RH) |
+| `boundary` | Penalize shocks outside domain |
+| `collision` | Penalize colliding shocks |
+| `existence_reg` | Prevent existence collapse |
+| `supervised_trajectory` | Supervised trajectory loss |
+| `pde_residual` | PDE conservation in smooth regions |
+| `rh_residual` | RH residual from region densities |
+
+Presets (in `loss.py`):
+| Preset | Description |
+|--------|-------------|
+| `shock_net` | Trajectory model losses (trajectory + boundary + collision + existence_reg) |
+| `hybrid` | HybridDeepONet losses (mse + rh_residual + pde_residual + ic + existence_reg) |
+
+## Adding a New Loss
+
+1. Create a new file in `losses/` inheriting from `BaseLoss`
+2. Implement the unified interface: `forward(input_dict, output_dict, target) -> (loss, components)`
+3. Register it in `loss.py`:
+```python
+from losses.my_loss import MyLoss
+LOSSES = {
+    ...
+    "my_loss": MyLoss,
+}
+```
+4. Export it in `losses/__init__.py`
+5. Update `ARCHITECTURE.md` with the mathematical formula and configuration
 
 ## Adding a New Model
 

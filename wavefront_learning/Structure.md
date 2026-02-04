@@ -11,7 +11,7 @@ wavefront_learning/
 ├── data_loading.py        # HuggingFace upload/download utilities
 ├── data_processing.py     # Grid generation, discontinuity extraction, preprocessing
 ├── model.py               # Model factory and registry
-├── loss.py                # Loss function factory and registry
+├── loss.py                # Loss function factory, CombinedLoss, presets
 ├── logger.py              # W&B logging utilities
 ├── metrics.py             # Shared metrics utilities (MSE, MAE, rel_l2, max_error)
 ├── plotter.py             # Backwards-compat shim (imports from plotting/)
@@ -28,18 +28,25 @@ wavefront_learning/
 │   ├── region_trunk.py            # SpaceTimeEncoder, RegionTrunk, RegionTrunkSet
 │   └── hybrid_deeponet.py         # HybridDeepONet (trajectory + grid prediction)
 ├── losses/
-│   ├── __init__.py
-│   ├── base.py                    # BaseLoss abstract class
-│   ├── rankine_hugoniot.py        # Rankine-Hugoniot physics loss
-│   ├── pde_residual.py            # PDE residual loss for smooth regions
-│   └── hybrid_loss.py             # Combined loss for HybridDeepONet
+│   ├── __init__.py                # Package exports all loss classes
+│   ├── base.py                    # BaseLoss abstract class (unified interface)
+│   ├── flux.py                    # Centralized flux functions (greenshields_flux, etc.)
+│   ├── mse.py                     # MSELoss for grid predictions
+│   ├── ic.py                      # ICLoss for initial condition matching
+│   ├── trajectory_consistency.py  # TrajectoryConsistencyLoss (RH trajectory)
+│   ├── boundary.py                # BoundaryLoss (shocks outside domain)
+│   ├── collision.py               # CollisionLoss (shock merging)
+│   ├── existence_regularization.py # ExistenceRegularizationLoss
+│   ├── supervised_trajectory.py   # SupervisedTrajectoryLoss (when GT available)
+│   ├── pde_residual.py            # PDEResidualLoss (conservation in smooth regions)
+│   └── rh_residual.py             # RHResidualLoss (RH from sampled densities)
 └── wandb/                 # W&B run logs (gitignored)
 ```
 
 ## Key Files
 
 ### Entry Points
-- **train.py**: `uv run python train.py --model ShockNet --epochs 100`
+- **train.py**: `uv run python train.py --model ShockNet --loss shock_net --epochs 100`
 - **train.py**: `uv run python train.py --model HybridDeepONet --loss hybrid --epochs 100`
 - **test.py**: `uv run python test.py --model_path wavefront_model.pth`
 
@@ -68,21 +75,57 @@ wavefront_learning/
 - **GridAssembler** (`models/hybrid_deeponet.py`): Assembles grid from region predictions using soft boundaries
 
 ### Losses
-- **RankineHugoniotLoss** (`losses/rankine_hugoniot.py`): Physics-based unsupervised loss
-  - Trajectory consistency (Rankine-Hugoniot condition)
-  - Boundary loss (shocks exit domain)
-  - Collision loss (shock merging)
-  - Existence regularization
 
-- **HybridDeepONetLoss** (`losses/hybrid_loss.py`): Combined loss for HybridDeepONet
-  - Grid MSE: Match output_grid to target
-  - RH Residual (CORRECTED): R_RH = ẋ_s(u+ - u-) - (f(u+) - f(u-))
-  - PDE Residual: Enforce conservation in smooth regions
-  - Existence Regularization
+All losses follow a unified interface:
+```python
+def forward(
+    self,
+    input_dict: dict[str, torch.Tensor],
+    output_dict: dict[str, torch.Tensor],
+    target: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, float]]:
+```
 
-- **PDEResidualLoss** (`losses/pde_residual.py`): Conservation law loss
-  - Computes ∂ρ/∂t + ∂f/∂x = 0 using central finite differences
-  - Shock masking to exclude points near predicted discontinuities
+#### Individual Losses (one file per loss)
+| File | Class | Purpose |
+|------|-------|---------|
+| `flux.py` | - | `greenshields_flux`, `greenshields_flux_derivative`, `compute_shock_speed` |
+| `mse.py` | `MSELoss` | Grid MSE loss |
+| `ic.py` | `ICLoss` | Initial condition matching at t=0 |
+| `trajectory_consistency.py` | `TrajectoryConsistencyLoss` | Match predicted to analytical RH trajectory |
+| `boundary.py` | `BoundaryLoss` | Penalize shocks outside domain |
+| `collision.py` | `CollisionLoss` | Penalize colliding shocks |
+| `existence_regularization.py` | `ExistenceRegularizationLoss` | Prevent existence collapse |
+| `supervised_trajectory.py` | `SupervisedTrajectoryLoss` | Supervised trajectory (when GT available) |
+| `pde_residual.py` | `PDEResidualLoss` | PDE conservation in smooth regions |
+| `rh_residual.py` | `RHResidualLoss` | RH residual from sampled region densities |
+
+#### CombinedLoss and Presets (`loss.py`)
+```python
+# Available presets
+LOSS_PRESETS = {
+    "shock_net": [  # For trajectory-only models
+        ("trajectory", 1.0),
+        ("boundary", 1.0),
+        ("collision", 0.5),
+        ("existence_reg", 0.1),
+    ],
+    "hybrid": [  # For HybridDeepONet
+        ("mse", 1.0),
+        ("rh_residual", 1.0),
+        ("pde_residual", 0.1),
+        ("ic", 10.0),
+        ("existence_reg", 0.01),
+    ],
+}
+
+# Usage
+loss = get_loss("shock_net")  # Use preset
+loss = get_loss("mse")  # Use individual loss
+loss = get_loss("hybrid", loss_kwargs={  # Customize preset
+    "pde_residual": {"dt": 0.004, "dx": 0.02},
+})
+```
 
 ### Plotting
 
@@ -231,7 +274,7 @@ R_PDE = ∂ρ/∂t + ∂f(ρ)/∂x
 ```bash
 cd wavefront_learning
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
-  --model ShockNet --loss rankine_hugoniot --epochs 100
+  --model ShockNet --loss shock_net --epochs 100
 ```
 
 ### Training HybridDeepONet (trajectory + grid)

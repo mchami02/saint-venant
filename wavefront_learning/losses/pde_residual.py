@@ -3,9 +3,9 @@
 This module provides a physics-informed loss that enforces the conservation
 law in smooth regions between shock waves:
 
-    ∂ρ/∂t + ∂f(ρ)/∂x = 0
+    drho/dt + df(rho)/dx = 0
 
-where f(ρ) = ρ(1 - ρ) is the Greenshields flux.
+where f(rho) = rho(1 - rho) is the Greenshields flux.
 
 The loss is computed using central finite differences and excludes points
 within a buffer distance from predicted shock locations to avoid penalizing
@@ -13,31 +13,9 @@ physically valid discontinuities.
 """
 
 import torch
-import torch.nn as nn
 
-
-def greenshields_flux(rho: torch.Tensor) -> torch.Tensor:
-    """Greenshields flux function: f(ρ) = ρ(1 - ρ).
-
-    Args:
-        rho: Density tensor.
-
-    Returns:
-        Flux values.
-    """
-    return rho * (1.0 - rho)
-
-
-def greenshields_flux_derivative(rho: torch.Tensor) -> torch.Tensor:
-    """Derivative of Greenshields flux: f'(ρ) = 1 - 2ρ.
-
-    Args:
-        rho: Density tensor.
-
-    Returns:
-        Flux derivative values.
-    """
-    return 1.0 - 2.0 * rho
+from .base import BaseLoss
+from .flux import greenshields_flux
 
 
 def compute_pde_residual(
@@ -47,9 +25,9 @@ def compute_pde_residual(
 ) -> torch.Tensor:
     """Compute PDE residual using central finite differences.
 
-    Computes R = ∂ρ/∂t + ∂f(ρ)/∂x using:
-        ∂ρ/∂t ≈ (ρ[t+1] - ρ[t-1]) / (2·dt)
-        ∂f/∂x ≈ (f(ρ[x+1]) - f(ρ[x-1])) / (2·dx)
+    Computes R = drho/dt + df(rho)/dx using:
+        drho/dt = (rho[t+1] - rho[t-1]) / (2*dt)
+        df/dx = (f(rho[x+1]) - f(rho[x-1])) / (2*dx)
 
     Args:
         density: Density grid of shape (B, nt, nx).
@@ -62,11 +40,11 @@ def compute_pde_residual(
     # Compute flux
     flux = greenshields_flux(density)
 
-    # ∂ρ/∂t using central difference in time
+    # drho/dt using central difference in time
     # (rho[t+1, x] - rho[t-1, x]) / (2*dt)
     drho_dt = (density[:, 2:, 1:-1] - density[:, :-2, 1:-1]) / (2.0 * dt)
 
-    # ∂f/∂x using central difference in space
+    # df/dx using central difference in space
     # (f[t, x+1] - f[t, x-1]) / (2*dx)
     df_dx = (flux[:, 1:-1, 2:] - flux[:, 1:-1, :-2]) / (2.0 * dx)
 
@@ -135,10 +113,10 @@ def create_shock_mask(
     return mask
 
 
-class PDEResidualLoss(nn.Module):
+class PDEResidualLoss(BaseLoss):
     """PDE residual loss for conservation law in smooth regions.
 
-    Enforces ∂ρ/∂t + ∂f(ρ)/∂x = 0 using central finite differences,
+    Enforces drho/dt + df(rho)/dx = 0 using central finite differences,
     with shock masking to exclude points near predicted discontinuities.
 
     Optionally includes an initial condition (IC) loss that penalizes
@@ -156,7 +134,7 @@ class PDEResidualLoss(nn.Module):
         dt: float = 0.004,
         dx: float = 0.02,
         shock_buffer: float = 0.05,
-        ic_weight: float = 10.0,
+        ic_weight: float = 0.0,
     ):
         super().__init__()
         self.dt = dt
@@ -166,27 +144,32 @@ class PDEResidualLoss(nn.Module):
 
     def forward(
         self,
-        output_grid: torch.Tensor,
-        positions: torch.Tensor,
-        existence: torch.Tensor,
-        x_coords: torch.Tensor,
-        disc_mask: torch.Tensor,
-        target: torch.Tensor = None,
+        input_dict: dict[str, torch.Tensor],
+        output_dict: dict[str, torch.Tensor],
+        target: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """Compute PDE residual loss with optional IC loss.
 
         Args:
-            output_grid: Predicted density grid (B, 1, nt, nx).
-            positions: Predicted shock positions (B, D, T).
-            existence: Predicted shock existence (B, D, T).
-            x_coords: Spatial coordinates (B, 1, nt, nx).
-            disc_mask: Validity mask for discontinuities (B, D).
-            target: Optional target grid (B, 1, nt, nx) for IC loss.
+            input_dict: Must contain:
+                - 'x_coords': (B, 1, nt, nx) spatial coordinates
+                - 'disc_mask': (B, D) validity mask
+            output_dict: Must contain:
+                - 'output_grid': (B, 1, nt, nx) predicted grid
+                - 'positions': (B, D, T) predicted shock positions
+                - 'existence': (B, D, T) existence probabilities
+            target: Target grid (B, 1, nt, nx) for optional IC loss.
 
         Returns:
             Tuple of (total_loss, components_dict) where components_dict
-            contains 'pde_residual', 'ic_loss', and 'total'.
+            contains 'pde_residual', 'ic' (if ic_weight > 0), and 'total'.
         """
+        output_grid = output_dict["output_grid"]
+        positions = output_dict["positions"]
+        existence = output_dict["existence"]
+        x_coords = input_dict["x_coords"]
+        disc_mask = input_dict["disc_mask"]
+
         # Squeeze channel dimension
         density = output_grid.squeeze(1)  # (B, nt, nx)
 
@@ -194,7 +177,6 @@ class PDEResidualLoss(nn.Module):
         residual = compute_pde_residual(density, self.dt, self.dx)  # (B, nt-2, nx-2)
 
         # Create shock mask for interior points
-        # x_coords for interior points
         if x_coords.dim() == 4:
             x_coords_3d = x_coords.squeeze(1)
         else:
@@ -218,56 +200,21 @@ class PDEResidualLoss(nn.Module):
 
         pde_loss = (masked_residual**2).sum() / n_valid
 
-        # Compute IC loss if target provided
-        ic_loss_val = torch.tensor(0.0, device=output_grid.device)
-        if target is not None and self.ic_weight > 0:
+        # Compute IC loss if weight > 0
+        components = {
+            "pde_residual": pde_loss.item(),
+        }
+
+        total_loss = pde_loss
+
+        if self.ic_weight > 0:
             # Extract IC at t=0: (B, 1, nt, nx) -> (B, nx)
             pred_ic = output_grid[:, 0, 0, :]  # (B, nx)
             true_ic = target[:, 0, 0, :]  # (B, nx)
             ic_loss_val = torch.nn.functional.mse_loss(pred_ic, true_ic)
+            total_loss = pde_loss + self.ic_weight * ic_loss_val
+            components["ic"] = ic_loss_val.item()
 
-        # Combine losses
-        total_loss = pde_loss + self.ic_weight * ic_loss_val
-
-        components = {
-            "pde_residual": pde_loss.item(),
-            "ic_loss": ic_loss_val.item(),
-            "total": total_loss.item(),
-        }
+        components["total"] = total_loss.item()
 
         return total_loss, components
-
-
-def pde_residual_loss(
-    output_grid: torch.Tensor,
-    positions: torch.Tensor,
-    existence: torch.Tensor,
-    x_coords: torch.Tensor,
-    disc_mask: torch.Tensor,
-    target: torch.Tensor = None,
-    dt: float = 0.004,
-    dx: float = 0.02,
-    shock_buffer: float = 0.05,
-    ic_weight: float = 10.0,
-) -> tuple[torch.Tensor, dict[str, float]]:
-    """Functional interface for PDE residual loss.
-
-    Args:
-        output_grid: Predicted density grid (B, 1, nt, nx).
-        positions: Predicted shock positions (B, D, T).
-        existence: Predicted shock existence (B, D, T).
-        x_coords: Spatial coordinates (B, 1, nt, nx).
-        disc_mask: Validity mask for discontinuities (B, D).
-        target: Optional target grid (B, 1, nt, nx) for IC loss.
-        dt: Time step size.
-        dx: Spatial step size.
-        shock_buffer: Buffer distance around shocks to exclude.
-        ic_weight: Weight for IC loss (higher = prioritize IC accuracy).
-
-    Returns:
-        Tuple of (total_loss, components_dict).
-    """
-    loss_fn = PDEResidualLoss(
-        dt=dt, dx=dx, shock_buffer=shock_buffer, ic_weight=ic_weight
-    )
-    return loss_fn(output_grid, positions, existence, x_coords, disc_mask, target)

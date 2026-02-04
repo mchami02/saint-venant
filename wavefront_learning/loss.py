@@ -1,89 +1,241 @@
-"""Loss function factory for wavefront learning."""
+"""Loss function factory for wavefront learning.
+
+This module provides:
+- CombinedLoss: Combines multiple losses with configurable weights
+- LOSSES: Registry of available loss classes
+- LOSS_PRESETS: Pre-configured loss combinations for common use cases
+- get_loss(): Factory function to create loss instances
+"""
 
 import torch
 import torch.nn as nn
-from losses.hybrid_loss import HybridDeepONetLoss, build_hybrid_loss
-from losses.rankine_hugoniot import RankineHugoniotLoss
+from losses.base import BaseLoss
+from losses.boundary import BoundaryLoss
+from losses.collision import CollisionLoss
+from losses.existence_regularization import ExistenceRegularizationLoss
+from losses.ic import ICLoss
+from losses.mse import MSELoss
+from losses.pde_residual import PDEResidualLoss
+from losses.rh_residual import RHResidualLoss
+from losses.supervised_trajectory import SupervisedTrajectoryLoss
+from losses.trajectory_consistency import TrajectoryConsistencyLoss
 
 # Registry of available loss functions
-LOSSES = {
-    "rankine_hugoniot": RankineHugoniotLoss,
-    "hybrid": HybridDeepONetLoss,
+LOSSES: dict[str, type[BaseLoss]] = {
+    "mse": MSELoss,
+    "trajectory": TrajectoryConsistencyLoss,
+    "rh_residual": RHResidualLoss,
+    "pde_residual": PDEResidualLoss,
+    "boundary": BoundaryLoss,
+    "collision": CollisionLoss,
+    "existence_reg": ExistenceRegularizationLoss,
+    "supervised_trajectory": SupervisedTrajectoryLoss,
+    "ic": ICLoss,
 }
 
-# Factory functions for losses that need special construction
-LOSS_FACTORIES = {
-    "hybrid": build_hybrid_loss,
+# Presets for common configurations
+# Each preset is a list of (loss_name, weight) tuples
+LOSS_PRESETS: dict[str, list[tuple[str, float]]] = {
+    "shock_net": [
+        ("trajectory", 1.0),
+        ("boundary", 1.0),
+        ("collision", 0.5),
+        ("existence_reg", 0.1),
+    ],
+    "hybrid": [
+        ("mse", 1.0),
+        ("rh_residual", 1.0),
+        ("pde_residual", 0.1),
+        ("ic", 10.0),
+        ("existence_reg", 0.01),
+    ],
 }
+
+
+class CombinedLoss(BaseLoss):
+    """Combines multiple loss functions with weights.
+
+    Args:
+        losses: Dict of {name: (loss_fn, weight)} or list of (loss_fn, weight).
+    """
+
+    def __init__(
+        self,
+        losses: dict[str, tuple[nn.Module, float]] | list[tuple[nn.Module, float]],
+    ):
+        super().__init__()
+
+        if isinstance(losses, list):
+            # Convert list to dict with auto-generated names
+            losses = {f"loss_{i}": item for i, item in enumerate(losses)}
+
+        self.loss_names = list(losses.keys())
+        self.losses = nn.ModuleList([loss_fn for loss_fn, _ in losses.values()])
+        self.weights = [weight for _, weight in losses.values()]
+
+    @classmethod
+    def from_preset(
+        cls,
+        preset_name: str,
+        loss_kwargs: dict[str, dict] | None = None,
+    ) -> "CombinedLoss":
+        """Create CombinedLoss from a preset configuration.
+
+        Args:
+            preset_name: Name of the preset (e.g., 'shock_net', 'hybrid').
+            loss_kwargs: Optional dict of {loss_name: kwargs} for customizing
+                individual loss instances.
+
+        Returns:
+            Configured CombinedLoss instance.
+        """
+        if preset_name not in LOSS_PRESETS:
+            raise ValueError(
+                f"Unknown preset '{preset_name}'. Available: {list(LOSS_PRESETS.keys())}"
+            )
+
+        loss_kwargs = loss_kwargs or {}
+        preset = LOSS_PRESETS[preset_name]
+
+        losses = {}
+        for loss_name, weight in preset:
+            if loss_name not in LOSSES:
+                raise ValueError(f"Unknown loss '{loss_name}' in preset '{preset_name}'")
+            kwargs = loss_kwargs.get(loss_name, {})
+            losses[loss_name] = (LOSSES[loss_name](**kwargs), weight)
+
+        return cls(losses)
+
+    @classmethod
+    def from_config(
+        cls,
+        config: list[tuple[str, float]],
+        loss_kwargs: dict[str, dict] | None = None,
+    ) -> "CombinedLoss":
+        """Create CombinedLoss from a custom configuration.
+
+        Args:
+            config: List of (loss_name, weight) tuples.
+            loss_kwargs: Optional dict of {loss_name: kwargs} for customizing
+                individual loss instances.
+
+        Returns:
+            Configured CombinedLoss instance.
+        """
+        loss_kwargs = loss_kwargs or {}
+
+        losses = {}
+        for loss_name, weight in config:
+            if loss_name not in LOSSES:
+                raise ValueError(
+                    f"Unknown loss '{loss_name}'. Available: {list(LOSSES.keys())}"
+                )
+            kwargs = loss_kwargs.get(loss_name, {})
+            losses[loss_name] = (LOSSES[loss_name](**kwargs), weight)
+
+        return cls(losses)
+
+    def forward(
+        self,
+        input_dict: dict[str, torch.Tensor],
+        output_dict: dict[str, torch.Tensor],
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Compute combined loss.
+
+        Args:
+            input_dict: Dictionary of input tensors.
+            output_dict: Dictionary of model output tensors.
+            target: Ground truth tensor.
+
+        Returns:
+            Tuple of (total_loss, loss_components_dict).
+        """
+        total = torch.tensor(0.0, device=target.device)
+        components: dict[str, float] = {}
+
+        for name, loss_fn, weight in zip(
+            self.loss_names, self.losses, self.weights, strict=True
+        ):
+            loss_val, sub_components = loss_fn(input_dict, output_dict, target)
+            total = total + weight * loss_val
+
+            # Store the main loss value
+            components[name] = loss_val.item()
+
+            # Store sub-components with prefix
+            for sub_key, sub_val in sub_components.items():
+                if sub_key != "total":  # Skip nested totals
+                    components[f"{name}/{sub_key}"] = sub_val
+
+        components["total"] = total.item()
+        return total, components
 
 
 def get_loss(loss_name: str, **kwargs) -> nn.Module:
     """Create a loss function instance.
 
     Args:
-        loss_name: Name of the loss function.
+        loss_name: Name of the loss function or preset.
         **kwargs: Additional arguments for the loss function.
-            For "hybrid" loss, supports:
-            - smooth_loss_type: "pde_residual" (default) or "supervised"
-            - grid_weight, rh_weight, smooth_weight, reg_weight, ic_weight
-            - dt, dx, shock_buffer, epsilon
+            For presets, pass 'loss_kwargs' dict to customize individual losses.
+            For individual losses, kwargs are passed directly to the constructor.
 
     Returns:
         Instantiated loss function.
 
     Raises:
         ValueError: If loss_name is not supported.
-    """
-    if loss_name not in LOSSES:
-        raise ValueError(f"Loss {loss_name} not supported")
 
-    # Use factory if available
-    if loss_name in LOSS_FACTORIES:
-        return LOSS_FACTORIES[loss_name](kwargs)
+    Examples:
+        # Use a preset
+        loss = get_loss("shock_net")
 
-    return LOSSES[loss_name](**kwargs)
+        # Use an individual loss
+        loss = get_loss("mse")
 
-
-class CombinedLoss(nn.Module):
-    """Combines multiple loss functions with weights.
-
-    Args:
-        losses: List of (loss_fn, weight) tuples.
+        # Use a preset with custom parameters
+        loss = get_loss("hybrid", loss_kwargs={
+            "pde_residual": {"dt": 0.004, "dx": 0.02},
+            "rh_residual": {"dt": 0.004},
+        })
     """
 
-    def __init__(self, losses: list[tuple[nn.Module, float]]):
-        super().__init__()
-        self.losses = nn.ModuleList([loss for loss, _ in losses])
-        self.weights = [w for _, w in losses]
+    # Check if it's a preset
+    if loss_name in LOSS_PRESETS:
+        loss_kwargs = kwargs.pop("loss_kwargs", None)
+        return CombinedLoss.from_preset(loss_name, loss_kwargs=loss_kwargs)
 
-    def forward(
-        self,
-        prediction: torch.Tensor,
-        target: torch.Tensor,
-        **kwargs,
-    ) -> tuple[torch.Tensor, dict]:
-        """Compute combined loss.
+    # Check if it's an individual loss
+    if loss_name in LOSSES:
+        return LOSSES[loss_name](**kwargs)
 
-        Args:
-            prediction: Model prediction.
-            target: Ground truth.
-            **kwargs: Additional arguments for individual losses.
-
-        Returns:
-            Tuple of (total_loss, loss_components_dict).
-        """
-        # TODO: Implement combined loss computation
-        pass
+    raise ValueError(
+        f"Loss '{loss_name}' not supported. "
+        f"Available losses: {list(LOSSES.keys())}. "
+        f"Available presets: {list(LOSS_PRESETS.keys())}."
+    )
 
 
 def create_loss_from_args(args) -> nn.Module:
     """Create loss function from command line arguments.
 
     Args:
-        args: Parsed command line arguments.
+        args: Parsed command line arguments with 'loss', 'dt', 'dx' attributes.
 
     Returns:
         Configured loss function.
     """
-    # TODO: Implement loss creation from args
-    pass
+    loss_kwargs = {}
+
+    # Build kwargs for losses that need dt/dx
+    if hasattr(args, "dt") and hasattr(args, "dx"):
+        loss_kwargs["pde_residual"] = {
+            "dt": args.dt,
+            "dx": args.dx,
+        }
+        loss_kwargs["rh_residual"] = {
+            "dt": args.dt,
+        }
+
+    return get_loss(args.loss, loss_kwargs=loss_kwargs)

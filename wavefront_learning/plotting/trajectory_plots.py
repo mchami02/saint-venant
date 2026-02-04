@@ -150,10 +150,7 @@ def plot_trajectory_on_grid(
     discontinuities: np.ndarray,
     mask: np.ndarray,
     times: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
     sample_idx: int = 0,
     show_analytical: bool = False,
 ) -> Figure:
@@ -171,14 +168,14 @@ def plot_trajectory_on_grid(
         discontinuities: Initial discontinuities of shape (D, 3) with [x_0, rho_L, rho_R].
         mask: Validity mask of shape (D,).
         times: Query times of shape (T,).
-        nx, nt: Grid dimensions.
-        dx, dt: Grid spacing.
+        grid_config: Dict with {nx, nt, dx, dt}.
         sample_idx: Sample index for title.
         show_analytical: Whether to show analytical RH trajectories.
 
     Returns:
         Matplotlib figure with trajectory overlay on grid.
     """
+    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
     fig, ax = plt.subplots(figsize=(10, 8))
 
     # Background: solution heatmap
@@ -253,16 +250,8 @@ def plot_trajectory_on_grid(
 
 
 def plot_trajectory_on_grid_wandb(
-    grids: np.ndarray,
-    positions: np.ndarray,
-    existence: np.ndarray,
-    discontinuities: np.ndarray,
-    masks: np.ndarray,
-    times: np.ndarray,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    traj_data: dict,
+    grid_config: dict,
     logger,
     epoch: int,
     mode: str = "val",
@@ -271,19 +260,27 @@ def plot_trajectory_on_grid_wandb(
     """Create trajectory-on-grid overlay plots and upload to W&B.
 
     Args:
-        grids: Solution grids of shape (B, nt, nx).
-        positions: Predicted positions of shape (B, D, T).
-        existence: Predicted existence of shape (B, D, T).
-        discontinuities: Initial discontinuities of shape (B, D, 3).
-        masks: Validity masks of shape (B, D).
-        times: Query times of shape (T,) or (B, T).
-        nx, nt: Grid dimensions.
-        dx, dt: Grid spacing.
+        traj_data: Dict containing:
+            - grids: Solution grids of shape (B, nt, nx).
+            - positions: Predicted positions of shape (B, D, T).
+            - existence: Predicted existence of shape (B, D, T).
+            - discontinuities: Initial discontinuities of shape (B, D, 3).
+            - masks: Validity masks of shape (B, D).
+            - times: Query times of shape (T,) or (B, T).
+        grid_config: Dict with {nx, nt, dx, dt}.
         logger: WandbLogger instance.
         epoch: Current epoch.
         mode: Mode string for logging prefix.
         use_summary: If True, log to summary instead of step-based logging.
     """
+    # Extract from traj_data
+    grids = traj_data["grids"]
+    positions = traj_data["positions"]
+    existence = traj_data["existence"]
+    discontinuities = traj_data["discontinuities"]
+    masks = traj_data["masks"]
+    times = traj_data["times"]
+
     B = positions.shape[0]
 
     # Handle times shape
@@ -300,10 +297,7 @@ def plot_trajectory_on_grid_wandb(
             discontinuities[b],
             masks[b],
             times_1d,
-            nx,
-            nt,
-            dx,
-            dt,
+            grid_config,
             sample_idx=b,
             show_analytical=False,
         )
@@ -314,11 +308,7 @@ def plot_trajectory_on_grid_wandb(
 
 
 def plot_trajectory_wandb(
-    positions: np.ndarray,
-    existence: np.ndarray,
-    discontinuities: np.ndarray,
-    masks: np.ndarray,
-    times: np.ndarray,
+    traj_data: dict,
     logger,
     epoch: int,
     mode: str = "val",
@@ -327,16 +317,24 @@ def plot_trajectory_wandb(
     """Create trajectory plots and upload to W&B.
 
     Args:
-        positions: Predicted positions of shape (B, D, T).
-        existence: Predicted existence of shape (B, D, T).
-        discontinuities: Initial discontinuities of shape (B, D, 3).
-        masks: Validity masks of shape (B, D).
-        times: Query times of shape (T,) or (B, T).
+        traj_data: Dict containing:
+            - positions: Predicted positions of shape (B, D, T).
+            - existence: Predicted existence of shape (B, D, T).
+            - discontinuities: Initial discontinuities of shape (B, D, 3).
+            - masks: Validity masks of shape (B, D).
+            - times: Query times of shape (T,) or (B, T).
         logger: WandbLogger instance.
         epoch: Current epoch.
         mode: Mode string for logging prefix.
         use_summary: If True, log to summary instead of step-based logging.
     """
+    # Extract from traj_data
+    positions = traj_data["positions"]
+    existence = traj_data["existence"]
+    discontinuities = traj_data["discontinuities"]
+    masks = traj_data["masks"]
+    times = traj_data["times"]
+
     B = positions.shape[0]
 
     # Handle times shape
@@ -544,10 +542,7 @@ def plot_sample_predictions(
     dataloader: torch.utils.data.DataLoader,
     device: torch.device,
     num_samples: int = 5,
-    nx: int | None = None,
-    nt: int | None = None,
-    dx: float | None = None,
-    dt: float | None = None,
+    grid_config: dict | None = None,
 ) -> list[Figure]:
     """Generate prediction plots for multiple samples.
 
@@ -556,10 +551,7 @@ def plot_sample_predictions(
         dataloader: DataLoader to sample from.
         device: Computation device.
         num_samples: Number of samples to plot.
-        nx: Number of spatial points.
-        nt: Number of time steps.
-        dx: Spatial step size.
-        dt: Time step size.
+        grid_config: Optional dict with {nx, nt, dx, dt}. If None, inferred from data.
 
     Returns:
         List of matplotlib figures.
@@ -587,15 +579,20 @@ def plot_sample_predictions(
                 gt = batch_target[i].squeeze(0).cpu().numpy()
                 p = pred[i].squeeze(0).cpu().numpy()
 
-                # Infer dimensions if not provided
-                actual_nt, actual_nx = gt.shape
-                _nx = nx if nx else actual_nx
-                _nt = nt if nt else actual_nt
-                _dx = dx if dx else 1.0 / _nx
-                _dt = dt if dt else 1.0 / _nt
+                # Build grid_config if not provided
+                if grid_config is not None:
+                    _grid_config = grid_config
+                else:
+                    actual_nt, actual_nx = gt.shape
+                    _grid_config = {
+                        "nx": actual_nx,
+                        "nt": actual_nt,
+                        "dx": 1.0 / actual_nx,
+                        "dt": 1.0 / actual_nt,
+                    }
 
                 fig = plot_prediction_comparison(
-                    gt, p, _nx, _nt, _dx, _dt, title=f"Sample {count + 1}"
+                    gt, p, _grid_config, title=f"Sample {count + 1}"
                 )
                 figures.append(fig)
                 count += 1
