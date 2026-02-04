@@ -160,7 +160,7 @@ def _log_figure(
     logger,
     key: str,
     fig: Figure,
-    epoch: int,
+    epoch: int | None,
     use_summary: bool = False,
 ) -> None:
     """Log a figure to W&B with unified logic.
@@ -169,7 +169,7 @@ def _log_figure(
         logger: WandbLogger instance (can be None).
         key: Logging key/name.
         fig: Matplotlib figure to log.
-        epoch: Current epoch.
+        epoch: Current epoch (logged as metric, not as step to avoid conflicts with wandb.watch).
         use_summary: If True, log to summary instead of step-based logging.
     """
     if logger is None:
@@ -177,4 +177,6 @@ def _log_figure(
     if use_summary:
         logger.log_summary_image(key, fig)
     else:
-        logger.log_figure(key, fig, step=epoch)
+        # Don't use explicit step to avoid conflicts with wandb.watch step counter
+        # Include epoch as a metric so it can be used as x-axis in charts
+        logger.log_figure(key, fig, epoch=epoch)

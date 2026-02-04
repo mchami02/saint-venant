@@ -677,7 +677,9 @@ def main():
         # Watch model for gradient/parameter tracking
         import wandb
 
-        wandb.watch(model, log="all", log_freq=100)
+        # Use high log_freq to avoid step counter conflicts with epoch-based logging
+        # Gradients are logged every log_freq batches; high value means rare gradient logs
+        wandb.watch(model, log="all", log_freq=10000)
 
     # Run profiler if requested
     if args.profile:

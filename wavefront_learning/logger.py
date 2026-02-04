@@ -64,11 +64,13 @@ class WandbLogger:
 
         Args:
             metrics: Dictionary of metric names to values.
-            step: Optional global step number.
+            step: Deprecated - no longer used to avoid wandb.watch conflicts.
+                  Include 'epoch' key in metrics instead.
         """
         if not self.enabled or self.run is None:
             return
-        wandb.log(metrics, step=step)
+        # Don't use explicit step to avoid conflicts with wandb.watch step counter
+        wandb.log(metrics)
 
     def log_image(
         self,
@@ -82,36 +84,47 @@ class WandbLogger:
         Args:
             key: Image key/name.
             image: Image data (PIL, numpy, matplotlib figure, or path).
-            step: Optional global step number.
+            step: Deprecated - no longer used to avoid wandb.watch conflicts.
             caption: Optional image caption.
         """
         if not self.enabled or self.run is None:
             return
 
+        # Don't use explicit step to avoid conflicts with wandb.watch step counter
         if hasattr(image, "savefig"):
             # Matplotlib figure
-            wandb.log({key: wandb.Image(image, caption=caption)}, step=step)
+            wandb.log({key: wandb.Image(image, caption=caption)})
         elif isinstance(image, np.ndarray):
-            wandb.log({key: wandb.Image(image, caption=caption)}, step=step)
+            wandb.log({key: wandb.Image(image, caption=caption)})
         else:
-            wandb.log({key: wandb.Image(image, caption=caption)}, step=step)
+            wandb.log({key: wandb.Image(image, caption=caption)})
 
     def log_figure(
         self,
         key: str,
         figure,
         step: int | None = None,
+        epoch: int | None = None,
     ) -> None:
         """Log a matplotlib figure.
 
         Args:
             key: Figure key/name.
             figure: Matplotlib figure.
-            step: Optional global step number.
+            step: Optional global step number. Avoid using with wandb.watch.
+            epoch: Optional epoch number to log as metric (preferred over step).
         """
         if not self.enabled or self.run is None:
             return
-        wandb.log({key: wandb.Image(figure)}, step=step)
+        # Build log dict with figure and optional epoch
+        log_dict = {key: wandb.Image(figure)}
+        if epoch is not None:
+            log_dict["plot_epoch"] = epoch
+        # Don't use explicit step if epoch is provided (avoids wandb.watch conflicts)
+        if epoch is not None:
+            wandb.log(log_dict)
+        else:
+            wandb.log(log_dict, step=step)
 
     def log_summary(self, metrics: dict[str, float]) -> None:
         """Log metrics to run summary (final/aggregate values).
@@ -160,12 +173,13 @@ class WandbLogger:
         Args:
             path: Path to video file.
             key: Video key/name.
-            step: Optional global step number.
+            step: Deprecated - no longer used to avoid wandb.watch conflicts.
             fps: Frames per second.
         """
         if not self.enabled or self.run is None:
             return
-        wandb.log({key: wandb.Video(path, fps=fps, format="gif")}, step=step)
+        # Don't use explicit step to avoid conflicts with wandb.watch step counter
+        wandb.log({key: wandb.Video(path, fps=fps, format="gif")})
 
     def log_model(
         self,

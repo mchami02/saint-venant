@@ -155,7 +155,7 @@ def _create_comparison_table(
         logger: WandbLogger instance.
         num_samples: Maximum number of samples to include.
         mode: Mode string for logging prefix.
-        step: Optional step for W&B logging (must match other logs in same epoch).
+        step: Optional epoch number to log as metric (avoids wandb.watch step conflicts).
     """
     if logger is None or not logger.enabled:
         return
@@ -202,7 +202,12 @@ def _create_comparison_table(
         data.append(row)
 
     table = wandb.Table(columns=columns, data=data)
-    wandb.log({f"{mode}/hybrid_comparison_table": table}, step=step)
+    # Don't use explicit step to avoid conflicts with wandb.watch step counter
+    # Include epoch as a metric so it can be used as x-axis in charts
+    log_dict = {f"{mode}/hybrid_comparison_table": table}
+    if step is not None:
+        log_dict["plot_epoch"] = step
+    wandb.log(log_dict)
 
 
 def plot_hybrid_predictions_wandb(
