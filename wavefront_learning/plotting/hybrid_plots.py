@@ -139,6 +139,7 @@ def _create_comparison_table(
     logger,
     num_samples: int = 5,
     mode: str = "test",
+    step: int | None = None,
 ) -> None:
     """Create a W&B table with comparison images.
 
@@ -153,6 +154,8 @@ def _create_comparison_table(
         grid_config: Dict with {nx, nt, dx, dt}.
         logger: WandbLogger instance.
         num_samples: Maximum number of samples to include.
+        mode: Mode string for logging prefix.
+        step: Optional step for W&B logging (must match other logs in same epoch).
     """
     if logger is None or not logger.enabled:
         return
@@ -199,7 +202,7 @@ def _create_comparison_table(
         data.append(row)
 
     table = wandb.Table(columns=columns, data=data)
-    wandb.log({f"{mode}/hybrid_comparison_table": table})
+    wandb.log({f"{mode}/hybrid_comparison_table": table}, step=step)
 
 
 def plot_hybrid_predictions_wandb(
@@ -268,6 +271,7 @@ def plot_hybrid_predictions_wandb(
         logger,
         num_samples=5,
         mode=mode,
+        step=epoch,
     )
 
     # Summary comparison plot: 3 columns (GT, Pred+traj, MSE Error)
