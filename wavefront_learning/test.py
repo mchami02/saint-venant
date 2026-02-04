@@ -15,12 +15,8 @@ from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger
 from loss import get_loss
 from metrics import compute_metrics
-from plotter import (
-    plot_comparison_wandb,
-    plot_hybrid_predictions_wandb,
-    plot_trajectory_on_grid_wandb,
-    plot_trajectory_wandb,
-)
+from plotter import PLOT_PRESETS, plot_wandb
+from plotting import plot_comparison_wandb
 from torch.profiler import ProfilerActivity, profile, schedule
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -37,6 +33,7 @@ def test_model(
     grid_config: dict | None = None,
     num_plots: int = 3,
     epoch: int = 0,  # noqa: ARG001 - kept for API compat, now unused
+    plot_preset: str | None = None,
 ) -> dict[str, float]:
     """Evaluate model on test dataset.
 
@@ -182,15 +179,15 @@ def test_model(
                 "region_densities": np.array(hybrid_region_densities),
                 "region_weights": np.array(hybrid_region_weights),
                 "times": traj_times,
+                "is_hybrid": True,
             }
-            # Plot HybridDeepONet comprehensive visualization
-            plot_hybrid_predictions_wandb(
+            plot_wandb(
                 traj_data,
                 grid_config,
                 logger,
                 epoch=None,
                 mode="test",
-                use_summary=False,
+                preset=plot_preset,
             )
         elif is_trajectory_model and traj_positions:
             # Build traj_data dict for trajectory model
@@ -202,22 +199,13 @@ def test_model(
                 "masks": np.array(traj_masks),
                 "times": traj_times,
             }
-            # Plot trajectory for trajectory models
-            plot_trajectory_wandb(
-                traj_data,
-                logger,
-                epoch=None,
-                mode="test",
-                use_summary=False,
-            )
-            # Also plot trajectory overlay on grid
-            plot_trajectory_on_grid_wandb(
+            plot_wandb(
                 traj_data,
                 grid_config,
                 logger,
                 epoch=None,
                 mode="test",
-                use_summary=False,
+                preset=plot_preset,
             )
         elif not is_trajectory_model and all_targets:
             # Plot comparison for standard models
@@ -564,6 +552,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
 
+    # Plot preset
+    parser.add_argument(
+        "--plot",
+        type=str,
+        default=None,
+        choices=list(PLOT_PRESETS.keys()),
+        help="Plot preset (default: auto-detect based on model)",
+    )
+
     return parser.parse_args()
 
 
@@ -647,6 +644,7 @@ def main():
         logger=logger,
         grid_config=grid_config,
         num_plots=args.num_plots,
+        plot_preset=args.plot,
     )
 
     # Cleanup

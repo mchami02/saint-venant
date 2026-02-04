@@ -8,6 +8,11 @@ Modules:
     grid_plots: Grid comparison and error visualization
     trajectory_plots: Shock trajectory visualization
     hybrid_plots: HybridDeepONet-specific visualization
+
+Main entry point:
+    plot_wandb(): Unified plotting function that uses presets
+    PLOTS: Registry of available plot functions
+    PLOT_PRESETS: Pre-configured plot combinations
 """
 
 from .base import (

@@ -14,7 +14,7 @@ wavefront_learning/
 ├── loss.py                # Loss function factory, CombinedLoss, presets
 ├── logger.py              # W&B logging utilities
 ├── metrics.py             # Shared metrics utilities (MSE, MAE, rel_l2, max_error)
-├── plotter.py             # Backwards-compat shim (imports from plotting/)
+├── plotter.py             # Plotting factory (PLOTS, PLOT_PRESETS, plot_wandb)
 ├── plotting/              # Visualization subpackage
 │   ├── __init__.py        # Re-exports all public plotting functions
 │   ├── base.py            # Common setup, helpers (save_figure, _get_extent, etc.)
@@ -129,7 +129,56 @@ loss = get_loss("hybrid", loss_kwargs={  # Customize preset
 
 ### Plotting
 
-The `plotting/` subpackage provides visualization utilities split into focused modules:
+The plotting system consists of two parts:
+1. **`plotter.py`** - Main entry point with preset system (similar to loss.py)
+2. **`plotting/`** - Low-level visualization utilities
+
+#### `plotter.py` - Plotting Factory
+
+The main plotting module provides a preset-based system similar to `loss.py`:
+
+```python
+# Available presets
+PLOT_PRESETS = {
+    "shock_net": [        # For trajectory-only models
+        "ground_truth",
+        "grid_with_trajectory",
+        "trajectory_vs_analytical",
+        "existence",
+    ],
+    "hybrid": [           # For HybridDeepONet
+        "ground_truth",
+        "prediction_with_trajectory",
+        "mse_error",
+        "trajectory_vs_analytical",
+        "existence",
+        "region_weights",
+    ],
+}
+
+# Usage in train.py
+plot_wandb(traj_data, grid_config, logger, epoch, mode="val", preset=args.plot)
+```
+
+| Plot Function | Description | Required Data |
+|---------------|-------------|---------------|
+| `ground_truth` | GT grid heatmap | `grids` |
+| `grid_with_trajectory` | GT grid + predicted trajectories | `grids`, `positions`, `existence`, `masks`, `times` |
+| `trajectory_vs_analytical` | Predicted vs RH trajectories | `positions`, `existence`, `discontinuities`, `masks`, `times` |
+| `existence` | Existence probability heatmap | `existence`, `masks`, `times` |
+| `prediction_with_trajectory` | Predicted grid + trajectories | `output_grid`, `positions`, `existence`, `masks`, `times` |
+| `mse_error` | MSE error heatmap | `output_grid`, `grids` |
+| `region_weights` | Region assignment visualization | `region_weights`, `positions`, `existence`, `masks`, `times` |
+
+Command-line usage:
+```bash
+# Auto-detect preset based on model
+uv run python train.py --model ShockNet --epochs 10
+
+# Explicit preset
+uv run python train.py --model ShockNet --plot shock_net --epochs 10
+uv run python train.py --model HybridDeepONet --plot hybrid --epochs 10
+```
 
 #### `plotting/base.py` - Common Utilities
 - `save_figure(fig, path, dpi)` - Save figure to file

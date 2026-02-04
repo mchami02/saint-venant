@@ -16,12 +16,8 @@ from logger import WandbLogger, init_logger, log_epoch_metrics
 from loss import LOSS_PRESETS, LOSSES, get_loss
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
-from plotter import (
-    plot_comparison_wandb,
-    plot_hybrid_predictions_wandb,
-    plot_trajectory_on_grid_wandb,
-    plot_trajectory_wandb,
-)
+from plotter import PLOT_PRESETS, plot_wandb
+from plotting import plot_comparison_wandb
 from test import run_profiler, run_sanity_check, test_model
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -82,6 +78,15 @@ def parse_args() -> argparse.Namespace:
     # Debugging/profiling
     parser.add_argument(
         "--profile", action="store_true", help="Run profiler before training"
+    )
+
+    # Plot preset
+    parser.add_argument(
+        "--plot",
+        type=str,
+        default=None,
+        choices=list(PLOT_PRESETS.keys()),
+        help="Plot preset (default: auto-detect based on model)",
     )
 
     return parser.parse_args()
@@ -493,60 +498,28 @@ def train_model(
                     model, train_loader, num_samples=2
                 )
                 if traj_data_train is not None:
-                    # Check if this is HybridDeepONet
-                    if traj_data_train.get("is_hybrid", False):
-                        plot_hybrid_predictions_wandb(
-                            traj_data_train,
-                            grid_config,
-                            logger,
-                            epoch + 1,
-                            mode="train",
-                        )
-                    else:
-                        plot_trajectory_wandb(
-                            traj_data_train,
-                            logger,
-                            epoch + 1,
-                            mode="train",
-                        )
-                        # Also plot trajectory overlay on grid
-                        plot_trajectory_on_grid_wandb(
-                            traj_data_train,
-                            grid_config,
-                            logger,
-                            epoch + 1,
-                            mode="train",
-                        )
+                    plot_wandb(
+                        traj_data_train,
+                        grid_config,
+                        logger,
+                        epoch + 1,
+                        mode="train",
+                        preset=args.plot,
+                    )
 
                 # Plot validation samples
                 traj_data = sample_trajectory_predictions(
                     model, val_loader, num_samples=2
                 )
                 if traj_data is not None:
-                    # Check if this is HybridDeepONet
-                    if traj_data.get("is_hybrid", False):
-                        plot_hybrid_predictions_wandb(
-                            traj_data,
-                            grid_config,
-                            logger,
-                            epoch + 1,
-                            mode="val",
-                        )
-                    else:
-                        plot_trajectory_wandb(
-                            traj_data,
-                            logger,
-                            epoch + 1,
-                            mode="val",
-                        )
-                        # Also plot trajectory overlay on grid
-                        plot_trajectory_on_grid_wandb(
-                            traj_data,
-                            grid_config,
-                            logger,
-                            epoch + 1,
-                            mode="val",
-                        )
+                    plot_wandb(
+                        traj_data,
+                        grid_config,
+                        logger,
+                        epoch + 1,
+                        mode="val",
+                        preset=args.plot,
+                    )
                 else:
                     # Standard grid-based models - plot both train and val
                     gts_train, preds_train = sample_predictions(
@@ -704,6 +677,7 @@ def main():
         loss_fn=loss_fn,
         grid_config=grid_config,
         epoch=args.epochs + 1,  # Log after final training epoch
+        plot_preset=args.plot,
     )
 
     # Log final model
