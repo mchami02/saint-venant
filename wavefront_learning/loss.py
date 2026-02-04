@@ -208,9 +208,9 @@ class CombinedLoss(BaseLoss):
             # Store the main loss value
             components[name] = loss_val.item()
 
-            # Store sub-components with prefix
+            # Store sub-components with prefix (skip duplicates of main loss name)
             for sub_key, sub_val in sub_components.items():
-                if sub_key != "total":  # Skip nested totals
+                if sub_key != "total" and sub_key != name:
                     components[f"{name}/{sub_key}"] = sub_val
 
         components["total"] = total.item()
