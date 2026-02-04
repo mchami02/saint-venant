@@ -4,6 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **IMPORTANT**: After completing any task that modifies a folder's structure (adding/removing files), update the corresponding `structure.md` file to reflect the changes. If no `structure.md` exists in that folder, create one.
 
+**IMPORTANT**: After modifying models or losses:
+- Update `ARCHITECTURE.md` with architecture details and mathematical formulas
+- Update `Structure.md` if adding/removing files
+
 ## Project Overview
 
 A research project for solving 1D shallow water (Saint-Venant) equations using both traditional finite volume numerical methods and machine learning-based neural operators. The codebase supports two equation systems:

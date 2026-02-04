@@ -2,6 +2,7 @@
 
 ```
 wavefront_learning/
+├── ARCHITECTURE.md        # Detailed model and loss architecture documentation
 ├── CLAUDE.md              # Claude Code guidance for this module
 ├── Structure.md           # This file - folder structure documentation
 ├── train.py               # Main training script (standalone)

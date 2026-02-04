@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from losses.pde_residual import PDEResidualLoss
+from losses.pde_residual import PDEResidualLoss, create_shock_mask
 
 
 def greenshields_flux(rho: torch.Tensor) -> torch.Tensor:
@@ -162,12 +162,20 @@ def sample_density_at_shock(
     # Here H = nt, W = nx
     # Use "zeros" padding mode for MPS compatibility (border not supported on MPS)
     u_minus = F.grid_sample(
-        region_left, grid_minus, mode="bilinear", padding_mode="zeros", align_corners=True
+        region_left,
+        grid_minus,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=True,
     )  # (B, 1, nt, 1)
     u_minus = u_minus.squeeze(1).squeeze(-1)  # (B, nt) = (B, T)
 
     u_plus = F.grid_sample(
-        region_right, grid_plus, mode="bilinear", padding_mode="zeros", align_corners=True
+        region_right,
+        grid_plus,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=True,
     )  # (B, 1, nt, 1)
     u_plus = u_plus.squeeze(1).squeeze(-1)  # (B, T)
 
@@ -255,17 +263,22 @@ class HybridDeepONetLoss(nn.Module):
     Combines:
     1. Grid MSE: Match output_grid to target
     2. RH Residual: Enforce Rankine-Hugoniot at shocks (CORRECTED)
-    3. PDE Residual: Enforce conservation in smooth regions
-    4. Existence Regularization: Prevent collapse
+    3. Smooth Region Loss: Either PDE residual (unsupervised) or supervised MSE
+    4. IC Loss: Match initial condition at t=0 (included in PDE loss)
+    5. Existence Regularization: Prevent collapse
 
     Args:
         grid_weight: Weight for grid MSE loss.
         rh_weight: Weight for Rankine-Hugoniot residual loss.
-        pde_weight: Weight for PDE residual loss.
+        smooth_weight: Weight for smooth region loss (PDE residual or supervised).
         reg_weight: Weight for existence regularization.
+        ic_weight: Weight for initial condition loss (higher = prioritize IC).
+        smooth_loss_type: Type of loss for smooth regions:
+            - "pde_residual" (default): Unsupervised physics-informed loss
+            - "supervised": MSE between prediction and target in smooth regions
         dt: Time step size.
         dx: Spatial step size.
-        shock_buffer: Buffer around shocks for PDE loss.
+        shock_buffer: Buffer around shocks for smooth region masking.
         epsilon: Offset for density sampling in RH loss.
     """
 
@@ -273,8 +286,10 @@ class HybridDeepONetLoss(nn.Module):
         self,
         grid_weight: float = 1.0,
         rh_weight: float = 1.0,
-        pde_weight: float = 0.1,
+        smooth_weight: float = 0.1,
         reg_weight: float = 0.01,
+        ic_weight: float = 10.0,
+        smooth_loss_type: str = "pde_residual",
         dt: float = 0.004,
         dx: float = 0.02,
         shock_buffer: float = 0.05,
@@ -283,14 +298,22 @@ class HybridDeepONetLoss(nn.Module):
         super().__init__()
         self.grid_weight = grid_weight
         self.rh_weight = rh_weight
-        self.pde_weight = pde_weight
+        self.smooth_weight = smooth_weight
         self.reg_weight = reg_weight
+        self.ic_weight = ic_weight
+        self.smooth_loss_type = smooth_loss_type
         self.dt = dt
         self.dx = dx
+        self.shock_buffer = shock_buffer
         self.epsilon = epsilon
 
-        # PDE residual loss module
-        self.pde_loss = PDEResidualLoss(dt=dt, dx=dx, shock_buffer=shock_buffer)
+        # PDE residual loss module (includes IC loss) - only used if smooth_loss_type is "pde_residual"
+        if smooth_loss_type == "pde_residual":
+            self.pde_loss = PDEResidualLoss(
+                dt=dt, dx=dx, shock_buffer=shock_buffer, ic_weight=ic_weight
+            )
+        else:
+            self.pde_loss = None
 
     def forward(
         self,
@@ -338,10 +361,38 @@ class HybridDeepONetLoss(nn.Module):
             self.epsilon,
         )
 
-        # 3. PDE Residual Loss
-        loss_pde = self.pde_loss(
-            output_grid, positions, existence, x_coords, disc_mask
-        )
+        # 3. Smooth Region Loss (either PDE residual or supervised MSE)
+        if self.smooth_loss_type == "pde_residual":
+            # Unsupervised physics-informed loss in smooth regions
+            loss_smooth, smooth_components = self.pde_loss(
+                output_grid, positions, existence, x_coords, disc_mask, target
+            )
+            smooth_loss_name = "smooth_pde"
+            ic_loss_val = smooth_components["ic_loss"]
+        else:
+            # Supervised MSE loss in smooth regions only
+            # Create mask for smooth regions (1 = smooth, 0 = near shock)
+            if x_coords.dim() == 4:
+                x_coords_3d = x_coords.squeeze(1)  # (B, nt, nx)
+            else:
+                x_coords_3d = x_coords
+
+            mask = create_shock_mask(
+                positions, existence, x_coords_3d, disc_mask, self.shock_buffer
+            )  # (B, nt, nx)
+
+            # Compute masked supervised loss
+            output_squeezed = output_grid.squeeze(1)  # (B, nt, nx)
+            target_squeezed = target.squeeze(1)  # (B, nt, nx)
+            squared_error = (output_squeezed - target_squeezed) ** 2
+            masked_error = squared_error * mask
+            loss_smooth = masked_error.sum() / mask.sum().clamp(min=1)
+            smooth_loss_name = "smooth_supervised"
+
+            # For supervised mode, compute IC loss separately
+            pred_ic = output_grid[:, 0, 0, :]  # (B, nx)
+            true_ic = target[:, 0, 0, :]  # (B, nx)
+            ic_loss_val = F.mse_loss(pred_ic, true_ic).item()
 
         # 4. Existence Regularization
         # Encourage non-trivial existence predictions
@@ -358,7 +409,7 @@ class HybridDeepONetLoss(nn.Module):
         total_loss = (
             self.grid_weight * loss_grid
             + self.rh_weight * loss_rh
-            + self.pde_weight * loss_pde
+            + self.smooth_weight * loss_smooth
             + self.reg_weight * loss_reg
         )
 
@@ -366,8 +417,11 @@ class HybridDeepONetLoss(nn.Module):
             "total": total_loss.item(),
             "grid": loss_grid.item(),
             "rh_residual": loss_rh.item(),
-            "pde_residual": loss_pde.item(),
-            "existence_reg": loss_reg.item() if isinstance(loss_reg, torch.Tensor) else loss_reg,
+            smooth_loss_name: loss_smooth.item(),
+            "ic_loss": ic_loss_val,
+            "existence_reg": loss_reg.item()
+            if isinstance(loss_reg, torch.Tensor)
+            else loss_reg,
         }
 
         return total_loss, components
@@ -380,11 +434,13 @@ def build_hybrid_loss(args: dict) -> HybridDeepONetLoss:
         args: Configuration dictionary with optional keys:
             - grid_weight: Weight for grid MSE (default 1.0)
             - rh_weight: Weight for RH residual (default 1.0)
-            - pde_weight: Weight for PDE residual (default 0.1)
+            - smooth_weight: Weight for smooth region loss (default 0.1)
             - reg_weight: Weight for regularization (default 0.01)
+            - ic_weight: Weight for IC loss (default 10.0)
+            - smooth_loss_type: "pde_residual" or "supervised" (default "pde_residual")
             - dt: Time step size (default 0.004)
             - dx: Spatial step size (default 0.02)
-            - shock_buffer: Buffer for PDE loss (default 0.05)
+            - shock_buffer: Buffer for smooth region masking (default 0.05)
             - epsilon: Offset for density sampling (default 0.01)
 
     Returns:
@@ -393,8 +449,10 @@ def build_hybrid_loss(args: dict) -> HybridDeepONetLoss:
     return HybridDeepONetLoss(
         grid_weight=args.get("grid_weight", 1.0),
         rh_weight=args.get("rh_weight", 1.0),
-        pde_weight=args.get("pde_weight", 0.1),
+        smooth_weight=args.get("smooth_weight", 0.1),
         reg_weight=args.get("reg_weight", 0.01),
+        ic_weight=args.get("ic_weight", 10.0),
+        smooth_loss_type=args.get("smooth_loss_type", "pde_residual"),
         dt=args.get("dt", 0.004),
         dx=args.get("dx", 0.02),
         shock_buffer=args.get("shock_buffer", 0.05),

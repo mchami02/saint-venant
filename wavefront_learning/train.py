@@ -71,6 +71,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
     parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
 
+    # Loss configuration
+    parser.add_argument(
+        "--smooth_loss_type",
+        type=str,
+        choices=["pde_residual", "supervised"],
+        default="pde_residual",
+        help="Loss type for smooth regions: 'pde_residual' (physics) or 'supervised' (MSE)",
+    )
+
     # Output
     parser.add_argument(
         "--save_path", type=str, default="wavefront_model.pth", help="Model save path"
@@ -387,7 +396,14 @@ def train_model(
     Returns:
         Trained model (best checkpoint).
     """
-    loss_fn = get_loss(args.loss)
+    # Configure loss function with additional parameters
+    loss_kwargs = {
+        "dt": args.dt,
+        "dx": args.dx,
+    }
+    if args.loss == "hybrid":
+        loss_kwargs["smooth_loss_type"] = args.smooth_loss_type
+    loss_fn = get_loss(args.loss, **loss_kwargs)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
@@ -663,7 +679,13 @@ def main():
 
     # Final test
     print("\nRunning final evaluation on test set...")
-    loss_fn = get_loss(args.loss)
+    loss_kwargs = {
+        "dt": args.dt,
+        "dx": args.dx,
+    }
+    if args.loss == "hybrid":
+        loss_kwargs["smooth_loss_type"] = args.smooth_loss_type
+    loss_fn = get_loss(args.loss, **loss_kwargs)
     test_model(
         model=model,
         test_loader=test_loader,

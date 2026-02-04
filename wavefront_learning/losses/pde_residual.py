@@ -142,10 +142,14 @@ class PDEResidualLoss(nn.Module):
     Enforces ∂ρ/∂t + ∂f(ρ)/∂x = 0 using central finite differences,
     with shock masking to exclude points near predicted discontinuities.
 
+    Optionally includes an initial condition (IC) loss that penalizes
+    deviation from the target IC at t=0.
+
     Args:
         dt: Time step size.
         dx: Spatial step size.
         shock_buffer: Buffer distance around shocks to exclude.
+        ic_weight: Weight for IC loss (higher = prioritize IC accuracy).
     """
 
     def __init__(
@@ -153,11 +157,13 @@ class PDEResidualLoss(nn.Module):
         dt: float = 0.004,
         dx: float = 0.02,
         shock_buffer: float = 0.05,
+        ic_weight: float = 10.0,
     ):
         super().__init__()
         self.dt = dt
         self.dx = dx
         self.shock_buffer = shock_buffer
+        self.ic_weight = ic_weight
 
     def forward(
         self,
@@ -166,8 +172,9 @@ class PDEResidualLoss(nn.Module):
         existence: torch.Tensor,
         x_coords: torch.Tensor,
         disc_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute PDE residual loss.
+        target: torch.Tensor = None,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Compute PDE residual loss with optional IC loss.
 
         Args:
             output_grid: Predicted density grid (B, 1, nt, nx).
@@ -175,9 +182,11 @@ class PDEResidualLoss(nn.Module):
             existence: Predicted shock existence (B, D, T).
             x_coords: Spatial coordinates (B, 1, nt, nx).
             disc_mask: Validity mask for discontinuities (B, D).
+            target: Optional target grid (B, 1, nt, nx) for IC loss.
 
         Returns:
-            Scalar PDE residual loss.
+            Tuple of (total_loss, components_dict) where components_dict
+            contains 'pde_residual', 'ic_loss', and 'total'.
         """
         # Squeeze channel dimension
         density = output_grid.squeeze(1)  # (B, nt, nx)
@@ -208,9 +217,26 @@ class PDEResidualLoss(nn.Module):
         masked_residual = residual * mask
         n_valid = mask.sum().clamp(min=1)
 
-        loss = (masked_residual**2).sum() / n_valid
+        pde_loss = (masked_residual**2).sum() / n_valid
 
-        return loss
+        # Compute IC loss if target provided
+        ic_loss_val = torch.tensor(0.0, device=output_grid.device)
+        if target is not None and self.ic_weight > 0:
+            # Extract IC at t=0: (B, 1, nt, nx) -> (B, nx)
+            pred_ic = output_grid[:, 0, 0, :]  # (B, nx)
+            true_ic = target[:, 0, 0, :]  # (B, nx)
+            ic_loss_val = torch.nn.functional.mse_loss(pred_ic, true_ic)
+
+        # Combine losses
+        total_loss = pde_loss + self.ic_weight * ic_loss_val
+
+        components = {
+            "pde_residual": pde_loss.item(),
+            "ic_loss": ic_loss_val.item(),
+            "total": total_loss.item(),
+        }
+
+        return total_loss, components
 
 
 def pde_residual_loss(
@@ -219,10 +245,12 @@ def pde_residual_loss(
     existence: torch.Tensor,
     x_coords: torch.Tensor,
     disc_mask: torch.Tensor,
+    target: torch.Tensor = None,
     dt: float = 0.004,
     dx: float = 0.02,
     shock_buffer: float = 0.05,
-) -> torch.Tensor:
+    ic_weight: float = 10.0,
+) -> tuple[torch.Tensor, dict[str, float]]:
     """Functional interface for PDE residual loss.
 
     Args:
@@ -231,12 +259,16 @@ def pde_residual_loss(
         existence: Predicted shock existence (B, D, T).
         x_coords: Spatial coordinates (B, 1, nt, nx).
         disc_mask: Validity mask for discontinuities (B, D).
+        target: Optional target grid (B, 1, nt, nx) for IC loss.
         dt: Time step size.
         dx: Spatial step size.
         shock_buffer: Buffer distance around shocks to exclude.
+        ic_weight: Weight for IC loss (higher = prioritize IC accuracy).
 
     Returns:
-        Scalar PDE residual loss.
+        Tuple of (total_loss, components_dict).
     """
-    loss_fn = PDEResidualLoss(dt=dt, dx=dx, shock_buffer=shock_buffer)
-    return loss_fn(output_grid, positions, existence, x_coords, disc_mask)
+    loss_fn = PDEResidualLoss(
+        dt=dt, dx=dx, shock_buffer=shock_buffer, ic_weight=ic_weight
+    )
+    return loss_fn(output_grid, positions, existence, x_coords, disc_mask, target)

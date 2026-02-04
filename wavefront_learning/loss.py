@@ -2,13 +2,18 @@
 
 import torch
 import torch.nn as nn
-from losses.hybrid_loss import HybridDeepONetLoss
+from losses.hybrid_loss import HybridDeepONetLoss, build_hybrid_loss
 from losses.rankine_hugoniot import RankineHugoniotLoss
 
 # Registry of available loss functions
 LOSSES = {
     "rankine_hugoniot": RankineHugoniotLoss,
     "hybrid": HybridDeepONetLoss,
+}
+
+# Factory functions for losses that need special construction
+LOSS_FACTORIES = {
+    "hybrid": build_hybrid_loss,
 }
 
 
@@ -18,6 +23,10 @@ def get_loss(loss_name: str, **kwargs) -> nn.Module:
     Args:
         loss_name: Name of the loss function.
         **kwargs: Additional arguments for the loss function.
+            For "hybrid" loss, supports:
+            - smooth_loss_type: "pde_residual" (default) or "supervised"
+            - grid_weight, rh_weight, smooth_weight, reg_weight, ic_weight
+            - dt, dx, shock_buffer, epsilon
 
     Returns:
         Instantiated loss function.
@@ -27,6 +36,11 @@ def get_loss(loss_name: str, **kwargs) -> nn.Module:
     """
     if loss_name not in LOSSES:
         raise ValueError(f"Loss {loss_name} not supported")
+
+    # Use factory if available
+    if loss_name in LOSS_FACTORIES:
+        return LOSS_FACTORIES[loss_name](kwargs)
+
     return LOSSES[loss_name](**kwargs)
 
 
