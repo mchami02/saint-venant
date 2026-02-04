@@ -13,6 +13,7 @@ wavefront_learning/
 ├── model.py               # Model factory and registry
 ├── loss.py                # Loss function factory and registry
 ├── logger.py              # W&B logging utilities
+├── metrics.py             # Shared metrics utilities (MSE, MAE, rel_l2, max_error)
 ├── plotter.py             # Backwards-compat shim (imports from plotting/)
 ├── plotting/              # Visualization subpackage
 │   ├── __init__.py        # Re-exports all public plotting functions
@@ -118,9 +119,52 @@ The `plotting/` subpackage provides visualization utilities split into focused m
 
 ## Logging
 
+### Sanity Check
+
+Before training starts, `run_sanity_check()` verifies all code paths:
+1. **[1/4] Forward pass on training batch** - Logs output shapes
+2. **[2/4] Forward pass on validation batch** - Verifies consistency
+3. **[3/4] Loss computation** - Tests loss function with model output
+4. **[4/4] Backward pass** - Verifies gradients are computed
+
+### wandb.watch()
+
+After W&B initialization, `wandb.watch(model, log="all", log_freq=100)` is called to track:
+- Model parameter histograms
+- Gradient histograms (every 100 forward passes)
+
+View in W&B dashboard under the "Gradients" section.
+
+### Profiler
+
+Run with `--profile` flag to profile training steps before the main loop:
+```bash
+uv run python train.py --model HybridDeepONet --epochs 1 --profile
+```
+
+The profiler:
+- Runs warmup steps (default: 2) followed by active profiling steps (default: 10)
+- Records CPU and CUDA (if available) activities
+- Uploads artifacts to W&B:
+  - `trace.json`: Chrome trace for visualization (chrome://tracing)
+  - `summary.txt`: Summary table sorted by time
+
+### Metrics Hierarchy
+
 Training logs to W&B with the following metrics hierarchy:
+
+### Loss Components
 - `train/loss/*`: Training loss components (trajectory, boundary, collision, etc.)
 - `val/loss/*`: Validation loss components
+
+### Grid Metrics (for models with grid output)
+- `train/metrics/{mse,mae,rel_l2,max_error}`: Training grid metrics
+- `val/metrics/{mse,mae,rel_l2,max_error}`: Validation grid metrics
+- `test/metrics/{mse,mae,rel_l2,max_error}`: Test grid metrics
+
+**Note**: Grid metrics are only logged for models that produce grid outputs (e.g., HybridDeepONet). Trajectory-only models (e.g., ShockNet) do not log grid metrics.
+
+### Visualizations
 - For ShockNet:
   - `train/trajectory_on_grid_sample_*`: Trajectory overlay on grid (every 5 epochs)
   - `val/trajectory_on_grid_sample_*`: Validation trajectory overlay (every 5 epochs)

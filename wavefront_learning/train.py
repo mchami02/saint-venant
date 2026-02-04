@@ -14,6 +14,7 @@ import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger, log_epoch_metrics
 from loss import LOSSES, get_loss
+from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
 from plotter import (
     plot_comparison_wandb,
@@ -21,7 +22,7 @@ from plotter import (
     plot_trajectory_on_grid_wandb,
     plot_trajectory_wandb,
 )
-from test import test_model
+from test import run_profiler, run_sanity_check, test_model
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -87,6 +88,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
     parser.add_argument("--run_name", type=str, default=None, help="W&B run name")
 
+    # Debugging/profiling
+    parser.add_argument(
+        "--profile", action="store_true", help="Run profiler before training"
+    )
+
     return parser.parse_args()
 
 
@@ -151,7 +157,7 @@ def train_epoch(
     train_loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
-) -> tuple[float, dict[str, float]]:
+) -> tuple[float, dict[str, float], dict[str, float] | None]:
     """Train for one epoch.
 
     Args:
@@ -161,34 +167,50 @@ def train_epoch(
         optimizer: Optimizer.
 
     Returns:
-        Tuple of (average_loss, metrics_dict).
+        Tuple of (average_loss, loss_components, grid_metrics | None).
+        grid_metrics is None for trajectory-only models (ShockNet).
     """
     model.train()
     total_loss = 0.0
     all_components = []
+    all_predictions = []
+    all_targets = []
 
     for batch_input, batch_target in tqdm(train_loader, desc="Training", leave=False):
-        loss, _pred, components = train_step(
+        loss, pred, components = train_step(
             model, batch_input, batch_target, loss_fn, optimizer
         )
         total_loss += loss
         all_components.append(components)
 
+        # Collect grid predictions for metrics (if available)
+        grid_pred = extract_grid_prediction(pred)
+        if grid_pred is not None:
+            all_predictions.append(grid_pred.cpu())
+            all_targets.append(batch_target.cpu())
+
     avg_loss = total_loss / len(train_loader)
     # Average loss components
-    avg_metrics = {
+    avg_loss_components = {
         key: np.mean([c[key] for c in all_components])
         for key in all_components[0].keys()
     }
 
-    return avg_loss, avg_metrics
+    # Compute grid metrics if predictions available
+    grid_metrics = None
+    if all_predictions:
+        all_preds_tensor = torch.cat(all_predictions, dim=0)
+        all_targets_tensor = torch.cat(all_targets, dim=0)
+        grid_metrics = compute_metrics(all_preds_tensor, all_targets_tensor)
+
+    return avg_loss, avg_loss_components, grid_metrics
 
 
 def validate_epoch(
     model: nn.Module,
     val_loader: DataLoader,
     loss_fn: nn.Module,
-) -> tuple[float, dict[str, float]]:
+) -> tuple[float, dict[str, float], dict[str, float] | None]:
     """Validate for one epoch.
 
     Args:
@@ -197,11 +219,14 @@ def validate_epoch(
         loss_fn: Loss function.
 
     Returns:
-        Tuple of (average_loss, metrics_dict).
+        Tuple of (average_loss, loss_components, grid_metrics | None).
+        grid_metrics is None for trajectory-only models (ShockNet).
     """
     model.eval()
     total_loss = 0.0
     all_components = []
+    all_predictions = []
+    all_targets = []
 
     with torch.no_grad():
         for batch_input, batch_target in tqdm(
@@ -224,13 +249,26 @@ def validate_epoch(
             total_loss += loss.item()
             all_components.append(components)
 
+            # Collect grid predictions for metrics (if available)
+            grid_pred = extract_grid_prediction(pred)
+            if grid_pred is not None:
+                all_predictions.append(grid_pred.cpu())
+                all_targets.append(batch_target.cpu())
+
     avg_loss = total_loss / len(val_loader)
-    avg_metrics = {
+    avg_loss_components = {
         key: np.mean([c[key] for c in all_components])
         for key in all_components[0].keys()
     }
 
-    return avg_loss, avg_metrics
+    # Compute grid metrics if predictions available
+    grid_metrics = None
+    if all_predictions:
+        all_preds_tensor = torch.cat(all_predictions, dim=0)
+        all_targets_tensor = torch.cat(all_targets, dim=0)
+        grid_metrics = compute_metrics(all_preds_tensor, all_targets_tensor)
+
+    return avg_loss, avg_loss_components, grid_metrics
 
 
 def sample_predictions(
@@ -348,9 +386,7 @@ def sample_trajectory_predictions(
                     region_densities_list.append(
                         pred["region_densities"][i].cpu().numpy()
                     )
-                    region_weights_list.append(
-                        pred["region_weights"][i].cpu().numpy()
-                    )
+                    region_weights_list.append(pred["region_weights"][i].cpu().numpy())
 
             if len(positions_list) >= num_samples:
                 break
@@ -397,12 +433,13 @@ def train_model(
         Trained model (best checkpoint).
     """
     # Configure loss function with additional parameters
-    loss_kwargs = {
-        "dt": args.dt,
-        "dx": args.dx,
-    }
+    loss_kwargs = {}
     if args.loss == "hybrid":
-        loss_kwargs["smooth_loss_type"] = args.smooth_loss_type
+        loss_kwargs = {
+            "dt": args.dt,
+            "dx": args.dx,
+            "smooth_loss_type": args.smooth_loss_type,
+        }
     loss_fn = get_loss(args.loss, **loss_kwargs)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -417,10 +454,14 @@ def train_model(
 
     for epoch in progress_bar:
         # Train
-        train_loss, train_metrics = train_epoch(model, train_loader, loss_fn, optimizer)
+        train_loss, train_loss_components, train_metrics = train_epoch(
+            model, train_loader, loss_fn, optimizer
+        )
 
         # Validate
-        val_loss, val_metrics = validate_epoch(model, val_loader, loss_fn)
+        val_loss, val_loss_components, val_metrics = validate_epoch(
+            model, val_loader, loss_fn
+        )
 
         # Update scheduler
         scheduler.step(val_loss)
@@ -429,14 +470,26 @@ def train_model(
         # Log metrics
         if logger is not None:
             log_epoch_metrics(logger, epoch + 1, train_loss, val_loss, current_lr)
+            # Log loss components
             logger.log_metrics(
-                {f"train/loss/{k}": v for k, v in train_metrics.items()},
+                {f"train/loss/{k}": v for k, v in train_loss_components.items()},
                 step=epoch + 1,
             )
             logger.log_metrics(
-                {f"val/loss/{k}": v for k, v in val_metrics.items()},
+                {f"val/loss/{k}": v for k, v in val_loss_components.items()},
                 step=epoch + 1,
             )
+            # Log grid metrics (MSE, MAE, etc.) if available
+            if train_metrics is not None:
+                logger.log_metrics(
+                    {f"train/metrics/{k}": v for k, v in train_metrics.items()},
+                    step=epoch + 1,
+                )
+            if val_metrics is not None:
+                logger.log_metrics(
+                    {f"val/metrics/{k}": v for k, v in val_metrics.items()},
+                    step=epoch + 1,
+                )
 
             # Plot every 5 epochs
             if (epoch + 1) % 5 == 0:
@@ -667,11 +720,23 @@ def main():
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {num_params:,}")
 
+    # Run sanity check before logging
+    run_sanity_check(model, train_loader, val_loader, args, device)
+
     # Initialize logger
     logger = None
     if not args.no_wandb:
         logger = init_logger(args)
         logger.log_metrics({"model/parameters": num_params})
+
+        # Watch model for gradient/parameter tracking
+        import wandb
+
+        wandb.watch(model, log="all", log_freq=100)
+
+    # Run profiler if requested
+    if args.profile:
+        run_profiler(model, train_loader, args, device, logger)
 
     # Train
     if args.epochs > 0:
@@ -679,12 +744,13 @@ def main():
 
     # Final test
     print("\nRunning final evaluation on test set...")
-    loss_kwargs = {
-        "dt": args.dt,
-        "dx": args.dx,
-    }
+    loss_kwargs = {}
     if args.loss == "hybrid":
-        loss_kwargs["smooth_loss_type"] = args.smooth_loss_type
+        loss_kwargs = {
+            "dt": args.dt,
+            "dx": args.dx,
+            "smooth_loss_type": args.smooth_loss_type,
+        }
     loss_fn = get_loss(args.loss, **loss_kwargs)
     test_model(
         model=model,

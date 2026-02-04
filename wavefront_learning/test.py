@@ -5,53 +5,27 @@ This is a standalone script that can be run with:
 """
 
 import argparse
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger
+from loss import get_loss
+from metrics import compute_metrics
 from plotter import (
     plot_comparison_wandb,
     plot_hybrid_predictions_wandb,
     plot_trajectory_on_grid_wandb,
     plot_trajectory_wandb,
 )
+from torch.profiler import ProfilerActivity, profile, schedule
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
-
-
-def compute_metrics(
-    prediction: torch.Tensor,
-    target: torch.Tensor,
-) -> dict[str, float]:
-    """Compute evaluation metrics for predictions.
-
-    Args:
-        prediction: Model predictions.
-        target: Ground truth targets.
-
-    Returns:
-        Dictionary containing MSE, MAE, relative error.
-    """
-    mse = torch.mean((prediction - target) ** 2).item()
-    mae = torch.mean(torch.abs(prediction - target)).item()
-
-    # Relative L2 error
-    rel_l2 = torch.norm(prediction - target) / torch.norm(target)
-    rel_l2 = rel_l2.item() if not torch.isnan(rel_l2) else float("inf")
-
-    # Max absolute error
-    max_error = torch.max(torch.abs(prediction - target)).item()
-
-    return {
-        "mse": mse,
-        "mae": mae,
-        "rel_l2": rel_l2,
-        "max_error": max_error,
-    }
 
 
 def test_model(
@@ -192,7 +166,7 @@ def test_model(
 
     # Log to W&B if logger provided (use summary for test metrics)
     if logger is not None:
-        logger.log_summary({f"test/{k}": v for k, v in avg_metrics.items()})
+        logger.log_summary({f"test/metrics/{k}": v for k, v in avg_metrics.items()})
 
         if is_hybrid_model and traj_positions:
             # Plot HybridDeepONet comprehensive visualization
@@ -294,6 +268,282 @@ def run_inference(
         pred = model(input_data)
 
     return pred
+
+
+def run_sanity_check(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> bool:
+    """Run sanity checks to verify all code paths before training.
+
+    Performs 4 checks:
+    1. Forward pass on training batch
+    2. Forward pass on validation batch
+    3. Loss computation
+    4. Backward pass (gradient check)
+
+    Args:
+        model: Model to check.
+        train_loader: Training data loader.
+        val_loader: Validation data loader.
+        args: Training arguments (needs loss, dt, dx, smooth_loss_type).
+        device: Computation device.
+
+    Returns:
+        True if all checks pass.
+
+    Raises:
+        RuntimeError: If any check fails.
+    """
+    print("\n" + "=" * 50)
+    print("Running sanity checks...")
+    print("=" * 50)
+
+    model.train()
+
+    # Get loss function - build kwargs based on loss type
+    loss_kwargs = {}
+    if args.loss == "hybrid":
+        loss_kwargs = {
+            "dt": args.dt,
+            "dx": args.dx,
+            "smooth_loss_type": args.smooth_loss_type,
+        }
+    loss_fn = get_loss(args.loss, **loss_kwargs)
+
+    # [1/4] Forward pass on training batch
+    print("\n[1/4] Testing forward pass on training batch...")
+    train_batch = next(iter(train_loader))
+    batch_input, batch_target = train_batch
+
+    # Move to device
+    if isinstance(batch_input, dict):
+        batch_input = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in batch_input.items()
+        }
+    else:
+        batch_input = batch_input.to(device)
+    batch_target = batch_target.to(device)
+
+    try:
+        pred = model(batch_input)
+        if isinstance(pred, dict):
+            print(f"  Output type: dict with keys {list(pred.keys())}")
+            for k, v in pred.items():
+                if isinstance(v, torch.Tensor):
+                    print(f"    {k}: shape={v.shape}, dtype={v.dtype}")
+        else:
+            print(f"  Output shape: {pred.shape}")
+        print("  [PASS] Forward pass on training batch")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Forward pass on training batch: {e}") from e
+
+    # [2/4] Forward pass on validation batch
+    print("\n[2/4] Testing forward pass on validation batch...")
+    val_batch = next(iter(val_loader))
+    val_input, val_target = val_batch
+
+    # Move to device
+    if isinstance(val_input, dict):
+        val_input = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in val_input.items()
+        }
+    else:
+        val_input = val_input.to(device)
+    val_target = val_target.to(device)
+
+    try:
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_input)
+        if isinstance(val_pred, dict):
+            print(f"  Output type: dict with keys {list(val_pred.keys())}")
+        else:
+            print(f"  Output shape: {val_pred.shape}")
+        print("  [PASS] Forward pass on validation batch")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Forward pass on validation batch: {e}") from e
+
+    # [3/4] Loss computation
+    print("\n[3/4] Testing loss computation...")
+    model.train()
+    try:
+        # Re-run forward pass for fresh computation graph
+        pred = model(batch_input)
+        loss, components = loss_fn(pred, batch_input, batch_target)
+        print(f"  Loss value: {loss.item():.6f}")
+        print(f"  Loss components: {list(components.keys())}")
+        for k, v in components.items():
+            print(f"    {k}: {v:.6f}")
+        print("  [PASS] Loss computation")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Loss computation: {e}") from e
+
+    # [4/4] Backward pass
+    print("\n[4/4] Testing backward pass...")
+    try:
+        loss.backward()
+        grad_count = 0
+        total_params = 0
+        for _name, param in model.named_parameters():
+            total_params += 1
+            if param.grad is not None:
+                grad_count += 1
+        print(f"  Parameters with gradients: {grad_count}/{total_params}")
+        if grad_count == 0:
+            raise RuntimeError("No gradients computed!")
+        print("  [PASS] Backward pass")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Backward pass: {e}") from e
+
+    # Clean up gradients
+    model.zero_grad()
+
+    print("\n" + "=" * 50)
+    print("Sanity check passed!")
+    print("=" * 50 + "\n")
+
+    return True
+
+
+def run_profiler(
+    model: nn.Module,
+    train_loader: DataLoader,
+    args: argparse.Namespace,
+    device: torch.device,
+    logger: WandbLogger | None = None,
+    num_steps: int = 10,
+    warmup_steps: int = 2,
+) -> None:
+    """Profile training steps and optionally upload trace to wandb.
+
+    Args:
+        model: Model to profile.
+        train_loader: Training data loader.
+        args: Training arguments (needs loss, dt, dx, smooth_loss_type).
+        device: Computation device.
+        logger: Optional WandbLogger for uploading artifacts.
+        num_steps: Number of active profiling steps.
+        warmup_steps: Number of warmup steps before profiling.
+    """
+    import wandb
+
+    print("\n" + "=" * 50)
+    print("Running profiler...")
+    print("=" * 50)
+
+    # Get loss function - build kwargs based on loss type
+    loss_kwargs = {}
+    if args.loss == "hybrid":
+        loss_kwargs = {
+            "dt": args.dt,
+            "dx": args.dx,
+            "smooth_loss_type": args.smooth_loss_type,
+        }
+    loss_fn = get_loss(args.loss, **loss_kwargs)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+
+    # Determine profiler activities
+    activities = [ProfilerActivity.CPU]
+    if torch.cuda.is_available():
+        activities.append(ProfilerActivity.CUDA)
+
+    # Create profiler schedule
+    prof_schedule = schedule(
+        wait=0,
+        warmup=warmup_steps,
+        active=num_steps,
+        repeat=1,
+    )
+
+    model.train()
+    data_iter = iter(train_loader)
+
+    total_steps = warmup_steps + num_steps
+    print(f"  Warmup steps: {warmup_steps}")
+    print(f"  Active steps: {num_steps}")
+    print(f"  Total steps: {total_steps}")
+
+    with profile(
+        activities=activities,
+        schedule=prof_schedule,
+        on_trace_ready=lambda p: None,  # We'll export manually
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+    ) as prof:
+        for step in range(total_steps):
+            try:
+                batch_input, batch_target = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_loader)
+                batch_input, batch_target = next(data_iter)
+
+            # Move to device
+            if isinstance(batch_input, dict):
+                batch_input = {
+                    k: v.to(device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch_input.items()
+                }
+            else:
+                batch_input = batch_input.to(device)
+            batch_target = batch_target.to(device)
+
+            # Training step
+            optimizer.zero_grad()
+            pred = model(batch_input)
+            loss, _ = loss_fn(pred, batch_input, batch_target)
+            loss.backward()
+            optimizer.step()
+
+            prof.step()
+
+            if step < warmup_steps:
+                print(f"  Step {step + 1}/{total_steps} (warmup)")
+            else:
+                print(f"  Step {step + 1}/{total_steps} (profiling)")
+
+    # Generate summary table
+    sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total"
+    summary_table = prof.key_averages().table(sort_by=sort_by, row_limit=30)
+    print("\nProfiler Summary:")
+    print(summary_table)
+
+    # Export trace and upload to wandb
+    if logger is not None and logger.enabled and logger.run is not None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_path = Path(tmpdir) / "trace.json"
+            summary_path = Path(tmpdir) / "summary.txt"
+
+            # Export Chrome trace
+            prof.export_chrome_trace(str(trace_path))
+
+            # Save summary
+            with open(summary_path, "w") as f:
+                f.write(summary_table)
+
+            # Create and upload artifact
+            run_id = logger.run.id
+            artifact = wandb.Artifact(
+                f"profiler-trace-{run_id}",
+                type="profile",
+                description="PyTorch profiler trace and summary",
+            )
+            artifact.add_file(str(trace_path), name="trace.json")
+            artifact.add_file(str(summary_path), name="summary.txt")
+            logger.run.log_artifact(artifact)
+
+            print(f"\n  Uploaded profiler artifact: profiler-trace-{run_id}")
+
+    print("\n" + "=" * 50)
+    print("Profiling complete!")
+    print("=" * 50 + "\n")
 
 
 def parse_args() -> argparse.Namespace:
