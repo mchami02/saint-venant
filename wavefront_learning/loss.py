@@ -34,10 +34,10 @@ LOSSES: dict[str, type[BaseLoss]] = {
 }
 
 # Presets for common configurations
-# Each preset is a list of (loss_name, weight) tuples
-LOSS_PRESETS: dict[str, list[tuple[str, float]]] = {
+# Each preset is a list of (loss_name, weight) or (loss_name, weight, kwargs) tuples
+LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "shock_net": [
-        ("trajectory", 1.0),
+        ("rh_residual", 1.0, {"mode": "gt"}),
         ("boundary", 1.0),
         ("collision", 0.5),
         ("existence_reg", 0.1),
@@ -84,10 +84,24 @@ class CombinedLoss(BaseLoss):
         Args:
             preset_name: Name of the preset (e.g., 'shock_net', 'hybrid').
             loss_kwargs: Optional dict of {loss_name: kwargs} for customizing
-                individual loss instances.
+                individual loss instances. These override preset defaults.
 
         Returns:
             Configured CombinedLoss instance.
+
+        Examples:
+            # Preset with per-loss kwargs:
+            LOSS_PRESETS = {
+                "hybrid": [
+                    ("mse", 1.0),                              # No kwargs
+                    ("rh_residual", 1.0, {"mode": "gt"}),      # With kwargs
+                ],
+            }
+
+            # Override preset kwargs at runtime:
+            loss = CombinedLoss.from_preset("hybrid", loss_kwargs={
+                "rh_residual": {"mode": "per_region"},  # Overrides preset default
+            })
         """
         if preset_name not in LOSS_PRESETS:
             raise ValueError(
@@ -98,10 +112,19 @@ class CombinedLoss(BaseLoss):
         preset = LOSS_PRESETS[preset_name]
 
         losses = {}
-        for loss_name, weight in preset:
+        for entry in preset:
+            # Parse 2-element or 3-element tuples
+            if len(entry) == 2:
+                loss_name, weight = entry
+                preset_kwargs = {}
+            else:
+                loss_name, weight, preset_kwargs = entry
+
             if loss_name not in LOSSES:
                 raise ValueError(f"Unknown loss '{loss_name}' in preset '{preset_name}'")
-            kwargs = loss_kwargs.get(loss_name, {})
+
+            # Merge: loss_kwargs overrides preset defaults
+            kwargs = {**preset_kwargs, **loss_kwargs.get(loss_name, {})}
             losses[loss_name] = (LOSSES[loss_name](**kwargs), weight)
 
         return cls(losses)
@@ -109,28 +132,50 @@ class CombinedLoss(BaseLoss):
     @classmethod
     def from_config(
         cls,
-        config: list[tuple[str, float]],
+        config: list[tuple[str, float] | tuple[str, float, dict]],
         loss_kwargs: dict[str, dict] | None = None,
     ) -> "CombinedLoss":
         """Create CombinedLoss from a custom configuration.
 
         Args:
-            config: List of (loss_name, weight) tuples.
+            config: List of (loss_name, weight) or (loss_name, weight, kwargs) tuples.
             loss_kwargs: Optional dict of {loss_name: kwargs} for customizing
-                individual loss instances.
+                individual loss instances. These override config defaults.
 
         Returns:
             Configured CombinedLoss instance.
+
+        Examples:
+            # Config with per-loss kwargs:
+            config = [
+                ("mse", 1.0),
+                ("rh_residual", 1.0, {"mode": "gt", "dt": 0.004}),
+            ]
+            loss = CombinedLoss.from_config(config)
+
+            # Override config kwargs:
+            loss = CombinedLoss.from_config(config, loss_kwargs={
+                "rh_residual": {"mode": "per_region"},
+            })
         """
         loss_kwargs = loss_kwargs or {}
 
         losses = {}
-        for loss_name, weight in config:
+        for entry in config:
+            # Parse 2-element or 3-element tuples
+            if len(entry) == 2:
+                loss_name, weight = entry
+                config_kwargs = {}
+            else:
+                loss_name, weight, config_kwargs = entry
+
             if loss_name not in LOSSES:
                 raise ValueError(
                     f"Unknown loss '{loss_name}'. Available: {list(LOSSES.keys())}"
                 )
-            kwargs = loss_kwargs.get(loss_name, {})
+
+            # Merge: loss_kwargs overrides config defaults
+            kwargs = {**config_kwargs, **loss_kwargs.get(loss_name, {})}
             losses[loss_name] = (LOSSES[loss_name](**kwargs), weight)
 
         return cls(losses)
