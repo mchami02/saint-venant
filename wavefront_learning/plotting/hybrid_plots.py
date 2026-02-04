@@ -141,6 +141,7 @@ def _create_comparison_table(
     dt: float,
     logger,
     num_samples: int = 5,
+    mode: str = "test",
 ) -> None:
     """Create a W&B table with comparison images.
 
@@ -201,7 +202,7 @@ def _create_comparison_table(
         data.append(row)
 
     table = wandb.Table(columns=columns, data=data)
-    wandb.log({"test/hybrid_comparison_table": table})
+    wandb.log({f"{mode}/hybrid_comparison_table": table})
 
 
 def plot_hybrid_predictions_wandb(
@@ -256,23 +257,23 @@ def plot_hybrid_predictions_wandb(
 
     extent = _get_extent(nx, nt, dx, dt)
 
-    # Create W&B comparison table (for test mode)
-    if mode == "test":
-        _create_comparison_table(
-            ground_truths,
-            predictions,
-            positions,
-            existence,
-            masks,
-            region_weights,
-            times_1d,
-            nx,
-            nt,
-            dx,
-            dt,
-            logger,
-            num_samples=5,
-        )
+    # Create W&B comparison table
+    _create_comparison_table(
+        ground_truths,
+        predictions,
+        positions,
+        existence,
+        masks,
+        region_weights,
+        times_1d,
+        nx,
+        nt,
+        dx,
+        dt,
+        logger,
+        num_samples=5,
+        mode=mode,
+    )
 
     # Summary comparison plot: 3 columns (GT, Pred+traj, MSE Error)
     fig, axes = plt.subplots(B, 3, figsize=(15, 5 * B))

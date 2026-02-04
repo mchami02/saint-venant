@@ -67,30 +67,30 @@ def compute_shock_velocity(positions: torch.Tensor, dt: float) -> torch.Tensor:
     return velocities
 
 
-def sample_density_at_shock(
+def sample_density_at_shocks_vectorized(
     region_densities: torch.Tensor,
     positions: torch.Tensor,
     x_coords: torch.Tensor,
-    disc_idx: int,
+    max_d: int,
     epsilon: float = 0.01,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample density values on both sides of a shock.
+    """Sample density values on both sides of all shocks (vectorized).
 
-    For shock d, we sample:
+    For each shock d, we sample:
     - u_minus: density from region d (left of shock) at x = x_shock - epsilon
     - u_plus: density from region d+1 (right of shock) at x = x_shock + epsilon
 
-    Uses bilinear interpolation via grid_sample.
+    Uses bilinear interpolation via grid_sample with batched operations.
 
     Args:
         region_densities: Per-region densities (B, K, nt, nx).
         positions: Shock positions (B, D, T).
         x_coords: Spatial coordinates (B, nt, nx) or (B, 1, nt, nx).
-        disc_idx: Index of the discontinuity.
+        max_d: Maximum discontinuity index to process (min(D, K-1)).
         epsilon: Small offset from shock position for sampling.
 
     Returns:
-        Tuple of (u_minus, u_plus), each of shape (B, T).
+        Tuple of (u_minus, u_plus), each of shape (B, max_d, T).
     """
     B, K, nt, nx = region_densities.shape
     device = region_densities.device
@@ -99,85 +99,74 @@ def sample_density_at_shock(
     if x_coords.dim() == 4:
         x_coords = x_coords.squeeze(1)  # (B, nt, nx)
 
-    # Get shock positions: (B, T)
-    x_shock = positions[:, disc_idx, :]
+    # Get shock positions for all discontinuities: (B, max_d, T)
+    x_shock = positions[:, :max_d, :]
 
-    # Sample positions
-    x_minus = x_shock - epsilon  # (B, T)
-    x_plus = x_shock + epsilon  # (B, T)
-
-    # Clamp to valid range [0, 1]
-    x_minus = x_minus.clamp(0.0, 1.0)
-    x_plus = x_plus.clamp(0.0, 1.0)
+    # Sample positions: (B, max_d, T)
+    x_minus = (x_shock - epsilon).clamp(0.0, 1.0)
+    x_plus = (x_shock + epsilon).clamp(0.0, 1.0)
 
     # Get x range from coordinates
-    x_min = x_coords[:, 0, 0].min()  # Assume same for all batches
+    x_min = x_coords[:, 0, 0].min()
     x_max = x_coords[:, 0, -1].max()
     x_range = x_max - x_min
 
-    # Normalize to [-1, 1] for grid_sample
+    # Normalize to [-1, 1] for grid_sample: (B, max_d, T)
     x_minus_norm = 2.0 * (x_minus - x_min) / x_range - 1.0
     x_plus_norm = 2.0 * (x_plus - x_min) / x_range - 1.0
 
-    # Time coordinates (normalized to [-1, 1])
-    t_norm = torch.linspace(-1, 1, nt, device=device)  # (T,)
-    t_norm = t_norm.unsqueeze(0).expand(B, -1)  # (B, T)
+    # Time coordinates (normalized to [-1, 1]): (B, T)
+    t_norm = torch.linspace(-1, 1, nt, device=device).unsqueeze(0).expand(B, -1)
 
-    # Create sampling grids
-    # grid_sample expects (B, H_out, W_out, 2) for input (B, C, H, W)
-    # Here we sample at each time point, so H_out = 1, W_out = T
-    # Actually, we sample along time (first dim of region_densities is nt)
+    # Expand t_norm for all discontinuities: (B, max_d, T)
+    t_norm_exp = t_norm.unsqueeze(1).expand(-1, max_d, -1)
 
-    # region_densities[b, k, t, x] has shape (B, K, nt, nx)
-    # We want to sample at specific (t, x) locations
+    # Gather left and right regions for each discontinuity
+    # For discontinuity d: left = region d, right = region d+1
+    # Create index tensors
+    d_indices = torch.arange(max_d, device=device)  # (max_d,)
 
-    # For u_minus: sample from region disc_idx (left region)
-    region_left = region_densities[:, disc_idx, :, :]  # (B, nt, nx)
-    region_left = region_left.unsqueeze(1)  # (B, 1, nt, nx) for grid_sample
+    # Gather left regions: region_densities[:, d, :, :] for each d
+    # Result shape: (B, max_d, nt, nx)
+    left_indices = d_indices.view(1, max_d, 1, 1).expand(B, -1, nt, nx)
+    regions_left = torch.gather(region_densities, 1, left_indices)
 
-    # For u_plus: sample from region disc_idx + 1 (right region)
-    region_right = region_densities[:, disc_idx + 1, :, :]  # (B, nt, nx)
-    region_right = region_right.unsqueeze(1)  # (B, 1, nt, nx)
+    # Gather right regions: region_densities[:, d+1, :, :] for each d
+    right_indices = (d_indices + 1).view(1, max_d, 1, 1).expand(B, -1, nt, nx)
+    regions_right = torch.gather(region_densities, 1, right_indices)
 
-    # Create sampling grid: (B, T, 1, 2) -> (B, 1, T, 2) for grid_sample format
-    # grid_sample input shape: (B, C, H, W) = (B, 1, nt, nx)
-    # grid_sample grid shape: (B, H_out, W_out, 2) where last dim is (x, y) = (nx_dim, nt_dim)
-    # So grid[:, :, :, 0] is x-coordinate, grid[:, :, :, 1] is t-coordinate
+    # Reshape for batched grid_sample: treat (B, max_d) as batch dimension
+    # regions: (B, max_d, nt, nx) -> (B*max_d, 1, nt, nx)
+    regions_left_flat = regions_left.view(B * max_d, 1, nt, nx)
+    regions_right_flat = regions_right.view(B * max_d, 1, nt, nx)
 
-    # We sample at all time points (full nt), specific x locations
-    # Output shape should be (B, 1, nt, 1) -> squeeze to (B, nt)
+    # Create sampling grids: (B, max_d, T, 2) -> (B*max_d, T, 1, 2)
+    grid_minus = torch.stack([x_minus_norm, t_norm_exp], dim=-1)  # (B, max_d, T, 2)
+    grid_minus_flat = grid_minus.view(B * max_d, nt, 1, 2)
 
-    # Create grid for left sampling (x_minus)
-    grid_minus = torch.stack(
-        [x_minus_norm, t_norm], dim=-1
-    )  # (B, T, 2) = (B, nt, 2) since T = nt
-    grid_minus = grid_minus.unsqueeze(2)  # (B, nt, 1, 2) -> (B, H_out, W_out, 2)
+    grid_plus = torch.stack([x_plus_norm, t_norm_exp], dim=-1)  # (B, max_d, T, 2)
+    grid_plus_flat = grid_plus.view(B * max_d, nt, 1, 2)
 
-    # Create grid for right sampling (x_plus)
-    grid_plus = torch.stack([x_plus_norm, t_norm], dim=-1)  # (B, nt, 2)
-    grid_plus = grid_plus.unsqueeze(2)  # (B, nt, 1, 2)
-
-    # Sample using grid_sample
-    # Note: grid_sample expects (B, C, H, W) and grid (B, H_out, W_out, 2)
-    # Here H = nt, W = nx
-    # Use "zeros" padding mode for MPS compatibility (border not supported on MPS)
-    u_minus = F.grid_sample(
-        region_left,
-        grid_minus,
+    # Batched grid_sample
+    u_minus_flat = F.grid_sample(
+        regions_left_flat,
+        grid_minus_flat,
         mode="bilinear",
         padding_mode="zeros",
         align_corners=True,
-    )  # (B, 1, nt, 1)
-    u_minus = u_minus.squeeze(1).squeeze(-1)  # (B, nt) = (B, T)
+    )  # (B*max_d, 1, nt, 1)
 
-    u_plus = F.grid_sample(
-        region_right,
-        grid_plus,
+    u_plus_flat = F.grid_sample(
+        regions_right_flat,
+        grid_plus_flat,
         mode="bilinear",
         padding_mode="zeros",
         align_corners=True,
-    )  # (B, 1, nt, 1)
-    u_plus = u_plus.squeeze(1).squeeze(-1)  # (B, T)
+    )  # (B*max_d, 1, nt, 1)
+
+    # Reshape back: (B*max_d, 1, nt, 1) -> (B, max_d, T)
+    u_minus = u_minus_flat.view(B, max_d, nt)
+    u_plus = u_plus_flat.view(B, max_d, nt)
 
     return u_minus, u_plus
 
@@ -191,7 +180,7 @@ def rankine_hugoniot_residual(
     dt: float = 0.004,
     epsilon: float = 0.01,
 ) -> torch.Tensor:
-    """Compute Rankine-Hugoniot residual loss (CORRECTED).
+    """Compute Rankine-Hugoniot residual loss (vectorized).
 
     The RH condition states: ẋ_s = [f(u+) - f(u-)] / [u+ - u-]
     Rearranging: R_RH = ẋ_s · (u+ - u-) - (f(u+) - f(u-)) = 0
@@ -214,47 +203,43 @@ def rankine_hugoniot_residual(
     K = region_densities.shape[1]  # Number of regions
     device = positions.device
 
-    # Compute shock velocities
-    velocities = compute_shock_velocity(positions, dt)  # (B, D, T)
-
-    total_residual = torch.tensor(0.0, device=device)
-    n_valid = torch.tensor(0.0, device=device)
-
-    # Only iterate over discontinuities that have corresponding regions
+    # Only process discontinuities that have corresponding regions
     # Region d is to the left of shock d, region d+1 is to the right
-    # So we can only compute RH for shocks where both regions exist
     max_d = min(D, K - 1)
 
-    for d in range(max_d):
-        # Sample densities on both sides of shock d
-        u_minus, u_plus = sample_density_at_shock(
-            region_densities, positions, x_coords, d, epsilon
-        )  # Each (B, T)
+    if max_d == 0:
+        return torch.tensor(0.0, device=device)
 
-        # Compute flux difference
-        f_minus = greenshields_flux(u_minus)  # (B, T)
-        f_plus = greenshields_flux(u_plus)  # (B, T)
+    # Compute shock velocities: (B, D, T)
+    velocities = compute_shock_velocity(positions, dt)
 
-        # RH residual: ẋ_s · (u+ - u-) - (f+ - f-)
-        v_shock = velocities[:, d, :]  # (B, T)
-        residual = v_shock * (u_plus - u_minus) - (f_plus - f_minus)  # (B, T)
+    # Sample densities on both sides of all shocks (vectorized)
+    # u_minus, u_plus: (B, max_d, T)
+    u_minus, u_plus = sample_density_at_shocks_vectorized(
+        region_densities, positions, x_coords, max_d, epsilon
+    )
 
-        # Weight by existence probability
-        exist = existence[:, d, :]  # (B, T)
-        weighted_residual = exist * residual**2
+    # Compute flux: (B, max_d, T)
+    f_minus = greenshields_flux(u_minus)
+    f_plus = greenshields_flux(u_plus)
 
-        # Apply discontinuity mask
-        mask_d = disc_mask[:, d].view(B, 1)  # (B, 1)
-        weighted_residual = weighted_residual * mask_d
+    # RH residual: ẋ_s · (u+ - u-) - (f+ - f-)
+    v_shock = velocities[:, :max_d, :]  # (B, max_d, T)
+    residual = v_shock * (u_plus - u_minus) - (f_plus - f_minus)  # (B, max_d, T)
 
-        # Accumulate
-        total_residual = total_residual + weighted_residual.sum()
-        n_valid = n_valid + (exist * mask_d).sum()
+    # Weight by existence probability: (B, max_d, T)
+    exist = existence[:, :max_d, :]
+    weighted_residual = exist * residual**2
 
-    # Average residual
-    loss = total_residual / n_valid.clamp(min=1)
+    # Apply discontinuity mask: (B, max_d) -> (B, max_d, 1)
+    mask_d = disc_mask[:, :max_d].unsqueeze(-1)
+    weighted_residual = weighted_residual * mask_d
 
-    return loss
+    # Sum and normalize
+    total_residual = weighted_residual.sum()
+    n_valid = (exist * mask_d).sum().clamp(min=1)
+
+    return total_residual / n_valid
 
 
 class HybridDeepONetLoss(nn.Module):

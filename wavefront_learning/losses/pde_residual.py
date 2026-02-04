@@ -83,7 +83,7 @@ def create_shock_mask(
     disc_mask: torch.Tensor,
     buffer: float = 0.05,
 ) -> torch.Tensor:
-    """Create mask for points away from shocks.
+    """Create mask for points away from shocks (vectorized).
 
     Creates a mask that is 1 for points that are sufficiently far from
     all predicted shock locations (to exclude shock regions from PDE loss).
@@ -104,34 +104,33 @@ def create_shock_mask(
 
     B, nt, nx = x_coords.shape
     D = positions.shape[1]
-    device = positions.device
 
-    # Start with all ones (all points valid)
-    mask = torch.ones(B, nt, nx, device=device)
+    # Expand dimensions for broadcasting
+    # positions: (B, D, T) -> (B, D, T, 1)
+    # x_coords: (B, nt, nx) -> (B, 1, nt, nx)
+    x_shock_exp = positions.unsqueeze(-1)  # (B, D, T, 1)
+    x_coords_exp = x_coords.unsqueeze(1)  # (B, 1, nt, nx)
 
-    for d in range(D):
-        # Shock position at each time: (B, T)
-        x_shock = positions[:, d, :]  # (B, nt)
+    # Distance from each shock: (B, D, nt, nx)
+    distance = torch.abs(x_coords_exp - x_shock_exp)
 
-        # Expand for comparison: (B, nt, nx)
-        x_shock_exp = x_shock.unsqueeze(-1).expand(-1, -1, nx)
+    # Points within buffer of shock: (B, D, nt, nx)
+    near_shock = distance < buffer
 
-        # Distance from shock: (B, nt, nx)
-        distance = torch.abs(x_coords - x_shock_exp)
+    # Modulate by existence: (B, D, T) -> (B, D, T, 1)
+    exist = (existence > 0.5).unsqueeze(-1)  # (B, D, nt, 1)
+    near_shock = near_shock & exist
 
-        # Points within buffer of shock
-        near_shock = distance < buffer
+    # Apply discontinuity mask: (B, D) -> (B, D, 1, 1)
+    dmask = disc_mask.view(B, D, 1, 1).bool()
+    near_shock = near_shock & dmask
 
-        # Modulate by existence: if shock doesn't exist, don't exclude
-        exist = existence[:, d, :].unsqueeze(-1) > 0.5  # (B, nt, 1)
-        near_shock = near_shock & exist
+    # Combine: a point is near ANY shock if any d has near_shock=True
+    # near_any_shock: (B, nt, nx)
+    near_any_shock = near_shock.any(dim=1)
 
-        # Apply discontinuity mask
-        dmask = disc_mask[:, d].view(B, 1, 1).bool()  # (B, 1, 1)
-        near_shock = near_shock & dmask
-
-        # Update mask: exclude points near this shock
-        mask = mask * (~near_shock).float()
+    # Mask is 1 where NOT near any shock
+    mask = (~near_any_shock).float()
 
     return mask
 

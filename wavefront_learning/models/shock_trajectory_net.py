@@ -321,6 +321,7 @@ class TrajectoryDecoder(nn.Module):
 
         # Apply output heads
         positions = self.position_head(fused).squeeze(-1)  # (B, D, T)
+        positions = torch.clamp(positions, 0.0, 1.0)  # Constrain to grid domain
         existence = self.existence_head(fused).squeeze(-1)  # (B, D, T)
 
         # Mask out invalid discontinuities

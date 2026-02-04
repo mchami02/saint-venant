@@ -292,6 +292,10 @@ class HybridDeepONet(nn.Module):
             branch_emb, trunk_emb, disc_mask
         )  # {positions, existence}
 
+        # Clamp positions to valid grid domain [0, 1]
+        positions = torch.clamp(traj_output["positions"], 0.0, 1.0)
+        existence = traj_output["existence"]
+
         # === REGION TRUNKS ===
         # Encode (t, x) coordinates
         coord_emb = self.coord_encoder(t_coords_3d, x_coords_3d)  # (B, nt, nx, hidden)
@@ -304,15 +308,15 @@ class HybridDeepONet(nn.Module):
         # === GRID ASSEMBLY ===
         output_grid, region_weights = self.grid_assembler(
             region_densities,
-            traj_output["positions"],
-            traj_output["existence"],
+            positions,
+            existence,
             x_coords_3d,
             disc_mask,
         )
 
         return {
-            "positions": traj_output["positions"],
-            "existence": traj_output["existence"],
+            "positions": positions,
+            "existence": existence,
             "output_grid": output_grid,
             "region_densities": region_densities,
             "region_weights": region_weights,

@@ -160,7 +160,7 @@ def collision_loss(
     mask: torch.Tensor,
     collision_threshold: float = 0.02,
 ) -> torch.Tensor:
-    """Compute loss penalizing simultaneous existence of colliding shocks.
+    """Compute loss penalizing simultaneous existence of colliding shocks (vectorized).
 
     When two shocks are very close (within threshold), at most one should exist.
     This encourages the model to predict shock merging.
@@ -174,40 +174,49 @@ def collision_loss(
     Returns:
         Scalar loss tensor.
     """
-    _, D, T = predicted_positions.shape
+    B, D, T = predicted_positions.shape
 
     if D < 2:
         return torch.tensor(0.0, device=predicted_positions.device)
 
-    total_loss = torch.tensor(0.0, device=predicted_positions.device)
-    n_pairs = 0
+    # Create pairwise distance matrix
+    # positions: (B, D, T) -> expand for pairwise comparison
+    pos_i = predicted_positions.unsqueeze(2)  # (B, D, 1, T)
+    pos_j = predicted_positions.unsqueeze(1)  # (B, 1, D, T)
 
-    # Compare all pairs of discontinuities
-    for i in range(D):
-        for j in range(i + 1, D):
-            # Get positions and existence for this pair
-            pos_i = predicted_positions[:, i, :]  # (B, T)
-            pos_j = predicted_positions[:, j, :]  # (B, T)
-            exist_i = predicted_existence[:, i, :]  # (B, T)
-            exist_j = predicted_existence[:, j, :]  # (B, T)
-            mask_i = mask[:, i]  # (B,)
-            mask_j = mask[:, j]  # (B,)
+    # Pairwise distances: (B, D, D, T)
+    distances = torch.abs(pos_i - pos_j)
 
-            # Distance between shocks
-            distance = torch.abs(pos_i - pos_j)  # (B, T)
+    # Collision indicator: (B, D, D, T)
+    colliding = (distances < collision_threshold).float()
 
-            # Collision indicator: 1 if close, 0 otherwise
-            colliding = (distance < collision_threshold).float()
+    # Pairwise existence product: (B, D, D, T)
+    exist_i = predicted_existence.unsqueeze(2)  # (B, D, 1, T)
+    exist_j = predicted_existence.unsqueeze(1)  # (B, 1, D, T)
+    exist_product = exist_i * exist_j
 
-            # Penalty: product of existences when colliding
-            penalty = colliding * exist_i * exist_j  # (B, T)
+    # Penalty: (B, D, D, T)
+    penalty = colliding * exist_product
 
-            # Apply mask: both must be valid
-            pair_mask = (mask_i * mask_j).unsqueeze(-1)  # (B, 1)
-            masked_penalty = penalty * pair_mask
+    # Pairwise mask: both must be valid
+    mask_i = mask.unsqueeze(2)  # (B, D, 1)
+    mask_j = mask.unsqueeze(1)  # (B, 1, D)
+    pair_mask = mask_i * mask_j  # (B, D, D)
 
-            total_loss = total_loss + masked_penalty.sum()
-            n_pairs = n_pairs + pair_mask.sum() * T
+    # Apply mask
+    masked_penalty = penalty * pair_mask.unsqueeze(-1)  # (B, D, D, T)
+
+    # Only count upper triangle (i < j) to avoid double counting
+    triu_mask = torch.triu(
+        torch.ones(D, D, device=predicted_positions.device), diagonal=1
+    )
+    triu_mask = triu_mask.view(1, D, D, 1)  # (1, D, D, 1)
+
+    masked_penalty = masked_penalty * triu_mask
+
+    # Compute total and count
+    total_loss = masked_penalty.sum()
+    n_pairs = (pair_mask.unsqueeze(-1) * triu_mask).sum() * T
 
     if n_pairs > 0:
         return total_loss / n_pairs
