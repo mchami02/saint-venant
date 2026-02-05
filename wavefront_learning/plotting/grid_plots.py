@@ -2,6 +2,9 @@
 
 This module provides functions for comparing ground truth vs prediction grids,
 error maps, and W&B logging of grid visualizations.
+
+Includes plot functions compatible with the PLOTS registry in plotter.py:
+- plot_ground_truth_wandb: Ground truth grid heatmaps
 """
 
 import tempfile
@@ -40,7 +43,12 @@ def plot_prediction_comparison(
     Returns:
         Matplotlib figure with comparison plot.
     """
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
     difference = np.abs(prediction - ground_truth)
     extent = _get_extent(nx, nt, dx, dt)
 
@@ -113,7 +121,12 @@ def plot_error_map(
     Returns:
         Matplotlib figure with error heatmap.
     """
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
     error = np.abs(prediction - ground_truth)
     extent = _get_extent(nx, nt, dx, dt)
 
@@ -148,7 +161,12 @@ def plot_comparison_wandb(
         mode: Mode string for logging prefix.
         use_summary: If True, log to summary instead of step-based logging.
     """
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
     ground_truth = np.asarray(ground_truth)
     prediction = np.asarray(prediction)
 
@@ -260,7 +278,12 @@ def plot_grid_comparison(
     Returns:
         Matplotlib figure with comparison plots.
     """
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
     difference = np.abs(prediction - ground_truth)
     extent = _get_extent(nx, nt, dx, dt)
 
@@ -326,3 +349,49 @@ def plot_grid_comparison(
     fig.suptitle(f"Grid Comparison (Sample {sample_idx + 1})", fontsize=14)
     plt.tight_layout()
     return fig
+
+
+def plot_ground_truth_wandb(
+    traj_data: dict,
+    grid_config: dict,
+    logger,
+    epoch: int | None,
+    mode: str = "val",
+) -> None:
+    """Plot ground truth grid heatmaps.
+
+    Args:
+        traj_data: Dict containing 'grids' of shape (B, nt, nx).
+        grid_config: Dict with {nx, nt, dx, dt}.
+        logger: WandbLogger instance.
+        epoch: Current epoch.
+        mode: Mode string for logging prefix.
+    """
+    grids = traj_data["grids"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    B = grids.shape[0]
+    for b in range(min(B, 3)):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.imshow(
+            grids[b],
+            extent=extent,
+            aspect="auto",
+            origin="lower",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+        )
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(f"Ground Truth (Sample {b + 1})")
+        plt.colorbar(im, ax=ax, label="Density")
+        plt.tight_layout()
+        _log_figure(logger, f"{mode}/ground_truth_sample_{b + 1}", fig, epoch)
+        plt.close(fig)

@@ -12,7 +12,7 @@ The final output grid is assembled by combining region predictions using
 soft sigmoid boundaries at predicted shock locations.
 
 Architecture:
-    Shared Branch: DiscontinuityEncoder (transformer-based)
+    Shared Branch: DiscontinuityEncoder (Fourier features + MLP)
     Trajectory Trunk: TimeEncoder + TrajectoryDecoder
     Region Trunks: K = max_disc + 1 RegionTrunks with shared SpaceTimeEncoder
     Grid Assembly: Soft region assignment using sigmoid boundaries
@@ -35,7 +35,7 @@ class HybridDeepONet(nn.Module):
     """Hybrid DeepONet for combined trajectory and density prediction.
 
     This model predicts shock trajectories AND the full solution grid by:
-    1. Encoding discontinuities using a shared transformer branch
+    1. Encoding discontinuities using a shared Fourier + MLP branch
     2. Predicting trajectories using time encoder + decoder
     3. Predicting per-region densities using space-time encoder + region trunks
     4. Assembling the final grid using soft region boundaries
@@ -45,11 +45,11 @@ class HybridDeepONet(nn.Module):
         max_discontinuities: Maximum number of discontinuities to handle.
         num_frequencies_t: Number of Fourier frequencies for time encoding.
         num_frequencies_x: Number of Fourier frequencies for space encoding.
-        num_disc_layers: Number of transformer layers in discontinuity encoder.
+        num_disc_frequencies: Number of Fourier frequencies for x in discontinuity encoder.
+        num_disc_layers: Number of MLP layers in discontinuity encoder.
         num_time_layers: Number of MLP layers in time encoder.
         num_coord_layers: Number of MLP layers in coordinate encoder.
         num_res_blocks: Number of residual blocks in decoders.
-        num_heads: Number of attention heads in discontinuity encoder.
         dropout: Dropout rate.
         sigma: Softness parameter for region boundaries.
     """
@@ -60,11 +60,11 @@ class HybridDeepONet(nn.Module):
         max_discontinuities: int = 3,
         num_frequencies_t: int = 32,
         num_frequencies_x: int = 16,
-        num_disc_layers: int = 2,
+        num_disc_frequencies: int = 16,
+        num_disc_layers: int = 3,
         num_time_layers: int = 3,
         num_coord_layers: int = 3,
         num_res_blocks: int = 2,
-        num_heads: int = 4,
         dropout: float = 0.1,
         sigma: float = 0.02,
     ):
@@ -78,7 +78,7 @@ class HybridDeepONet(nn.Module):
             input_dim=3,  # [x, rho_L, rho_R]
             hidden_dim=hidden_dim,
             output_dim=hidden_dim,
-            num_heads=num_heads,
+            num_frequencies=num_disc_frequencies,
             num_layers=num_disc_layers,
             dropout=dropout,
         )
@@ -215,16 +215,16 @@ def build_hybrid_deeponet(args: dict) -> HybridDeepONet:
 
     Args:
         args: Configuration dictionary with optional keys:
-            - hidden_dim: Hidden dimension (default 128)
-            - max_discontinuities: Max discontinuities (default 3)
-            - num_frequencies_t: Time Fourier frequencies (default 32)
-            - num_frequencies_x: Space Fourier frequencies (default 16)
-            - num_disc_layers: Discontinuity encoder layers (default 2)
-            - num_time_layers: Time encoder layers (default 3)
-            - num_coord_layers: Coordinate encoder layers (default 3)
+            - hidden_dim: Hidden dimension (default 32)
+            - max_discontinuities: Max discontinuities (default 10)
+            - num_frequencies_t: Time Fourier frequencies (default 8)
+            - num_frequencies_x: Space Fourier frequencies (default 8)
+            - num_disc_frequencies: Discontinuity x Fourier frequencies (default 16)
+            - num_disc_layers: Discontinuity encoder MLP layers (default 3)
+            - num_time_layers: Time encoder layers (default 2)
+            - num_coord_layers: Coordinate encoder layers (default 2)
             - num_res_blocks: Residual blocks (default 2)
-            - num_heads: Attention heads (default 4)
-            - dropout: Dropout rate (default 0.1)
+            - dropout: Dropout rate (default 0.05)
             - sigma: Boundary softness (default 0.02)
 
     Returns:
@@ -235,11 +235,11 @@ def build_hybrid_deeponet(args: dict) -> HybridDeepONet:
         max_discontinuities=args.get("max_discontinuities", 10),
         num_frequencies_t=args.get("num_frequencies_t", 8),
         num_frequencies_x=args.get("num_frequencies_x", 8),
-        num_disc_layers=args.get("num_disc_layers", 2),
+        num_disc_frequencies=args.get("num_disc_frequencies", 16),
+        num_disc_layers=args.get("num_disc_layers", 3),
         num_time_layers=args.get("num_time_layers", 2),
         num_coord_layers=args.get("num_coord_layers", 2),
         num_res_blocks=args.get("num_res_blocks", 2),
-        num_heads=args.get("num_heads", 8),
         dropout=args.get("dropout", 0.05),
         sigma=args.get("sigma", 0.02),
     )

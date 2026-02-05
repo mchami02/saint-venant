@@ -1,7 +1,10 @@
 """Shock trajectory plotting functions.
 
-This module provides functions for visualizing shock trajectories,
+This module provides core functions for visualizing shock trajectories,
 existence probabilities, and wavefront detection.
+
+For W&B-specific plotting functions (compatible with plotter.py PLOTS registry),
+see wandb_trajectory_plots.py.
 """
 
 import matplotlib.pyplot as plt
@@ -9,7 +12,26 @@ import numpy as np
 import torch
 from matplotlib.figure import Figure
 
-from .base import _get_colors, _get_extent, _log_figure
+from .base import _get_colors, _get_extent
+
+
+def _compute_acceleration_numpy(density: np.ndarray, dt: float) -> np.ndarray:
+    """Compute temporal acceleration using central finite differences.
+
+    Args:
+        density: (B, nt, nx) or (nt, nx) density grid.
+        dt: Time step size.
+
+    Returns:
+        (B, nt-2, nx) or (nt-2, nx) acceleration for interior time points.
+    """
+    # Central difference: a = (rho(t+dt) - 2*rho(t) + rho(t-dt)) / dt^2
+    if density.ndim == 3:
+        return (density[:, 2:, :] - 2 * density[:, 1:-1, :] + density[:, :-2, :]) / (
+            dt**2
+        )
+    else:
+        return (density[2:, :] - 2 * density[1:-1, :] + density[:-2, :]) / (dt**2)
 
 
 def plot_shock_trajectories(
@@ -175,7 +197,12 @@ def plot_trajectory_on_grid(
     Returns:
         Matplotlib figure with trajectory overlay on grid.
     """
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
     fig, ax = plt.subplots(figsize=(10, 8))
 
     # Background: solution heatmap
@@ -247,197 +274,6 @@ def plot_trajectory_on_grid(
 
     plt.tight_layout()
     return fig
-
-
-def plot_trajectory_on_grid_wandb(
-    traj_data: dict,
-    grid_config: dict,
-    logger,
-    epoch: int,
-    mode: str = "val",
-    use_summary: bool = False,
-) -> None:
-    """Create trajectory-on-grid overlay plots and upload to W&B.
-
-    Args:
-        traj_data: Dict containing:
-            - grids: Solution grids of shape (B, nt, nx).
-            - positions: Predicted positions of shape (B, D, T).
-            - existence: Predicted existence of shape (B, D, T).
-            - discontinuities: Initial discontinuities of shape (B, D, 3).
-            - masks: Validity masks of shape (B, D).
-            - times: Query times of shape (T,) or (B, T).
-        grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
-        use_summary: If True, log to summary instead of step-based logging.
-    """
-    # Extract from traj_data
-    grids = traj_data["grids"]
-    positions = traj_data["positions"]
-    existence = traj_data["existence"]
-    discontinuities = traj_data["discontinuities"]
-    masks = traj_data["masks"]
-    times = traj_data["times"]
-
-    B = positions.shape[0]
-
-    # Handle times shape
-    if times.ndim == 1:
-        times_1d = times
-    else:
-        times_1d = times[0]
-
-    for b in range(min(B, 3)):
-        fig = plot_trajectory_on_grid(
-            grids[b],
-            positions[b],
-            existence[b],
-            discontinuities[b],
-            masks[b],
-            times_1d,
-            grid_config,
-            sample_idx=b,
-            show_analytical=False,
-        )
-        _log_figure(
-            logger, f"{mode}/trajectory_on_grid_sample_{b + 1}", fig, epoch, use_summary
-        )
-        plt.close(fig)
-
-
-def plot_trajectory_wandb(
-    traj_data: dict,
-    logger,
-    epoch: int,
-    mode: str = "val",
-    use_summary: bool = False,
-) -> None:
-    """Create trajectory plots and upload to W&B.
-
-    Args:
-        traj_data: Dict containing:
-            - positions: Predicted positions of shape (B, D, T).
-            - existence: Predicted existence of shape (B, D, T).
-            - discontinuities: Initial discontinuities of shape (B, D, 3).
-            - masks: Validity masks of shape (B, D).
-            - times: Query times of shape (T,) or (B, T).
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
-        use_summary: If True, log to summary instead of step-based logging.
-    """
-    # Extract from traj_data
-    positions = traj_data["positions"]
-    existence = traj_data["existence"]
-    discontinuities = traj_data["discontinuities"]
-    masks = traj_data["masks"]
-    times = traj_data["times"]
-
-    B = positions.shape[0]
-
-    # Handle times shape
-    if times.ndim == 1:
-        times_1d = times
-    else:
-        times_1d = times[0]  # Assume same times for all samples
-
-    # Create trajectory plots for each sample
-    for b in range(min(B, 3)):  # Limit to 3 samples
-        # Trajectory plot
-        fig_traj = plot_shock_trajectories(
-            positions[b],
-            existence[b],
-            discontinuities[b],
-            masks[b],
-            times_1d,
-            sample_idx=b,
-            show_analytical=False,
-        )
-        _log_figure(
-            logger, f"{mode}/trajectory_sample_{b + 1}", fig_traj, epoch, use_summary
-        )
-        plt.close(fig_traj)
-
-        # Existence heatmap
-        fig_exist = plot_existence_heatmap(
-            existence[b],
-            masks[b],
-            times_1d,
-            sample_idx=b,
-        )
-        _log_figure(
-            logger, f"{mode}/existence_sample_{b + 1}", fig_exist, epoch, use_summary
-        )
-        plt.close(fig_exist)
-
-    # Create combined summary plot
-    fig, axes = plt.subplots(B, 2, figsize=(14, 5 * B))
-    if B == 1:
-        axes = axes.reshape(1, -1)
-
-    for b in range(B):
-        n_disc = int(masks[b].sum())
-        colors = _get_colors(n_disc)
-
-        # Left: trajectories
-        ax = axes[b, 0]
-        for d in range(n_disc):
-            x_0 = discontinuities[b, d, 0]
-            rho_L = discontinuities[b, d, 1]
-            rho_R = discontinuities[b, d, 2]
-
-            # Predicted
-            ax.plot(
-                times_1d,
-                positions[b, d],
-                color=colors[d],
-                linewidth=2,
-                label=f"Pred d={d}",
-            )
-
-            # Analytical
-            shock_speed = 1.0 - rho_L - rho_R
-            analytical = x_0 + shock_speed * times_1d
-            ax.plot(
-                times_1d,
-                analytical,
-                color=colors[d],
-                linestyle="--",
-                linewidth=1.5,
-                alpha=0.7,
-            )
-
-        ax.axhline(y=0, color="gray", linestyle=":", alpha=0.5)
-        ax.axhline(y=1, color="gray", linestyle=":", alpha=0.5)
-        ax.set_xlabel("Time t")
-        ax.set_ylabel("Position x")
-        ax.set_title(f"Sample {b + 1}: Trajectories (solid=pred, dashed=RH)")
-        ax.set_ylim(-0.1, 1.1)
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-
-        # Right: existence
-        ax = axes[b, 1]
-        if n_disc > 0:
-            im = ax.imshow(
-                existence[b, :n_disc],
-                aspect="auto",
-                origin="lower",
-                cmap="RdYlGn",
-                vmin=0,
-                vmax=1,
-                extent=[times_1d[0], times_1d[-1], -0.5, n_disc - 0.5],
-            )
-            plt.colorbar(im, ax=ax, label="P(exists)")
-        ax.set_xlabel("Time t")
-        ax.set_ylabel("Discontinuity")
-        ax.set_title(f"Sample {b + 1}: Existence Probability")
-
-    plt.tight_layout()
-    _log_figure(logger, f"{mode}/trajectory_summary", fig, epoch, use_summary)
-    plt.close(fig)
 
 
 def plot_wavefront_trajectory(

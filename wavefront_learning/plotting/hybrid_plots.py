@@ -2,6 +2,11 @@
 
 This module provides visualization functions specifically for the HybridDeepONet model,
 including region assignments and comprehensive hybrid predictions.
+
+Includes plot functions compatible with the PLOTS registry in plotter.py:
+- plot_prediction_with_trajectory_wandb: Predicted grid + trajectory overlay
+- plot_mse_error_wandb: MSE error heatmap
+- plot_region_weights_wandb: Region weight visualization
 """
 
 import matplotlib.pyplot as plt
@@ -35,7 +40,13 @@ def _create_single_heatmap(
     """
     fig, ax = plt.subplots(figsize=(4, 4))
     im = ax.imshow(
-        data, aspect="auto", origin="lower", extent=extent, cmap=cmap, vmin=vmin, vmax=vmax
+        data,
+        aspect="auto",
+        origin="lower",
+        extent=extent,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
     )
     ax.set_xlabel("x")
     ax.set_ylabel("t")
@@ -69,7 +80,13 @@ def _create_prediction_with_trajectories(
     """
     fig, ax = plt.subplots(figsize=(4, 4))
     ax.imshow(
-        prediction, aspect="auto", origin="lower", extent=extent, cmap="viridis", vmin=0, vmax=1
+        prediction,
+        aspect="auto",
+        origin="lower",
+        extent=extent,
+        cmap="viridis",
+        vmin=0,
+        vmax=1,
     )
 
     n_disc = int(mask.sum())
@@ -109,7 +126,13 @@ def _create_region_with_trajectories(
     """
     fig, ax = plt.subplots(figsize=(4, 4))
     ax.imshow(
-        region_weight, aspect="auto", origin="lower", extent=extent, cmap="Blues", vmin=0, vmax=1
+        region_weight,
+        aspect="auto",
+        origin="lower",
+        extent=extent,
+        cmap="Blues",
+        vmin=0,
+        vmax=1,
     )
 
     # Overlay trajectories that border this region (d == region_idx or d+1 == region_idx)
@@ -118,7 +141,9 @@ def _create_region_with_trajectories(
     for d in range(n_disc):
         if d == region_idx or d + 1 == region_idx:
             valid = existence[d] > 0.5
-            ax.plot(positions[d, valid], times[valid], "--", color=colors[d], linewidth=2)
+            ax.plot(
+                positions[d, valid], times[valid], "--", color=colors[d], linewidth=2
+            )
 
     ax.set_xlabel("x")
     ax.set_ylabel("t")
@@ -160,7 +185,12 @@ def _create_comparison_table(
     if logger is None or not logger.enabled:
         return
 
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
     B = min(ground_truths.shape[0], num_samples)
     K = region_weights.shape[1]
     extent = _get_extent(nx, nt, dx, dt)
@@ -194,7 +224,13 @@ def _create_comparison_table(
         # Region assignments (with trajectory overlays)
         for k in range(K):
             fig_region = _create_region_with_trajectories(
-                region_weights[b, k], positions[b], existence[b], masks[b], times, extent, k
+                region_weights[b, k],
+                positions[b],
+                existence[b],
+                masks[b],
+                times,
+                extent,
+                k,
             )
             row.append(wandb.Image(fig_region))
             plt.close(fig_region)
@@ -251,7 +287,12 @@ def plot_hybrid_predictions_wandb(
     times = traj_data["times"]
 
     # Extract from grid_config
-    nx, nt, dx, dt = grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
 
     B = positions.shape[0]
 
@@ -347,3 +388,219 @@ def plot_hybrid_predictions_wandb(
     plt.tight_layout()
     _log_figure(logger, f"{mode}/hybrid_summary", fig, epoch, use_summary)
     plt.close(fig)
+
+
+def plot_prediction_with_trajectory_wandb(
+    traj_data: dict,
+    grid_config: dict,
+    logger,
+    epoch: int | None,
+    mode: str = "val",
+) -> None:
+    """Plot predicted grid with trajectory overlay.
+
+    Used for HybridDeepONet where we want to show trajectories on predicted grid.
+
+    Args:
+        traj_data: Dict containing output_grid, positions, existence, masks, times.
+        grid_config: Dict with {nx, nt, dx, dt}.
+        logger: WandbLogger instance.
+        epoch: Current epoch.
+        mode: Mode string for logging prefix.
+    """
+    if "output_grid" not in traj_data:
+        return  # Skip if not a hybrid model
+
+    output_grid = traj_data["output_grid"]
+    positions = traj_data["positions"]
+    existence = traj_data["existence"]
+    masks = traj_data["masks"]
+    times = traj_data["times"]
+
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    if times.ndim > 1:
+        times = times[0]
+
+    B = output_grid.shape[0]
+    for b in range(min(B, 3)):
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        # Background: predicted grid heatmap
+        im = ax.imshow(
+            output_grid[b],
+            extent=extent,
+            aspect="auto",
+            origin="lower",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+            alpha=0.8,
+        )
+        plt.colorbar(im, ax=ax, label="Density")
+
+        # Overlay: predicted trajectories
+        n_disc = int(masks[b].sum())
+        colors = _get_colors(n_disc)
+
+        for d in range(n_disc):
+            valid = existence[b, d] > 0.5
+            ax.plot(
+                positions[b, d, valid],  # X = Space
+                times[valid],  # Y = Time
+                color=colors[d],
+                linewidth=2,
+                linestyle="--",
+            )
+
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(f"Predicted Grid + Trajectories (Sample {b + 1})")
+        ax.set_xlim(0, nx * dx)
+        ax.set_ylim(0, nt * dt)
+        plt.tight_layout()
+        _log_figure(
+            logger, f"{mode}/prediction_with_trajectory_sample_{b + 1}", fig, epoch
+        )
+        plt.close(fig)
+
+
+def plot_mse_error_wandb(
+    traj_data: dict,
+    grid_config: dict,
+    logger,
+    epoch: int | None,
+    mode: str = "val",
+) -> None:
+    """Plot MSE error heatmap between prediction and ground truth.
+
+    Args:
+        traj_data: Dict containing output_grid and grids.
+        grid_config: Dict with {nx, nt, dx, dt}.
+        logger: WandbLogger instance.
+        epoch: Current epoch.
+        mode: Mode string for logging prefix.
+    """
+    if "output_grid" not in traj_data:
+        return  # Skip if not a hybrid model
+
+    output_grid = traj_data["output_grid"]
+    grids = traj_data["grids"]
+
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    B = output_grid.shape[0]
+    for b in range(min(B, 3)):
+        error = (output_grid[b] - grids[b]) ** 2
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        im = ax.imshow(
+            error,
+            extent=extent,
+            aspect="auto",
+            origin="lower",
+            cmap="hot",
+            vmin=0,
+            vmax=0.5,
+        )
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(f"MSE Error (Sample {b + 1}, mean={error.mean():.4f})")
+        plt.colorbar(im, ax=ax, label="Squared Error")
+        plt.tight_layout()
+        _log_figure(logger, f"{mode}/mse_error_sample_{b + 1}", fig, epoch)
+        plt.close(fig)
+
+
+def plot_region_weights_wandb(
+    traj_data: dict,
+    grid_config: dict,
+    logger,
+    epoch: int | None,
+    mode: str = "val",
+) -> None:
+    """Plot region weight visualization for HybridDeepONet.
+
+    Args:
+        traj_data: Dict containing region_weights, positions, existence, masks, times.
+        grid_config: Dict with {nx, nt, dx, dt}.
+        logger: WandbLogger instance.
+        epoch: Current epoch.
+        mode: Mode string for logging prefix.
+    """
+    if "region_weights" not in traj_data:
+        return  # Skip if not a hybrid model
+
+    region_weights = traj_data["region_weights"]
+    positions = traj_data["positions"]
+    existence = traj_data["existence"]
+    masks = traj_data["masks"]
+    times = traj_data["times"]
+
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    if times.ndim > 1:
+        times = times[0]
+
+    B = region_weights.shape[0]
+    K = region_weights.shape[1]
+
+    for b in range(min(B, 2)):  # Limit to 2 samples for region plots
+        n_disc = int(masks[b].sum())
+        colors = _get_colors(n_disc)
+
+        # Create subplot grid for regions
+        fig, axes = plt.subplots(1, K, figsize=(4 * K, 4))
+        if K == 1:
+            axes = [axes]
+
+        for k in range(K):
+            ax = axes[k]
+            ax.imshow(
+                region_weights[b, k],
+                extent=extent,
+                aspect="auto",
+                origin="lower",
+                cmap="Blues",
+                vmin=0,
+                vmax=1,
+            )
+
+            # Overlay trajectories that border this region
+            for d in range(n_disc):
+                if d == k or d + 1 == k:
+                    valid = existence[b, d] > 0.5
+                    ax.plot(
+                        positions[b, d, valid],
+                        times[valid],
+                        "--",
+                        color=colors[d],
+                        linewidth=2,
+                    )
+
+            ax.set_xlabel("x")
+            ax.set_ylabel("t")
+            ax.set_title(f"Region {k}")
+
+        plt.suptitle(f"Region Weights (Sample {b + 1})")
+        plt.tight_layout()
+        _log_figure(logger, f"{mode}/region_weights_sample_{b + 1}", fig, epoch)
+        plt.close(fig)

@@ -6,7 +6,7 @@ unsupervised using Rankine-Hugoniot physics loss.
 
 Architecture:
     Branch Network (DiscontinuityEncoder): Encodes discontinuity information
-        using transformer self-attention to handle variable numbers of shocks.
+        using Fourier features + MLP, processing each discontinuity independently.
     Trunk Network (TimeEncoder): Encodes query times using Fourier features
         and an MLP.
     TrajectoryDecoder: Fuses branch and trunk outputs using bilinear interaction
@@ -27,17 +27,17 @@ class ShockTrajectoryNet(nn.Module):
     and predicts their positions and existence probability at query times.
 
     Architecture:
-        - Branch network: DiscontinuityEncoder (transformer-based)
+        - Branch network: DiscontinuityEncoder (Fourier features + MLP)
         - Trunk network: TimeEncoder (Fourier features + MLP)
         - Decoder: TrajectoryDecoder (bilinear fusion + residual blocks)
 
     Args:
         hidden_dim: Hidden dimension for all networks.
         num_frequencies: Number of Fourier frequency bands for time encoding.
-        num_disc_layers: Number of transformer layers in discontinuity encoder.
+        num_disc_frequencies: Number of Fourier frequency bands for x in discontinuity encoder.
+        num_disc_layers: Number of MLP layers in discontinuity encoder.
         num_time_layers: Number of MLP layers in time encoder.
         num_res_blocks: Number of residual blocks in decoder.
-        num_heads: Number of attention heads in discontinuity encoder.
         dropout: Dropout rate.
     """
 
@@ -45,10 +45,10 @@ class ShockTrajectoryNet(nn.Module):
         self,
         hidden_dim: int = 128,
         num_frequencies: int = 32,
-        num_disc_layers: int = 2,
+        num_disc_frequencies: int = 16,
+        num_disc_layers: int = 3,
         num_time_layers: int = 3,
         num_res_blocks: int = 2,
-        num_heads: int = 4,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -59,7 +59,7 @@ class ShockTrajectoryNet(nn.Module):
             input_dim=3,  # [x, rho_L, rho_R]
             hidden_dim=hidden_dim,
             output_dim=hidden_dim,
-            num_heads=num_heads,
+            num_frequencies=num_disc_frequencies,
             num_layers=num_disc_layers,
             dropout=dropout,
         )
@@ -151,17 +151,17 @@ class ShockTrajectoryNet(nn.Module):
 def build_shock_net(args):
     hidden_dim = args.get("hidden_dim", 128)
     num_frequencies = args.get("num_frequencies", 32)
-    num_disc_layers = args.get("num_disc_layers", 2)
+    num_disc_frequencies = args.get("num_disc_frequencies", 16)
+    num_disc_layers = args.get("num_disc_layers", 3)
     num_time_layers = args.get("num_time_layers", 3)
     num_res_blocks = args.get("num_res_blocks", 2)
-    num_heads = args.get("num_heads", 4)
     dropout = args.get("dropout", 0.1)
     return ShockTrajectoryNet(
         hidden_dim,
         num_frequencies,
+        num_disc_frequencies,
         num_disc_layers,
         num_time_layers,
         num_res_blocks,
-        num_heads,
         dropout,
     )

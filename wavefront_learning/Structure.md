@@ -18,9 +18,10 @@ wavefront_learning/
 ├── plotting/              # Visualization subpackage
 │   ├── __init__.py        # Re-exports all public plotting functions
 │   ├── base.py            # Common setup, helpers (save_figure, _get_extent, etc.)
-│   ├── grid_plots.py      # Grid comparison plots (plot_prediction_comparison, etc.)
-│   ├── trajectory_plots.py # Trajectory visualization (plot_shock_trajectories, etc.)
-│   └── hybrid_plots.py    # HybridDeepONet plots (plot_region_assignments, etc.)
+│   ├── grid_plots.py      # Grid comparison plots + plot_ground_truth_wandb
+│   ├── trajectory_plots.py # Core trajectory functions (plot_shock_trajectories, etc.)
+│   ├── wandb_trajectory_plots.py # W&B trajectory plots for PLOTS registry
+│   └── hybrid_plots.py    # HybridDeepONet plots (plot_region_weights_wandb, etc.)
 ├── models/
 │   ├── __init__.py
 │   ├── base.py                    # BaseWavefrontModel abstract class
@@ -39,7 +40,8 @@ wavefront_learning/
 │   ├── existence_regularization.py # ExistenceRegularizationLoss
 │   ├── supervised_trajectory.py   # SupervisedTrajectoryLoss (when GT available)
 │   ├── pde_residual.py            # PDEResidualLoss (conservation in smooth regions)
-│   └── rh_residual.py             # RHResidualLoss (RH from sampled densities)
+│   ├── rh_residual.py             # RHResidualLoss (RH from sampled densities)
+│   └── acceleration.py            # AccelerationLoss (shock detection via acceleration)
 └── wandb/                 # W&B run logs (gitignored)
 ```
 
@@ -99,15 +101,16 @@ def forward(
 | `supervised_trajectory.py` | `SupervisedTrajectoryLoss` | Supervised trajectory (when GT available) |
 | `pde_residual.py` | `PDEResidualLoss` | PDE conservation in smooth regions |
 | `rh_residual.py` | `RHResidualLoss` | RH residual from sampled region densities |
+| `acceleration.py` | `AccelerationLoss` | Shock detection via high acceleration + missed shock term |
 
 #### CombinedLoss and Presets (`loss.py`)
 ```python
 # Available presets
 LOSS_PRESETS = {
     "shock_net": [  # For trajectory-only models
-        ("trajectory", 1.0),
+        ("rh_residual", 1.0, {"mode": "gt"}),
         ("boundary", 1.0),
-        ("collision", 0.5),
+        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
         ("existence_reg", 0.1),
     ],
     "hybrid": [  # For HybridDeepONet
@@ -130,24 +133,21 @@ loss = get_loss("hybrid", loss_kwargs={  # Customize preset
 ### Plotting
 
 The plotting system consists of two parts:
-1. **`plotter.py`** - Main entry point with preset system (similar to loss.py)
-2. **`plotting/`** - Low-level visualization utilities
+1. **`plotter.py`** - Thin facade with preset system (similar to loss.py)
+2. **`plotting/`** - Individual plot functions organized by category
 
 #### `plotter.py` - Plotting Factory
 
-The main plotting module provides a preset-based system similar to `loss.py`:
+The main plotting module provides a preset-based system similar to `loss.py`. It imports all plot functions from `plotting/` and exposes them via the `PLOTS` registry.
 
 ```python
 # Available presets
 PLOT_PRESETS = {
     "shock_net": [        # For trajectory-only models
-        "ground_truth",
         "grid_with_trajectory",
-        "trajectory_vs_analytical",
-        "existence",
+        "grid_with_acceleration",
     ],
     "hybrid": [           # For HybridDeepONet
-        "ground_truth",
         "prediction_with_trajectory",
         "mse_error",
         "trajectory_vs_analytical",
@@ -164,6 +164,7 @@ plot_wandb(traj_data, grid_config, logger, epoch, mode="val", preset=args.plot)
 |---------------|-------------|---------------|
 | `ground_truth` | GT grid heatmap | `grids` |
 | `grid_with_trajectory` | GT grid + predicted trajectories | `grids`, `positions`, `existence`, `masks`, `times` |
+| `grid_with_acceleration` | GT grid + trajectories alongside |a| grid | `grids`, `positions`, `existence`, `masks`, `times` |
 | `trajectory_vs_analytical` | Predicted vs RH trajectories | `positions`, `existence`, `discontinuities`, `masks`, `times` |
 | `existence` | Existence probability heatmap | `existence`, `masks`, `times` |
 | `prediction_with_trajectory` | Predicted grid + trajectories | `output_grid`, `positions`, `existence`, `masks`, `times` |
@@ -195,21 +196,42 @@ All grid plotting functions accept a `grid_config: dict` with keys `{nx, nt, dx,
 - `plot_error_map(gt, pred, grid_config)` - Error heatmap
 - `plot_comparison_wandb(gt, pred, grid_config, logger, epoch, mode)` - W&B grid comparison + animations
 - `plot_grid_comparison(gt, pred, positions, existence, times, grid_config, sample_idx)` - GT vs prediction with trajectory overlay
+- `plot_ground_truth_wandb(traj_data, grid_config, logger, epoch, mode)` - **PLOTS registry**: GT grid heatmaps
 
-#### `plotting/trajectory_plots.py` - Trajectory Visualization
-Functions with W&B suffix accept `traj_data: dict` and `grid_config: dict` for simplified signatures.
-- `traj_data` keys: `{grids, positions, existence, discontinuities, masks, times}`
+#### `plotting/trajectory_plots.py` - Core Trajectory Visualization
 
+Core utility functions (not in PLOTS registry):
 - `plot_shock_trajectories(positions, existence, discontinuities, mask, times, ...)` - Trajectories vs analytical RH
 - `plot_existence_heatmap(existence, mask, times, sample_idx)` - Existence probability heatmap
 - `plot_trajectory_on_grid(grid, positions, existence, discontinuities, mask, times, grid_config, ...)` - Trajectory overlay on solution
-- `plot_trajectory_on_grid_wandb(traj_data, grid_config, logger, epoch, mode)` - W&B trajectory on grid
-- `plot_trajectory_wandb(traj_data, logger, epoch, mode)` - W&B trajectory plots
 - `plot_wavefront_trajectory(prediction, wavefront_positions, ...)` - Wavefront detection plot
 - `plot_loss_curves(train_losses, val_losses, title)` - Training progress
 - `plot_sample_predictions(model, dataloader, device, num_samples, grid_config)` - Batch sample plots
+- `_compute_acceleration_numpy(density, dt)` - Compute temporal acceleration via central difference
+
+#### `plotting/wandb_trajectory_plots.py` - W&B Trajectory Plots
+
+Functions with W&B suffix accept `traj_data: dict` and `grid_config: dict` for simplified signatures.
+- `traj_data` keys: `{grids, positions, existence, discontinuities, masks, times}`
+
+**PLOTS registry functions** (compatible with plotter.py):
+- `plot_grid_with_trajectory_wandb(...)` - GT grid + predicted trajectory overlay
+- `plot_grid_with_acceleration_wandb(...)` - Two-column: GT grid+trajectories | acceleration magnitude
+- `plot_trajectory_vs_analytical_wandb(...)` - Predicted vs RH trajectories
+- `plot_existence_wandb(...)` - Existence probability heatmap
+
+Other W&B trajectory functions:
+- `plot_trajectory_on_grid_wandb(traj_data, grid_config, logger, epoch, mode)` - W&B trajectory on grid
+- `plot_trajectory_wandb(traj_data, logger, epoch, mode)` - W&B trajectory plots
 
 #### `plotting/hybrid_plots.py` - HybridDeepONet Visualization
+
+**PLOTS registry functions** (compatible with plotter.py):
+- `plot_prediction_with_trajectory_wandb(...)` - Predicted grid + trajectory overlay
+- `plot_mse_error_wandb(...)` - MSE error heatmap
+- `plot_region_weights_wandb(...)` - Region weight visualization
+
+Other utility functions:
 - `plot_hybrid_predictions_wandb(traj_data, grid_config, logger, epoch, mode)` - Comprehensive hybrid visualization
   - `traj_data` keys: `{grids, output_grid, positions, existence, discontinuities, masks, region_densities, region_weights, times}`
   - Logs `{mode}/hybrid_summary`: B rows x 3 cols (GT, Pred+traj, MSE Error)

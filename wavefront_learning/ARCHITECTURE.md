@@ -154,34 +154,33 @@ where $L$ = `num_frequencies` (default: 32).
 
 **Location**: `models/base/encoders.py`
 
-Encodes variable-length discontinuity sequences using transformer self-attention.
+Encodes discontinuities using Fourier features + MLP. Each discontinuity is processed independently (no cross-attention).
 
 **Architecture**:
 ```
 Input: (B, D, 3) where each discontinuity = [x_position, rho_L, rho_R]
        │
-       ▼
-Linear(3 → hidden_dim) + GELU + LayerNorm
+       ├── x_position ──► FourierFeatures ──► (B, D, 2*num_freq + 1)
        │
-       ▼
-TransformerEncoder(num_layers, num_heads, dropout)
+       └── [rho_L, rho_R] ────────────────► (B, D, 2)
        │
-       ▼
-Linear(hidden_dim → output_dim)
-       │
-       ▼
-Apply mask × output
-       │
-       ▼
-Output: (B, D, output_dim)
+       └── concatenate ───────────────────► (B, D, 2*num_freq + 3)
+               │
+               ▼
+       MLP: [Linear + GELU + LayerNorm] × num_layers
+               │
+               ▼
+       Apply mask × output
+               │
+               ▼
+       Output: (B, D, output_dim)
 ```
 
 **Default configuration**:
 - `hidden_dim`: 128
 - `output_dim`: 128
-- `num_heads`: 4
-- `num_layers`: 2
-- `dropout`: 0.1
+- `num_frequencies`: 16
+- `num_layers`: 3
 
 ##### TimeEncoder (Trunk Network)
 
@@ -746,10 +745,16 @@ $$\mathcal{L}_{RH} = \frac{1}{|\mathcal{V}|} \sum_{(d,t) \in \mathcal{V}} e_d(t)
 
 Penalizes low existence predictions where the ground truth grid shows high temporal acceleration, indicating a shock should be present. This loss helps the model learn to predict high existence at shock locations even without explicit trajectory supervision.
 
+The loss has two components:
+1. **Original term**: Samples acceleration at predicted trajectory positions and penalizes low existence where acceleration is high.
+2. **Missed shock term** (optional): Scans the entire domain for high-acceleration points and penalizes those not covered by any nearby prediction with high existence.
+
 **Acceleration computation** (central finite differences):
 $$a(t, x) = \frac{\rho(t + \Delta t, x) - 2\rho(t, x) + \rho(t - \Delta t, x)}{\Delta t^2}$$
 
 This is computed for interior time points only (indices 1 to $n_t - 2$).
+
+##### Original Term
 
 **Acceleration sampling near trajectories**:
 
@@ -768,11 +773,30 @@ where:
 - $m_{b,d}$ = discontinuity validity mask
 - $N = |\mathcal{H}|$ = count of high-acceleration points
 
+##### Missed Shock Term
+
+**Problem solved**: The original term only samples acceleration at **predicted** trajectory positions. If the model predicts positions away from actual shocks, those shocks go undetected because the loss never "looks" there.
+
+**Coverage computation**:
+$$\text{coverage}(b, t, x) = \max_d \left[ e^{(b,d,t)} \cdot m_{b,d} \cdot \mathbf{1}(|x - x_d(t)| < \delta) \right]$$
+
+where $\delta$ is the `missed_shock_buffer` parameter.
+
+**Loss formula**:
+$$\mathcal{L}_{missed} = \frac{1}{M} \sum_{(b,t,x) \in \mathcal{H}_{domain}} \left(1 - \text{coverage}(b, t, x)\right)^2$$
+
+where:
+- $\mathcal{H}_{domain} = \{(b,t,x) : |a(t,x)| > \tau\}$ is the set of high-acceleration points in the entire domain
+- $M = |\mathcal{H}_{domain}|$ = count of high-acceleration points
+
+**Combined loss**:
+$$\mathcal{L}_{total} = \mathcal{L}_{accel} + w_{missed} \cdot \mathcal{L}_{missed}$$
+
 **Interpretation**:
 - High acceleration in the ground truth indicates a shock (rapid density change)
-- If the model predicts low existence ($e \approx 0$) at such locations, the loss is high
-- If the model correctly predicts high existence ($e \approx 1$), the loss is zero
-- Regions with low acceleration (smooth solution) do not contribute to the loss
+- The original term: If the model predicts low existence ($e \approx 0$) at predicted locations with high acceleration, the loss is high
+- The missed shock term: If there are high-acceleration points in the domain that are not covered by any predicted trajectory with high existence, the loss is high
+- Regions with low acceleration (smooth solution) do not contribute to either term
 
 **Configuration**:
 | Parameter | Default | Description |
@@ -780,11 +804,13 @@ where:
 | `dt` | 0.004 | Time step size for acceleration computation |
 | `accel_threshold` | 1.0 | Threshold for "high" acceleration |
 | `epsilon` | 0.02 | Spatial window for sampling near trajectories |
+| `missed_shock_weight` | 0.0 | Weight for missed shock loss (0 = disabled) |
+| `missed_shock_buffer` | None | Buffer for coverage computation (defaults to `epsilon`) |
 
 **Required inputs**: `x_coords`, `disc_mask`
 **Required outputs**: `positions`, `existence`
 
-**Components returned**: `{"acceleration": float}`
+**Components returned**: `{"acceleration": float, "missed_shock": float (if enabled)}`
 
 ---
 
@@ -913,8 +939,8 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
    - Smooth scale: PDE conservation
    - Global scale: Grid MSE supervision
 
-4. **Fourier Features**: Exponentially-spaced sinusoidal encoding enables MLPs to learn high-frequency shock dynamics
+4. **Fourier Features**: Exponentially-spaced sinusoidal encoding enables MLPs to learn high-frequency shock dynamics (used in TimeEncoder, DiscontinuityEncoder, and SpaceTimeEncoder)
 
-5. **Transformer Branch**: Self-attention handles interactions between variable numbers of shocks
+5. **Independent Discontinuity Encoding**: Each discontinuity is encoded independently via Fourier + MLP, enabling efficient parallel processing
 
 6. **Modular Loss Design**: One file per loss enables easy composition and testing

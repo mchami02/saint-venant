@@ -115,17 +115,18 @@ class TimeEncoder(nn.Module):
 
 
 class DiscontinuityEncoder(nn.Module):
-    """Branch network: encodes discontinuities using transformer self-attention.
+    """Branch network: encodes discontinuities using Fourier features + MLP.
 
+    Each discontinuity is processed independently (no cross-attention).
     Handles variable numbers of discontinuities through masking.
 
     Args:
         input_dim: Dimension of discontinuity features (default 3: x, rho_L, rho_R).
-        hidden_dim: Hidden dimension of the transformer.
+        hidden_dim: Hidden dimension of the MLP.
         output_dim: Output dimension (latent space dimension).
-        num_heads: Number of attention heads.
-        num_layers: Number of transformer layers.
-        dropout: Dropout rate.
+        num_frequencies: Number of Fourier frequency bands for x coordinate.
+        num_layers: Number of MLP layers.
+        dropout: Dropout rate (unused, kept for API compatibility).
     """
 
     def __init__(
@@ -133,8 +134,8 @@ class DiscontinuityEncoder(nn.Module):
         input_dim: int = 3,
         hidden_dim: int = 128,
         output_dim: int = 128,
-        num_heads: int = 4,
-        num_layers: int = 2,
+        num_frequencies: int = 16,
+        num_layers: int = 3,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -142,26 +143,26 @@ class DiscontinuityEncoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
 
-        # Project input discontinuities to hidden dim
-        self.input_proj = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(),
-            nn.LayerNorm(hidden_dim),
+        # Fourier features for x coordinate
+        self.fourier_x = FourierFeatures(
+            num_frequencies=num_frequencies, include_input=True
         )
 
-        # Transformer encoder layers for self-attention between discontinuities
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=num_heads,
-            dim_feedforward=hidden_dim * 4,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        # Input dimension: Fourier features for x + raw rho_L and rho_R
+        mlp_input_dim = self.fourier_x.output_dim + 2  # 2 for [rho_L, rho_R]
 
-        # Project to output dimension
-        self.output_proj = nn.Linear(hidden_dim, output_dim)
+        # Build MLP layers
+        layers = []
+        in_dim = mlp_input_dim
+        for i in range(num_layers):
+            out_dim = output_dim if i == num_layers - 1 else hidden_dim
+            layers.append(nn.Linear(in_dim, out_dim))
+            if i < num_layers - 1:
+                layers.append(nn.GELU())
+                layers.append(nn.LayerNorm(out_dim))
+            in_dim = out_dim
+
+        self.mlp = nn.Sequential(*layers)
 
     def forward(
         self,
@@ -178,23 +179,27 @@ class DiscontinuityEncoder(nn.Module):
         Returns:
             Encoded discontinuities of shape (B, D, output_dim).
         """
-        # Project input
-        x = self.input_proj(discontinuities)  # (B, D, hidden_dim)
+        B, D, _ = discontinuities.shape
 
-        # Create attention mask (True = ignore)
-        # PyTorch transformer uses True to mask out positions
-        attn_mask = mask == 0  # (B, D)
+        # Extract x coordinate and density values
+        x_coord = discontinuities[:, :, 0]  # (B, D)
+        rho_values = discontinuities[:, :, 1:]  # (B, D, 2) = [rho_L, rho_R]
 
-        # Apply transformer with masking
-        x = self.transformer(x, src_key_padding_mask=attn_mask)  # (B, D, hidden_dim)
+        # Apply Fourier features to x coordinate
+        x_flat = x_coord.reshape(-1)  # (B*D,)
+        x_fourier = self.fourier_x(x_flat)  # (B*D, fourier_dim)
+        x_fourier = x_fourier.reshape(B, D, -1)  # (B, D, fourier_dim)
 
-        # Project to output
-        x = self.output_proj(x)  # (B, D, output_dim)
+        # Concatenate Fourier features with density values
+        features = torch.cat([x_fourier, rho_values], dim=-1)  # (B, D, fourier_dim + 2)
+
+        # Apply MLP
+        output = self.mlp(features)  # (B, D, output_dim)
 
         # Zero out padded positions
-        x = x * mask.unsqueeze(-1)
+        output = output * mask.unsqueeze(-1)
 
-        return x
+        return output
 
 
 class SpaceTimeEncoder(nn.Module):

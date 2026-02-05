@@ -39,9 +39,9 @@ LOSSES: dict[str, type[BaseLoss]] = {
 # Each preset is a list of (loss_name, weight) or (loss_name, weight, kwargs) tuples
 LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "shock_net": [
-        ("rh_residual", 1.0, {"mode": "gt"}),
+        # ("rh_residual", 1.0, {"mode": "gt"}),
         ("boundary", 1.0),
-        ("collision", 0.5),
+        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
         ("existence_reg", 0.1),
     ],
     "hybrid": [
@@ -123,7 +123,9 @@ class CombinedLoss(BaseLoss):
                 loss_name, weight, preset_kwargs = entry
 
             if loss_name not in LOSSES:
-                raise ValueError(f"Unknown loss '{loss_name}' in preset '{preset_name}'")
+                raise ValueError(
+                    f"Unknown loss '{loss_name}' in preset '{preset_name}'"
+                )
 
             # Merge: loss_kwargs overrides preset defaults
             kwargs = {**preset_kwargs, **loss_kwargs.get(loss_name, {})}
