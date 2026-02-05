@@ -1,0 +1,659 @@
+"""Testing utilities for wavefront learning models.
+
+This is a standalone script that can be run with:
+    python test.py --model_path path/to/model.pth
+"""
+
+import argparse
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+from data import collate_wavefront_batch, get_wavefront_datasets
+from logger import WandbLogger, init_logger
+from loss import get_loss
+from metrics import compute_metrics
+from plotter import PLOT_PRESETS, plot_wandb
+from plotting import plot_comparison_wandb
+from torch.profiler import ProfilerActivity, profile, schedule
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+
+
+def test_model(
+    model: nn.Module,
+    test_loader: DataLoader,
+    device: torch.device,
+    logger: WandbLogger | None = None,
+    loss_fn: nn.Module | None = None,
+    grid_config: dict | None = None,
+    num_plots: int = 3,
+    epoch: int = 0,  # noqa: ARG001 - kept for API compat, now unused
+    plot_preset: str | None = None,
+) -> dict[str, float]:
+    """Evaluate model on test dataset.
+
+    Args:
+        model: Trained model to evaluate.
+        test_loader: DataLoader for test data.
+        device: Computation device.
+        logger: Optional WandbLogger for logging results.
+        loss_fn: Optional loss function for trajectory models.
+        grid_config: Dict with {nx, nt, dx, dt} for plotting. Defaults provided if None.
+        num_plots: Number of samples to plot.
+
+    Returns:
+        Dictionary of evaluation metrics.
+    """
+    # Default grid_config if not provided
+    if grid_config is None:
+        grid_config = {"nx": 50, "nt": 250, "dx": 0.02, "dt": 0.004}
+
+    model.eval()
+
+    all_preds = []
+    all_targets = []
+    batch_metrics = []
+    is_trajectory_model = False
+    is_hybrid_model = False
+
+    # For trajectory models: collect data for plotting
+    traj_positions = []
+    traj_existence = []
+    traj_discontinuities = []
+    traj_masks = []
+    traj_grids = []
+    traj_times = None
+
+    # For HybridDeepONet: additional outputs
+    hybrid_output_grids = []
+    hybrid_region_densities = []
+    hybrid_region_weights = []
+
+    with torch.no_grad():
+        for batch_input, batch_target in tqdm(test_loader, desc="Testing"):
+            # Store original batch_input for trajectory data
+            batch_input_orig = batch_input
+            batch_target_orig = batch_target
+
+            # Move to device
+            if isinstance(batch_input, dict):
+                batch_input = {
+                    k: v.to(device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch_input.items()
+                }
+            else:
+                batch_input = batch_input.to(device)
+            batch_target = batch_target.to(device)
+
+            # Forward pass
+            pred = model(batch_input)
+
+            # Handle trajectory models (dict output)
+            if isinstance(pred, dict):
+                is_trajectory_model = True
+
+                # Check if HybridDeepONet
+                if "output_grid" in pred:
+                    is_hybrid_model = True
+                    # Compute grid-based metrics for HybridDeepONet
+                    grid_metrics = compute_metrics(pred["output_grid"], batch_target)
+                    batch_metrics.append(grid_metrics)
+                elif loss_fn is not None:
+                    # Use new signature: (input_dict, output_dict, target)
+                    _, components = loss_fn(batch_input, pred, batch_target)
+                    batch_metrics.append(components)
+
+                # Collect trajectory data for plotting (only first few samples)
+                if len(traj_positions) < num_plots:
+                    batch_size = pred["positions"].shape[0]
+                    for i in range(min(num_plots - len(traj_positions), batch_size)):
+                        traj_positions.append(pred["positions"][i].cpu().numpy())
+                        traj_existence.append(pred["existence"][i].cpu().numpy())
+                        traj_discontinuities.append(
+                            batch_input_orig["discontinuities"][i].cpu().numpy()
+                        )
+                        traj_masks.append(
+                            batch_input_orig["disc_mask"][i].cpu().numpy()
+                        )
+                        traj_grids.append(batch_target_orig[i].squeeze(0).cpu().numpy())
+
+                        # HybridDeepONet specific
+                        if is_hybrid_model:
+                            hybrid_output_grids.append(
+                                pred["output_grid"][i].squeeze(0).cpu().numpy()
+                            )
+                            hybrid_region_densities.append(
+                                pred["region_densities"][i].cpu().numpy()
+                            )
+                            hybrid_region_weights.append(
+                                pred["region_weights"][i].cpu().numpy()
+                            )
+
+                    if traj_times is None:
+                        t_coords = batch_input_orig["t_coords"]
+                        traj_times = t_coords[0, 0, :, 0].cpu().numpy()
+            else:
+                # Standard models (tensor output)
+                metrics = compute_metrics(pred, batch_target)
+                batch_metrics.append(metrics)
+
+                # Store for plotting
+                for i in range(batch_target.shape[0]):
+                    all_preds.append(pred[i].squeeze(0).cpu().numpy())
+                    all_targets.append(batch_target[i].squeeze(0).cpu().numpy())
+
+    # Aggregate metrics
+    if batch_metrics:
+        avg_metrics = {
+            key: np.mean([m[key] for m in batch_metrics])
+            for key in batch_metrics[0].keys()
+        }
+    else:
+        avg_metrics = {}
+
+    # Print results
+    print("\nTest Results:")
+    print("-" * 40)
+    for key, value in avg_metrics.items():
+        print(f"  {key}: {value:.6f}")
+    print("-" * 40)
+
+    # Log to W&B if logger provided (use summary for test metrics)
+    if logger is not None:
+        logger.log_summary({f"test/metrics/{k}": v for k, v in avg_metrics.items()})
+
+        if is_hybrid_model and traj_positions:
+            # Build traj_data dict for hybrid model
+            traj_data = {
+                "grids": np.array(traj_grids),
+                "output_grid": np.array(hybrid_output_grids),
+                "positions": np.array(traj_positions),
+                "existence": np.array(traj_existence),
+                "discontinuities": np.array(traj_discontinuities),
+                "masks": np.array(traj_masks),
+                "region_densities": np.array(hybrid_region_densities),
+                "region_weights": np.array(hybrid_region_weights),
+                "times": traj_times,
+                "is_hybrid": True,
+            }
+            plot_wandb(
+                traj_data,
+                grid_config,
+                logger,
+                epoch=None,
+                mode="test",
+                preset=plot_preset,
+            )
+        elif is_trajectory_model and traj_positions:
+            # Build traj_data dict for trajectory model
+            traj_data = {
+                "grids": np.array(traj_grids),
+                "positions": np.array(traj_positions),
+                "existence": np.array(traj_existence),
+                "discontinuities": np.array(traj_discontinuities),
+                "masks": np.array(traj_masks),
+                "times": traj_times,
+            }
+            plot_wandb(
+                traj_data,
+                grid_config,
+                logger,
+                epoch=None,
+                mode="test",
+                preset=plot_preset,
+            )
+        elif not is_trajectory_model and all_targets:
+            # Plot comparison for standard models
+            gts = np.array(all_targets[:num_plots])
+            preds = np.array(all_preds[:num_plots])
+            plot_comparison_wandb(
+                gts,
+                preds,
+                grid_config,
+                logger,
+                epoch=None,
+                mode="test",
+                use_summary=False,
+            )
+
+    return avg_metrics
+
+
+def run_inference(
+    model: nn.Module,
+    input_data: dict | torch.Tensor,
+    device: torch.device,
+) -> torch.Tensor:
+    """Run inference on input data.
+
+    Args:
+        model: Trained model.
+        input_data: Input tensor or dict.
+        device: Computation device.
+
+    Returns:
+        Model prediction tensor.
+    """
+    model.eval()
+
+    with torch.no_grad():
+        if isinstance(input_data, dict):
+            input_data = {
+                k: v.to(device) if isinstance(v, torch.Tensor) else v
+                for k, v in input_data.items()
+            }
+        else:
+            input_data = input_data.to(device)
+
+        pred = model(input_data)
+
+    return pred
+
+
+def run_sanity_check(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> bool:
+    """Run sanity checks to verify all code paths before training.
+
+    Performs 4 checks:
+    1. Forward pass on training batch
+    2. Forward pass on validation batch
+    3. Loss computation
+    4. Backward pass (gradient check)
+
+    Args:
+        model: Model to check.
+        train_loader: Training data loader.
+        val_loader: Validation data loader.
+        args: Training arguments (needs loss, dt, dx, smooth_loss_type).
+        device: Computation device.
+
+    Returns:
+        True if all checks pass.
+
+    Raises:
+        RuntimeError: If any check fails.
+    """
+    print("\n" + "=" * 50)
+    print("Running sanity checks...")
+    print("=" * 50)
+
+    model.train()
+
+    # Get loss function - build kwargs for losses that need dt/dx
+    loss_kwargs = {
+        "pde_residual": {"dt": args.dt, "dx": args.dx},
+        "rh_residual": {"dt": args.dt},
+    }
+    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
+
+    # [1/4] Forward pass on training batch
+    print("\n[1/4] Testing forward pass on training batch...")
+    train_batch = next(iter(train_loader))
+    batch_input, batch_target = train_batch
+
+    # Move to device
+    if isinstance(batch_input, dict):
+        batch_input = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in batch_input.items()
+        }
+    else:
+        batch_input = batch_input.to(device)
+    batch_target = batch_target.to(device)
+
+    try:
+        pred = model(batch_input)
+        if isinstance(pred, dict):
+            print(f"  Output type: dict with keys {list(pred.keys())}")
+            for k, v in pred.items():
+                if isinstance(v, torch.Tensor):
+                    print(f"    {k}: shape={v.shape}, dtype={v.dtype}")
+        else:
+            print(f"  Output shape: {pred.shape}")
+        print("  [PASS] Forward pass on training batch")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Forward pass on training batch: {e}") from e
+
+    # [2/4] Forward pass on validation batch
+    print("\n[2/4] Testing forward pass on validation batch...")
+    val_batch = next(iter(val_loader))
+    val_input, val_target = val_batch
+
+    # Move to device
+    if isinstance(val_input, dict):
+        val_input = {
+            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            for k, v in val_input.items()
+        }
+    else:
+        val_input = val_input.to(device)
+    val_target = val_target.to(device)
+
+    try:
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_input)
+        if isinstance(val_pred, dict):
+            print(f"  Output type: dict with keys {list(val_pred.keys())}")
+        else:
+            print(f"  Output shape: {val_pred.shape}")
+        print("  [PASS] Forward pass on validation batch")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Forward pass on validation batch: {e}") from e
+
+    # [3/4] Loss computation
+    print("\n[3/4] Testing loss computation...")
+    model.train()
+    try:
+        # Re-run forward pass for fresh computation graph
+        pred = model(batch_input)
+        # Use new signature: (input_dict, output_dict, target)
+        loss, components = loss_fn(batch_input, pred, batch_target)
+        print(f"  Loss value: {loss.item():.6f}")
+        print(f"  Loss components: {list(components.keys())}")
+        for k, v in components.items():
+            print(f"    {k}: {v:.6f}")
+        print("  [PASS] Loss computation")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Loss computation: {e}") from e
+
+    # [4/4] Backward pass
+    print("\n[4/4] Testing backward pass...")
+    try:
+        loss.backward()
+        grad_count = 0
+        total_params = 0
+        for _name, param in model.named_parameters():
+            total_params += 1
+            if param.grad is not None:
+                grad_count += 1
+        print(f"  Parameters with gradients: {grad_count}/{total_params}")
+        if grad_count == 0:
+            raise RuntimeError("No gradients computed!")
+        print("  [PASS] Backward pass")
+    except Exception as e:
+        raise RuntimeError(f"[FAIL] Backward pass: {e}") from e
+
+    # Clean up gradients
+    model.zero_grad()
+
+    print("\n" + "=" * 50)
+    print("Sanity check passed!")
+    print("=" * 50 + "\n")
+
+    return True
+
+
+def run_profiler(
+    model: nn.Module,
+    train_loader: DataLoader,
+    args: argparse.Namespace,
+    device: torch.device,
+    logger: WandbLogger | None = None,
+    num_steps: int = 10,
+    warmup_steps: int = 2,
+) -> None:
+    """Profile training steps and optionally upload trace to wandb.
+
+    Args:
+        model: Model to profile.
+        train_loader: Training data loader.
+        args: Training arguments (needs loss, dt, dx, smooth_loss_type).
+        device: Computation device.
+        logger: Optional WandbLogger for uploading artifacts.
+        num_steps: Number of active profiling steps.
+        warmup_steps: Number of warmup steps before profiling.
+    """
+    import wandb
+
+    print("\n" + "=" * 50)
+    print("Running profiler...")
+    print("=" * 50)
+
+    # Get loss function - build kwargs for losses that need dt/dx
+    loss_kwargs = {
+        "pde_residual": {"dt": args.dt, "dx": args.dx},
+        "rh_residual": {"dt": args.dt},
+    }
+    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+
+    # Determine profiler activities
+    activities = [ProfilerActivity.CPU]
+    if torch.cuda.is_available():
+        activities.append(ProfilerActivity.CUDA)
+
+    # Create profiler schedule
+    prof_schedule = schedule(
+        wait=0,
+        warmup=warmup_steps,
+        active=num_steps,
+        repeat=1,
+    )
+
+    model.train()
+    data_iter = iter(train_loader)
+
+    total_steps = warmup_steps + num_steps
+    print(f"  Warmup steps: {warmup_steps}")
+    print(f"  Active steps: {num_steps}")
+    print(f"  Total steps: {total_steps}")
+
+    with profile(
+        activities=activities,
+        schedule=prof_schedule,
+        on_trace_ready=lambda p: None,  # We'll export manually
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+    ) as prof:
+        for step in range(total_steps):
+            try:
+                batch_input, batch_target = next(data_iter)
+            except StopIteration:
+                data_iter = iter(train_loader)
+                batch_input, batch_target = next(data_iter)
+
+            # Move to device
+            if isinstance(batch_input, dict):
+                batch_input = {
+                    k: v.to(device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch_input.items()
+                }
+            else:
+                batch_input = batch_input.to(device)
+            batch_target = batch_target.to(device)
+
+            # Training step
+            optimizer.zero_grad()
+            pred = model(batch_input)
+            # Use new signature: (input_dict, output_dict, target)
+            loss, _ = loss_fn(batch_input, pred, batch_target)
+            loss.backward()
+            optimizer.step()
+
+            prof.step()
+
+            if step < warmup_steps:
+                print(f"  Step {step + 1}/{total_steps} (warmup)")
+            else:
+                print(f"  Step {step + 1}/{total_steps} (profiling)")
+
+    # Generate summary table
+    sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total"
+    summary_table = prof.key_averages().table(sort_by=sort_by, row_limit=30)
+    print("\nProfiler Summary:")
+    print(summary_table)
+
+    # Export trace and upload to wandb
+    if logger is not None and logger.enabled and logger.run is not None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_path = Path(tmpdir) / "trace.json"
+            summary_path = Path(tmpdir) / "summary.txt"
+
+            # Export Chrome trace
+            prof.export_chrome_trace(str(trace_path))
+
+            # Save summary
+            with open(summary_path, "w") as f:
+                f.write(summary_table)
+
+            # Create and upload artifact
+            run_id = logger.run.id
+            artifact = wandb.Artifact(
+                f"profiler-trace-{run_id}",
+                type="profile",
+                description="PyTorch profiler trace and summary",
+            )
+            artifact.add_file(str(trace_path), name="trace.json")
+            artifact.add_file(str(summary_path), name="summary.txt")
+            logger.run.log_artifact(artifact)
+
+            print(f"\n  Uploaded profiler artifact: profiler-trace-{run_id}")
+
+    print("\n" + "=" * 50)
+    print("Profiling complete!")
+    print("=" * 50 + "\n")
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Test wavefront prediction model")
+
+    # Required argument
+    parser.add_argument(
+        "--model_path", type=str, required=True, help="Path to trained model checkpoint"
+    )
+
+    # Data arguments (with defaults matching training)
+    parser.add_argument(
+        "--n_samples", type=int, default=200, help="Number of test samples"
+    )
+    parser.add_argument("--nx", type=int, default=50, help="Number of spatial points")
+    parser.add_argument("--nt", type=int, default=250, help="Number of time steps")
+    parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
+    parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+
+    # Output arguments
+    parser.add_argument(
+        "--num_plots", type=int, default=3, help="Number of samples to plot"
+    )
+    parser.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
+
+    # Plot preset
+    parser.add_argument(
+        "--plot",
+        type=str,
+        default=None,
+        choices=list(PLOT_PRESETS.keys()),
+        help="Plot preset (default: auto-detect based on model)",
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    """Main entry point for standalone testing."""
+    args = parse_args()
+
+    # Create grid_config dict for plotting functions
+    grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+
+    print(f"Using device: {device}")
+    print(f"Loading model from: {args.model_path}")
+
+    # Load checkpoint
+    checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
+
+    # Extract model config from checkpoint if available
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+        model_config = checkpoint.get("config", {})
+    else:
+        state_dict = checkpoint
+        model_config = {}
+
+    # Import model creation - this requires model.py to have proper model registry
+    from model import MODELS
+
+    # Try to determine model type from checkpoint or use default
+    model_name = model_config.get("model", "fno")
+
+    if model_name not in MODELS:
+        print(
+            f"Warning: Model '{model_name}' not found in registry. Available: {list(MODELS.keys())}"
+        )
+        print("Please ensure your model is registered in model.py")
+        return
+
+    # Create model with config
+    model_class = MODELS[model_name]
+    model = model_class(
+        in_channels=model_config.get("in_channels", 3),
+        out_channels=model_config.get("out_channels", 1),
+        hidden_channels=model_config.get("hidden_channels", 64),
+    )
+    model.load_state_dict(state_dict)
+    model = model.to(device)
+
+    print(f"Model loaded: {model_name}")
+    print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Generate test data
+    print("\nGenerating test data...")
+    _, _, test_dataset = get_wavefront_datasets(
+        n_samples=args.n_samples,
+        nx=args.nx,
+        nt=args.nt,
+        dx=args.dx,
+        dt=args.dt,
+        train_ratio=0.0,  # All data for testing
+        val_ratio=0.0,
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=collate_wavefront_batch,
+    )
+
+    # Initialize logger
+    logger = None
+    if not args.no_wandb:
+        args.model = model_name
+        logger = init_logger(args, project="wavefront-learning-test")
+
+    # Run evaluation
+    metrics = test_model(
+        model=model,
+        test_loader=test_loader,
+        device=device,
+        logger=logger,
+        grid_config=grid_config,
+        num_plots=args.num_plots,
+        plot_preset=args.plot,
+    )
+
+    # Cleanup
+    if logger is not None:
+        logger.finish()
+
+    print("\nTesting complete!")
+    return metrics
+
+
+if __name__ == "__main__":
+    main()

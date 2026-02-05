@@ -5,3 +5,13 @@ numerical_solver/temp/
 *.gif
 *.png
 *.pt
+*.pth
+.venv/
+.cache/
+.DS_Store
+.env
+operator_learning/.env
+wavefront_learning/.env
+build/
+wandb/
+*.npz
