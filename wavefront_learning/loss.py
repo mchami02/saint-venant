@@ -9,6 +9,7 @@ This module provides:
 
 import torch
 import torch.nn as nn
+from losses.acceleration import AccelerationLoss
 from losses.base import BaseLoss
 from losses.boundary import BoundaryLoss
 from losses.collision import CollisionLoss
@@ -31,6 +32,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "existence_reg": ExistenceRegularizationLoss,
     "supervised_trajectory": SupervisedTrajectoryLoss,
     "ic": ICLoss,
+    "acceleration": AccelerationLoss,
 }
 
 # Presets for common configurations

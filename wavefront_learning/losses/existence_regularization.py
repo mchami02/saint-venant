@@ -1,6 +1,7 @@
-"""Existence regularization loss.
+"""Existence regularization loss with IC anchoring.
 
-Prevents existence predictions from collapsing to all 0s or all 1s.
+Enforces that if a discontinuity is predicted to exist at t=0,
+its trajectory must start at the actual IC discontinuity position.
 """
 
 import torch
@@ -9,18 +10,19 @@ from .base import BaseLoss
 
 
 class ExistenceRegularizationLoss(BaseLoss):
-    """Regularization to prevent existence from collapsing to 0 or 1.
+    """IC anchoring constraint for existence predictions.
 
-    Encourages existence predictions to be varied rather than all zeros/ones
-    by penalizing deviation from a target mean.
+    Enforces that predicted trajectories start at the correct IC positions
+    when existence at t=0 is high. This creates a soft constraint:
+    "if you claim it exists, place it correctly at t=0".
 
-    Args:
-        target_mean: Target mean existence value (default 0.5).
+    The loss is weighted by existence probability at t=0, so:
+    - High existence (~1) -> full penalty for position errors
+    - Low existence (~0) -> position errors are ignored
     """
 
-    def __init__(self, target_mean: float = 0.5):
+    def __init__(self):
         super().__init__()
-        self.target_mean = target_mean
 
     def forward(
         self,
@@ -28,29 +30,41 @@ class ExistenceRegularizationLoss(BaseLoss):
         output_dict: dict[str, torch.Tensor],
         target: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Compute existence regularization loss.
+        """Compute IC anchoring loss.
 
         Args:
             input_dict: Must contain:
+                - 'discontinuities': (B, D, 3) with [x_IC, rho_L, rho_R]
                 - 'disc_mask': (B, D) validity mask
             output_dict: Must contain:
+                - 'positions': (B, D, T) predicted positions
                 - 'existence': (B, D, T) existence probabilities
             target: Target tensor (unused).
 
         Returns:
             Tuple of (loss tensor, components dict with 'existence_reg' key).
         """
-        predicted_existence = output_dict["existence"]
-        mask = input_dict["disc_mask"]
+        positions = output_dict["positions"]  # (B, D, T)
+        existence = output_dict["existence"]  # (B, D, T)
+        discontinuities = input_dict["discontinuities"]  # (B, D, 3)
+        mask = input_dict["disc_mask"]  # (B, D)
 
-        mask_exp = mask.unsqueeze(-1)  # (B, D, 1)
-        masked_exist = predicted_existence * mask_exp
+        # Extract t=0 values
+        pred_pos_t0 = positions[:, :, 0]  # (B, D)
+        exist_t0 = existence[:, :, 0]  # (B, D)
+        ic_pos = discontinuities[:, :, 0]  # (B, D)
 
-        n_valid = mask.sum() * predicted_existence.shape[-1]
+        # Position error at t=0, weighted by existence
+        pos_error = (pred_pos_t0 - ic_pos) ** 2  # (B, D)
+        weighted_error = exist_t0 * pos_error  # (B, D)
+
+        # Apply validity mask
+        masked_error = weighted_error * mask
+
+        n_valid = mask.sum()
         if n_valid > 0:
-            mean_exist = masked_exist.sum() / n_valid
-            loss = (mean_exist - self.target_mean) ** 2
+            loss = masked_error.sum() / n_valid
         else:
-            loss = torch.tensor(0.0, device=predicted_existence.device)
+            loss = torch.tensor(0.0, device=positions.device)
 
         return loss, {"existence_reg": loss.item()}

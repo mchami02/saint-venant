@@ -15,6 +15,7 @@ Trajectory Losses:
 - CollisionLoss: Penalizes colliding shocks
 - ExistenceRegularizationLoss: Prevents existence collapse
 - SupervisedTrajectoryLoss: Supervised trajectory loss when GT available
+- AccelerationLoss: Penalizes low existence where GT has high acceleration
 
 Physics Losses:
 - PDEResidualLoss: PDE conservation in smooth regions
@@ -24,6 +25,7 @@ Utilities:
 - flux: Centralized flux functions (greenshields_flux, compute_shock_speed)
 """
 
+from .acceleration import AccelerationLoss, compute_acceleration
 from .base import BaseLoss
 from .boundary import BoundaryLoss
 from .collision import CollisionLoss
@@ -48,6 +50,7 @@ __all__ = [
     "CollisionLoss",
     "ExistenceRegularizationLoss",
     "SupervisedTrajectoryLoss",
+    "AccelerationLoss",
     # Physics losses
     "PDEResidualLoss",
     "RHResidualLoss",
@@ -57,4 +60,5 @@ __all__ = [
     "compute_shock_speed",
     "compute_pde_residual",
     "create_shock_mask",
+    "compute_acceleration",
 ]

@@ -23,6 +23,7 @@ This document describes the neural network architectures and loss functions used
      - [SupervisedTrajectoryLoss](#supervisedtrajectoryloss)
      - [PDEResidualLoss](#pderesidualloss)
      - [RHResidualLoss](#rhresidualloss)
+     - [AccelerationLoss](#accelerationloss)
    - [CombinedLoss](#combinedloss)
    - [Loss Presets](#loss-presets)
 
@@ -603,20 +604,26 @@ where $\mathbb{1}_{colliding}(x_i, x_j) = 1$ if $|x_i - x_j| < \epsilon_{collisi
 
 **Location**: `losses/existence_regularization.py`
 
-Prevents existence from collapsing to trivial solutions (all 0s or all 1s).
+IC anchoring constraint that enforces predicted trajectories to start at the correct IC discontinuity positions when existence at t=0 is high.
 
 **Formula**:
-$$\mathcal{L}_{reg} = \left( \bar{e} - \mu_{target} \right)^2$$
+$$\mathcal{L}_{anchor} = \frac{1}{N} \sum_{b,d} e^{(b,d)}_0 \cdot \left( x^{(b,d)}_{pred,0} - x^{(b,d)}_{IC} \right)^2$$
 
-where $\bar{e}$ is the mean existence probability across all valid shocks and $\mu_{target}$ is the target mean.
+where:
+- $e^{(b,d)}_0$ = existence probability at t=0 for discontinuity d in batch b
+- $x^{(b,d)}_{pred,0}$ = predicted position at t=0
+- $x^{(b,d)}_{IC}$ = IC discontinuity position from `discontinuities[:, :, 0]`
+- N = number of valid discontinuities (sum of `disc_mask`)
 
-**Configuration**:
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `target_mean` | 0.5 | Target mean existence value |
+**Interpretation**:
+- If existence at t=0 is high (~1), the position error is fully penalized
+- If existence at t=0 is low (~0), position error is ignored
+- This creates a soft constraint: "if you claim it exists, place it correctly"
 
-**Required inputs**: `disc_mask`
-**Required outputs**: `existence`
+**Configuration**: No parameters.
+
+**Required inputs**: `discontinuities`, `disc_mask`
+**Required outputs**: `positions`, `existence`
 
 **Components returned**: `{"existence_reg": float}`
 
@@ -733,6 +740,54 @@ $$\mathcal{L}_{RH} = \frac{1}{|\mathcal{V}|} \sum_{(d,t) \in \mathcal{V}} e_d(t)
 
 ---
 
+#### AccelerationLoss
+
+**Location**: `losses/acceleration.py`
+
+Penalizes low existence predictions where the ground truth grid shows high temporal acceleration, indicating a shock should be present. This loss helps the model learn to predict high existence at shock locations even without explicit trajectory supervision.
+
+**Acceleration computation** (central finite differences):
+$$a(t, x) = \frac{\rho(t + \Delta t, x) - 2\rho(t, x) + \rho(t - \Delta t, x)}{\Delta t^2}$$
+
+This is computed for interior time points only (indices 1 to $n_t - 2$).
+
+**Acceleration sampling near trajectories**:
+
+For each predicted trajectory position $x_d(t)$, sample the maximum absolute acceleration in a spatial window:
+$$a_{near}^{(d)}(t) = \max_{|x - x_d(t)| < \epsilon} |a(t, x)|$$
+
+In practice, samples are taken at $x - \epsilon$, $x$, and $x + \epsilon$.
+
+**Loss formula**:
+$$\mathcal{L}_{accel} = \frac{1}{N} \sum_{(b,d,t) \in \mathcal{H}} \left(1 - e^{(b,d,t)}\right)^2 \cdot m_{b,d}$$
+
+where:
+- $\mathcal{H} = \{(b,d,t) : |a_{near}^{(d)}(t)| > \tau\}$ is the set of high-acceleration points
+- $e^{(b,d,t)}$ = existence probability
+- $\tau$ = acceleration threshold (configurable)
+- $m_{b,d}$ = discontinuity validity mask
+- $N = |\mathcal{H}|$ = count of high-acceleration points
+
+**Interpretation**:
+- High acceleration in the ground truth indicates a shock (rapid density change)
+- If the model predicts low existence ($e \approx 0$) at such locations, the loss is high
+- If the model correctly predicts high existence ($e \approx 1$), the loss is zero
+- Regions with low acceleration (smooth solution) do not contribute to the loss
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dt` | 0.004 | Time step size for acceleration computation |
+| `accel_threshold` | 1.0 | Threshold for "high" acceleration |
+| `epsilon` | 0.02 | Spatial window for sampling near trajectories |
+
+**Required inputs**: `x_coords`, `disc_mask`
+**Required outputs**: `positions`, `existence`
+
+**Components returned**: `{"acceleration": float}`
+
+---
+
 ### CombinedLoss
 
 **Location**: `loss.py`
@@ -845,6 +900,7 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 | SupervisedTrajectoryLoss | `losses/supervised_trajectory.py` | Direct supervision | When GT available |
 | PDEResidualLoss | `losses/pde_residual.py` | Conservation in smooth regions | Grid models |
 | RHResidualLoss | `losses/rh_residual.py` | RH at shocks (from densities) | Hybrid models |
+| AccelerationLoss | `losses/acceleration.py` | High acceleration = shock | Existence supervision |
 
 ### Key Design Principles
 
