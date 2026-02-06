@@ -153,6 +153,7 @@ class PDEShockResidualLoss(BaseLoss):
                 - 'disc_mask': (B, D) validity mask
             output_dict: Must contain:
                 - 'positions': (B, D, T) predicted shock positions
+              Optionally contains:
                 - 'existence': (B, D, T) existence probabilities
             target: Ground truth grid (B, 1, nt, nx).
 
@@ -161,7 +162,7 @@ class PDEShockResidualLoss(BaseLoss):
             contains 'pde_shock_residual' and 'total'.
         """
         positions = output_dict["positions"]
-        existence = output_dict["existence"]
+        existence = output_dict.get("existence", torch.ones_like(positions))
         x_coords = input_dict["x_coords"]
         disc_mask = input_dict["disc_mask"]
 
@@ -244,6 +245,7 @@ class PDEResidualLoss(BaseLoss):
             output_dict: Must contain:
                 - 'output_grid': (B, 1, nt, nx) predicted grid
                 - 'positions': (B, D, T) predicted shock positions
+              Optionally contains:
                 - 'existence': (B, D, T) existence probabilities
             target: Target grid (B, 1, nt, nx) for optional IC loss.
 
@@ -253,7 +255,7 @@ class PDEResidualLoss(BaseLoss):
         """
         output_grid = output_dict["output_grid"]
         positions = output_dict["positions"]
-        existence = output_dict["existence"]
+        existence = output_dict.get("existence", torch.ones_like(positions))
         x_coords = input_dict["x_coords"]
         disc_mask = input_dict["disc_mask"]
 
