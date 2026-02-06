@@ -3,7 +3,6 @@
 from argparse import Namespace
 from pathlib import Path
 
-import numpy as np
 import torch
 import wandb
 from dotenv import load_dotenv
@@ -43,6 +42,12 @@ class WandbLogger:
                 tags=tags,
             )
 
+            # Define epoch as the x-axis for all custom metrics.
+            # This decouples our logging from wandb's internal step counter
+            # (used by wandb.watch for gradient logging).
+            wandb.define_metric("epoch")
+            wandb.define_metric("*", step_metric="epoch")
+
             # Log source code (exclude patterns from .gitignore)
             if self.run is not None:
                 self.run.log_code(
@@ -58,25 +63,25 @@ class WandbLogger:
     def log_metrics(
         self,
         metrics: dict[str, float],
-        step: int | None = None,
+        epoch: int | None = None,
     ) -> None:
         """Log scalar metrics.
 
         Args:
             metrics: Dictionary of metric names to values.
-            step: Deprecated - no longer used to avoid wandb.watch conflicts.
-                  Include 'epoch' key in metrics instead.
+            epoch: Current epoch number (used as x-axis via define_metric).
         """
         if not self.enabled or self.run is None:
             return
-        # Don't use explicit step to avoid conflicts with wandb.watch step counter
+        if epoch is not None:
+            metrics = {**metrics, "epoch": epoch}
         wandb.log(metrics)
 
     def log_image(
         self,
         key: str,
         image,
-        step: int | None = None,
+        epoch: int | None = None,
         caption: str | None = None,
     ) -> None:
         """Log an image.
@@ -84,26 +89,21 @@ class WandbLogger:
         Args:
             key: Image key/name.
             image: Image data (PIL, numpy, matplotlib figure, or path).
-            step: Deprecated - no longer used to avoid wandb.watch conflicts.
+            epoch: Current epoch number (used as x-axis via define_metric).
             caption: Optional image caption.
         """
         if not self.enabled or self.run is None:
             return
 
-        # Don't use explicit step to avoid conflicts with wandb.watch step counter
-        if hasattr(image, "savefig"):
-            # Matplotlib figure
-            wandb.log({key: wandb.Image(image, caption=caption)})
-        elif isinstance(image, np.ndarray):
-            wandb.log({key: wandb.Image(image, caption=caption)})
-        else:
-            wandb.log({key: wandb.Image(image, caption=caption)})
+        log_dict = {key: wandb.Image(image, caption=caption)}
+        if epoch is not None:
+            log_dict["epoch"] = epoch
+        wandb.log(log_dict)
 
     def log_figure(
         self,
         key: str,
         figure,
-        step: int | None = None,
         epoch: int | None = None,
     ) -> None:
         """Log a matplotlib figure.
@@ -111,20 +111,14 @@ class WandbLogger:
         Args:
             key: Figure key/name.
             figure: Matplotlib figure.
-            step: Optional global step number. Avoid using with wandb.watch.
-            epoch: Optional epoch number to log as metric (preferred over step).
+            epoch: Current epoch number (used as x-axis via define_metric).
         """
         if not self.enabled or self.run is None:
             return
-        # Build log dict with figure and optional epoch
         log_dict = {key: wandb.Image(figure)}
         if epoch is not None:
-            log_dict["plot_epoch"] = epoch
-        # Don't use explicit step if epoch is provided (avoids wandb.watch conflicts)
-        if epoch is not None:
-            wandb.log(log_dict)
-        else:
-            wandb.log(log_dict, step=step)
+            log_dict["epoch"] = epoch
+        wandb.log(log_dict)
 
     def log_summary(self, metrics: dict[str, float]) -> None:
         """Log metrics to run summary (final/aggregate values).
@@ -165,7 +159,7 @@ class WandbLogger:
         self,
         path: str,
         key: str,
-        step: int | None = None,
+        epoch: int | None = None,
         fps: int = 20,
     ) -> None:
         """Log a video file.
@@ -173,13 +167,15 @@ class WandbLogger:
         Args:
             path: Path to video file.
             key: Video key/name.
-            step: Deprecated - no longer used to avoid wandb.watch conflicts.
+            epoch: Current epoch number (used as x-axis via define_metric).
             fps: Frames per second.
         """
         if not self.enabled or self.run is None:
             return
-        # Don't use explicit step to avoid conflicts with wandb.watch step counter
-        wandb.log({key: wandb.Video(path, fps=fps, format="gif")})
+        log_dict = {key: wandb.Video(path, fps=fps, format="gif")}
+        if epoch is not None:
+            log_dict["epoch"] = epoch
+        wandb.log(log_dict)
 
     def log_model(
         self,
@@ -273,7 +269,7 @@ def init_logger(args: Namespace, project: str = "wavefront-learning") -> WandbLo
 def log_values(
     logger: WandbLogger,
     values: dict[str, float],
-    step: int,
+    epoch: int,
     mode: str,
     category: str,
 ) -> None:
@@ -284,11 +280,11 @@ def log_values(
     Args:
         logger: WandbLogger instance.
         values: Dictionary of metric names to values.
-        step: Current step (epoch number).
+        epoch: Current epoch number.
         mode: One of "train", "val", "test".
         category: One of "loss", "metrics".
     """
     logger.log_metrics(
         {f"{mode}/{category}/{k}": v for k, v in values.items()},
-        step=step,
+        epoch=epoch,
     )

@@ -251,7 +251,7 @@ def plot_comparison_wandb(
                 )
             else:
                 logger.log_video(
-                    tmp.name, f"{mode}/animation_sample_{b + 1}", step=epoch
+                    tmp.name, f"{mode}/animation_sample_{b + 1}", epoch=epoch
                 )
 
         plt.close(anim_fig)

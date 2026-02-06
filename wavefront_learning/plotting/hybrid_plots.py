@@ -166,7 +166,7 @@ def _create_comparison_table(
     logger,
     num_samples: int = 5,
     mode: str = "test",
-    step: int | None = None,
+    epoch: int | None = None,
 ) -> None:
     """Create a W&B table with comparison images.
 
@@ -182,7 +182,7 @@ def _create_comparison_table(
         logger: WandbLogger instance.
         num_samples: Maximum number of samples to include.
         mode: Mode string for logging prefix.
-        step: Optional epoch number to log as metric (avoids wandb.watch step conflicts).
+        epoch: Current epoch number (used as x-axis via define_metric).
     """
     if logger is None or not logger.enabled:
         return
@@ -240,11 +240,9 @@ def _create_comparison_table(
         data.append(row)
 
     table = wandb.Table(columns=columns, data=data)
-    # Don't use explicit step to avoid conflicts with wandb.watch step counter
-    # Include epoch as a metric so it can be used as x-axis in charts
     log_dict = {f"{mode}/hybrid_comparison_table": table}
-    if step is not None:
-        log_dict["plot_epoch"] = step
+    if epoch is not None:
+        log_dict["epoch"] = epoch
     wandb.log(log_dict)
 
 
@@ -319,7 +317,7 @@ def plot_hybrid_predictions_wandb(
         logger,
         num_samples=5,
         mode=mode,
-        step=epoch,
+        epoch=epoch,
     )
 
     # Summary comparison plot: 3 columns (GT, Pred+traj, MSE Error)

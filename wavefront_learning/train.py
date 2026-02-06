@@ -332,12 +332,12 @@ def train_model(
         current_lr = optimizer.param_groups[0]["lr"]
 
         # Log metrics
-        step = epoch + 1
-        logger.log_metrics({"train/lr": current_lr}, step=step)
-        log_values(logger, train_loss_components, step, "train", "loss")
-        log_values(logger, val_loss_components, step, "val", "loss")
-        log_values(logger, train_metrics, step, "train", "metrics")
-        log_values(logger, val_metrics, step, "val", "metrics")
+        ep = epoch + 1
+        logger.log_metrics({"train/lr": current_lr}, epoch=ep)
+        log_values(logger, train_loss_components, ep, "train", "loss")
+        log_values(logger, val_loss_components, ep, "val", "loss")
+        log_values(logger, train_metrics, ep, "train", "metrics")
+        log_values(logger, val_metrics, ep, "val", "metrics")
 
         # Plot every 5 epochs
         if (epoch + 1) % 5 == 0:
