@@ -286,7 +286,9 @@ class RHResidualLoss(BaseLoss):
                 - 'disc_mask': (B, D) validity mask
             output_dict: Must contain:
                 - 'positions': (B, D, T) predicted shock positions
+                Optionally:
                 - 'existence': (B, D, T) existence probabilities
+                Conditionally:
                 - 'region_densities': (B, K, nt, nx) per-region predictions
                   (required if mode="per_region")
                 - 'output_grid': (B, 1, nt, nx) assembled prediction
@@ -297,7 +299,7 @@ class RHResidualLoss(BaseLoss):
             Tuple of (loss tensor, components dict with 'rh_residual' key).
         """
         positions = output_dict["positions"]
-        existence = output_dict["existence"]
+        existence = output_dict.get("existence")
         x_coords = input_dict["x_coords"]
         disc_mask = input_dict["disc_mask"]
 
@@ -342,17 +344,20 @@ class RHResidualLoss(BaseLoss):
         v_shock = velocities[:, :max_d, :]  # (B, max_d, T)
         residual = v_shock * (u_plus - u_minus) - (f_plus - f_minus)  # (B, max_d, T)
 
-        # Weight by existence probability: (B, max_d, T)
-        exist = existence[:, :max_d, :]
-        weighted_residual = exist * residual**2
-
         # Apply discontinuity mask: (B, max_d) -> (B, max_d, 1)
         mask_d = disc_mask[:, :max_d].unsqueeze(-1)
-        weighted_residual = weighted_residual * mask_d
+
+        # Weight by existence probability if available: (B, max_d, T)
+        if existence is not None:
+            exist = existence[:, :max_d, :]
+            weighted_residual = exist * residual**2 * mask_d
+            n_valid = (exist * mask_d).sum().clamp(min=1)
+        else:
+            weighted_residual = residual**2 * mask_d
+            n_valid = mask_d.sum().clamp(min=1) * T
 
         # Sum and normalize
         total_residual = weighted_residual.sum()
-        n_valid = (exist * mask_d).sum().clamp(min=1)
 
         loss = total_residual / n_valid
 
