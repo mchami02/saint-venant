@@ -17,6 +17,7 @@ from losses.existence_regularization import ICAnchoringLoss
 from losses.ic import ICLoss
 from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss
+from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
@@ -33,6 +34,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "supervised_trajectory": SupervisedTrajectoryLoss,
     "ic": ICLoss,
     "acceleration": AccelerationLoss,
+    "regularize_traj": RegularizeTrajLoss,
 }
 
 # Presets for common configurations

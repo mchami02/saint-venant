@@ -9,6 +9,8 @@ Includes plot functions compatible with the PLOTS registry in plotter.py:
 - plot_region_weights_wandb: Region weight visualization
 """
 
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
@@ -393,10 +395,7 @@ def plot_hybrid_predictions_wandb(
 def plot_prediction_with_trajectory_existence_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot predicted grid with trajectory overlay.
 
     Used for HybridDeepONet where we want to show trajectories on predicted grid.
@@ -404,12 +403,12 @@ def plot_prediction_with_trajectory_existence_wandb(
     Args:
         traj_data: Dict containing output_grid, positions, existence, masks, times.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     if "output_grid" not in traj_data:
-        return  # Skip if not a hybrid model
+        return []
 
     output_grid = traj_data["output_grid"]
     positions = traj_data["positions"]
@@ -429,6 +428,7 @@ def plot_prediction_with_trajectory_existence_wandb(
         times = times[0]
 
     B = output_grid.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -465,19 +465,15 @@ def plot_prediction_with_trajectory_existence_wandb(
         ax.set_xlim(0, nx * dx)
         ax.set_ylim(0, nt * dt)
         plt.tight_layout()
-        _log_figure(
-            logger, f"{mode}/prediction_with_trajectory_sample_{b + 1}", fig, epoch
-        )
-        plt.close(fig)
+        figures.append((f"prediction_with_trajectory_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_pred_traj(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot predicted grid with trajectory overlay (no existence).
 
     Like plot_prediction_with_trajectory_existence_wandb but plots full
@@ -486,12 +482,12 @@ def plot_pred_traj(
     Args:
         traj_data: Dict containing output_grid, positions, masks, times.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     if "output_grid" not in traj_data:
-        return  # Skip if not a hybrid model
+        return []
 
     output_grid = traj_data["output_grid"]
     positions = traj_data["positions"]
@@ -510,6 +506,7 @@ def plot_pred_traj(
         times = times[0]
 
     B = output_grid.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -545,28 +542,26 @@ def plot_pred_traj(
         ax.set_xlim(0, nx * dx)
         ax.set_ylim(0, nt * dt)
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/pred_traj_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"pred_traj_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_mse_error_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot MSE error heatmap between prediction and ground truth.
 
     Args:
         traj_data: Dict containing output_grid and grids.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     if "output_grid" not in traj_data:
-        return  # Skip if not a hybrid model
+        return []
 
     output_grid = traj_data["output_grid"]
     grids = traj_data["grids"]
@@ -580,6 +575,7 @@ def plot_mse_error_wandb(
     extent = _get_extent(nx, nt, dx, dt)
 
     B = output_grid.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         error = (output_grid[b] - grids[b]) ** 2
 
@@ -598,28 +594,26 @@ def plot_mse_error_wandb(
         ax.set_title(f"MSE Error (Sample {b + 1}, mean={error.mean():.4f})")
         plt.colorbar(im, ax=ax, label="Squared Error")
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/mse_error_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"mse_error_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_region_weights_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot region weight visualization for HybridDeepONet.
 
     Args:
         traj_data: Dict containing region_weights, positions, existence, masks, times.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     if "region_weights" not in traj_data:
-        return  # Skip if not a hybrid model
+        return []
 
     region_weights = traj_data["region_weights"]
     positions = traj_data["positions"]
@@ -641,6 +635,7 @@ def plot_region_weights_wandb(
     B = region_weights.shape[0]
     K = region_weights.shape[1]
 
+    figures = []
     for b in range(min(B, 2)):  # Limit to 2 samples for region plots
         n_disc = int(masks[b].sum())
         colors = _get_colors(n_disc)
@@ -680,5 +675,6 @@ def plot_region_weights_wandb(
 
         plt.suptitle(f"Region Weights (Sample {b + 1})")
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/region_weights_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"region_weights_sample_{b + 1}", fig))
+
+    return figures

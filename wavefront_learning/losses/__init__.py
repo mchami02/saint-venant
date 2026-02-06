@@ -16,6 +16,7 @@ Trajectory Losses:
 - ICAnchoringLoss: Anchors trajectories to IC positions
 - SupervisedTrajectoryLoss: Supervised trajectory loss when GT available
 - AccelerationLoss: Penalizes low existence where GT has high acceleration
+- RegularizeTrajLoss: Penalizes erratic jumps between consecutive timesteps
 
 Physics Losses:
 - PDEResidualLoss: PDE conservation in smooth regions
@@ -34,6 +35,7 @@ from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_deri
 from .ic import ICLoss
 from .mse import MSELoss
 from .pde_residual import PDEResidualLoss, compute_pde_residual, create_shock_mask
+from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
@@ -51,6 +53,7 @@ __all__ = [
     "ICAnchoringLoss",
     "SupervisedTrajectoryLoss",
     "AccelerationLoss",
+    "RegularizeTrajLoss",
     # Physics losses
     "PDEResidualLoss",
     "RHResidualLoss",

@@ -9,15 +9,21 @@ Plot functions compatible with the PLOTS registry:
 - plot_existence_wandb: Existence probability heatmap
 - plot_grid_with_acceleration_wandb: Grid + trajectory alongside acceleration grid
 
-Other W&B trajectory plotting functions:
+Other trajectory plotting functions:
 - plot_trajectory_on_grid_wandb: Legacy trajectory on grid (uses detailed API)
 - plot_trajectory_wandb: Legacy trajectory plots (uses detailed API)
+
+All functions return list[tuple[str, Figure]] of (log_key, figure) pairs.
+Logging to W&B is handled by plot_wandb() in plotter.py.
 """
+
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 
-from .base import _get_colors, _get_extent, _log_figure
+from .base import _get_colors, _get_extent
 from .trajectory_plots import (
     _compute_acceleration_numpy,
     plot_existence_heatmap,
@@ -29,12 +35,8 @@ from .trajectory_plots import (
 def plot_trajectory_on_grid_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int,
-    mode: str = "val",
-    use_summary: bool = False,
-) -> None:
-    """Create trajectory-on-grid overlay plots and upload to W&B.
+) -> list[tuple[str, Figure]]:
+    """Create trajectory-on-grid overlay plots.
 
     Args:
         traj_data: Dict containing:
@@ -45,10 +47,9 @@ def plot_trajectory_on_grid_wandb(
             - masks: Validity masks of shape (B, D).
             - times: Query times of shape (T,) or (B, T).
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
-        use_summary: If True, log to summary instead of step-based logging.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     # Extract from traj_data
     grids = traj_data["grids"]
@@ -66,6 +67,7 @@ def plot_trajectory_on_grid_wandb(
     else:
         times_1d = times[0]
 
+    figures = []
     for b in range(min(B, 3)):
         fig = plot_trajectory_on_grid(
             grids[b],
@@ -78,20 +80,16 @@ def plot_trajectory_on_grid_wandb(
             sample_idx=b,
             show_analytical=False,
         )
-        _log_figure(
-            logger, f"{mode}/trajectory_on_grid_sample_{b + 1}", fig, epoch, use_summary
-        )
-        plt.close(fig)
+        figures.append((f"trajectory_on_grid_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_trajectory_wandb(
     traj_data: dict,
-    logger,
-    epoch: int,
-    mode: str = "val",
-    use_summary: bool = False,
-) -> None:
-    """Create trajectory plots and upload to W&B.
+    grid_config: dict,  # noqa: ARG001
+) -> list[tuple[str, Figure]]:
+    """Create trajectory plots.
 
     Args:
         traj_data: Dict containing:
@@ -100,10 +98,10 @@ def plot_trajectory_wandb(
             - discontinuities: Initial discontinuities of shape (B, D, 3).
             - masks: Validity masks of shape (B, D).
             - times: Query times of shape (T,) or (B, T).
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
-        use_summary: If True, log to summary instead of step-based logging.
+        grid_config: Dict with {nx, nt, dx, dt} (unused but kept for API consistency).
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     # Extract from traj_data
     positions = traj_data["positions"]
@@ -120,6 +118,8 @@ def plot_trajectory_wandb(
     else:
         times_1d = times[0]  # Assume same times for all samples
 
+    figures = []
+
     # Create trajectory plots for each sample
     for b in range(min(B, 3)):  # Limit to 3 samples
         # Trajectory plot
@@ -132,10 +132,7 @@ def plot_trajectory_wandb(
             sample_idx=b,
             show_analytical=False,
         )
-        _log_figure(
-            logger, f"{mode}/trajectory_sample_{b + 1}", fig_traj, epoch, use_summary
-        )
-        plt.close(fig_traj)
+        figures.append((f"trajectory_sample_{b + 1}", fig_traj))
 
         # Existence heatmap
         fig_exist = plot_existence_heatmap(
@@ -144,10 +141,7 @@ def plot_trajectory_wandb(
             times_1d,
             sample_idx=b,
         )
-        _log_figure(
-            logger, f"{mode}/existence_sample_{b + 1}", fig_exist, epoch, use_summary
-        )
-        plt.close(fig_exist)
+        figures.append((f"existence_sample_{b + 1}", fig_exist))
 
     # Create combined summary plot
     fig, axes = plt.subplots(B, 2, figsize=(14, 5 * B))
@@ -213,17 +207,15 @@ def plot_trajectory_wandb(
         ax.set_title(f"Sample {b + 1}: Existence Probability")
 
     plt.tight_layout()
-    _log_figure(logger, f"{mode}/trajectory_summary", fig, epoch, use_summary)
-    plt.close(fig)
+    figures.append(("trajectory_summary", fig))
+
+    return figures
 
 
 def plot_grid_with_trajectory_existence_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot ground truth grid with predicted trajectory overlay.
 
     Used for ShockNet where we want to show trajectories on GT grid.
@@ -231,9 +223,9 @@ def plot_grid_with_trajectory_existence_wandb(
     Args:
         traj_data: Dict containing grids, positions, existence, masks, times.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     grids = traj_data["grids"]
     positions = traj_data["positions"]
@@ -253,6 +245,7 @@ def plot_grid_with_trajectory_existence_wandb(
         times = times[0]
 
     B = grids.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -294,25 +287,23 @@ def plot_grid_with_trajectory_existence_wandb(
         ax.set_xlim(0, nx * dx)
         ax.set_ylim(0, nt * dt)
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/grid_with_trajectory_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"grid_with_trajectory_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_trajectory_vs_analytical_wandb(
     traj_data: dict,
     grid_config: dict,  # noqa: ARG001
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot predicted trajectories vs analytical Rankine-Hugoniot trajectories.
 
     Args:
         traj_data: Dict containing positions, existence, discontinuities, masks, times.
         grid_config: Dict with {nx, nt, dx, dt} (unused but kept for API consistency).
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     positions = traj_data["positions"]
     discontinuities = traj_data["discontinuities"]
@@ -323,6 +314,7 @@ def plot_trajectory_vs_analytical_wandb(
         times = times[0]
 
     B = positions.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -367,27 +359,23 @@ def plot_trajectory_vs_analytical_wandb(
         ax.legend(loc="upper right", fontsize=9)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
-        _log_figure(
-            logger, f"{mode}/trajectory_vs_analytical_sample_{b + 1}", fig, epoch
-        )
-        plt.close(fig)
+        figures.append((f"trajectory_vs_analytical_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_existence_wandb(
     traj_data: dict,
     grid_config: dict,  # noqa: ARG001
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot existence probability heatmap for all discontinuities.
 
     Args:
         traj_data: Dict containing existence, masks, times.
         grid_config: Dict with {nx, nt, dx, dt} (unused but kept for API consistency).
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     existence = traj_data["existence"]
     masks = traj_data["masks"]
@@ -397,6 +385,7 @@ def plot_existence_wandb(
         times = times[0]
 
     B = existence.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         n_disc = int(masks[b].sum())
         if n_disc == 0:
@@ -421,17 +410,15 @@ def plot_existence_wandb(
         ax.set_yticks(range(n_disc))
         plt.colorbar(im, ax=ax, label="P(exists)")
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/existence_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"existence_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_gt_traj(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot ground truth grid with predicted trajectory overlay (no existence).
 
     Like plot_grid_with_trajectory_existence_wandb but plots full trajectories
@@ -440,9 +427,9 @@ def plot_gt_traj(
     Args:
         traj_data: Dict containing grids, positions, masks, times.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     grids = traj_data["grids"]
     positions = traj_data["positions"]
@@ -461,6 +448,7 @@ def plot_gt_traj(
         times = times[0]
 
     B = grids.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -495,18 +483,16 @@ def plot_gt_traj(
         ax.set_xlim(0, nx * dx)
         ax.set_ylim(0, nt * dt)
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/gt_traj_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"gt_traj_sample_{b + 1}", fig))
+
+    return figures
 
 
 def plot_grid_with_acceleration_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
     accel_threshold: float = 1.0,
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot grid+trajectory alongside acceleration grid.
 
     Creates a two-column figure:
@@ -519,10 +505,10 @@ def plot_grid_with_acceleration_wandb(
     Args:
         traj_data: Dict with grids, positions, existence, masks, times.
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Logging prefix.
         accel_threshold: Threshold for highlighting high acceleration regions.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     grids = traj_data["grids"]
     positions = traj_data["positions"]
@@ -547,6 +533,7 @@ def plot_grid_with_acceleration_wandb(
         times = times[0]
 
     B = grids.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         # Compute acceleration for this sample
         accel = _compute_acceleration_numpy(grids[b], dt)  # (nt-2, nx)
@@ -632,5 +619,6 @@ def plot_grid_with_acceleration_wandb(
         ax_accel.set_ylim(dt, (nt - 1) * dt)
 
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/grid_with_acceleration_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"grid_with_acceleration_sample_{b + 1}", fig))
+
+    return figures

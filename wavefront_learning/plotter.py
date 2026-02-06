@@ -6,10 +6,15 @@ This module provides:
 - plot_wandb(): Main entry point that runs plots based on preset
 
 Each plot function signature:
-    fn(traj_data, grid_config, logger, epoch, mode, **kwargs) -> None
+    fn(traj_data, grid_config) -> list[tuple[str, Figure]]
+
+Returns a list of (log_key, figure) pairs. Logging and cleanup is handled
+centrally by plot_wandb().
 """
 
+import matplotlib.pyplot as plt
 from plotting import (
+    _log_figure,
     plot_existence_wandb,
     plot_grid_with_acceleration_wandb,
     plot_grid_with_trajectory_existence_wandb,
@@ -23,7 +28,7 @@ from plotting import (
 )
 
 # Registry of individual plot functions
-# Each function signature: fn(traj_data, grid_config, logger, epoch, mode) -> None
+# Each function signature: fn(traj_data, grid_config) -> list[tuple[str, Figure]]
 PLOTS: dict[str, callable] = {
     "ground_truth": plot_ground_truth_wandb,
     "grid_with_trajectory_existence": plot_grid_with_trajectory_existence_wandb,
@@ -68,6 +73,9 @@ def plot_wandb(
 ) -> None:
     """Main plotting entry point.
 
+    Calls plot functions from the registry, then logs the returned figures
+    to W&B and closes them.
+
     Args:
         traj_data: Data dict from sample_trajectory_predictions().
         grid_config: Dict with {nx, nt, dx, dt}.
@@ -92,7 +100,10 @@ def plot_wandb(
     for plot_name in PLOT_PRESETS[preset]:
         if plot_name in PLOTS:
             try:
-                PLOTS[plot_name](traj_data, grid_config, logger, epoch, mode)
+                figures = PLOTS[plot_name](traj_data, grid_config)
+                for key, fig in figures:
+                    _log_figure(logger, f"{mode}/{key}", fig, epoch)
+                    plt.close(fig)
             except Exception as e:
                 # Log warning but don't fail - some plots may not have required data
                 print(f"Warning: Plot '{plot_name}' failed: {e}")

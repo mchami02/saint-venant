@@ -7,6 +7,8 @@ Includes plot functions compatible with the PLOTS registry in plotter.py:
 - plot_ground_truth_wandb: Ground truth grid heatmaps
 """
 
+from __future__ import annotations
+
 import tempfile
 
 import matplotlib.pyplot as plt
@@ -354,18 +356,15 @@ def plot_grid_comparison(
 def plot_ground_truth_wandb(
     traj_data: dict,
     grid_config: dict,
-    logger,
-    epoch: int | None,
-    mode: str = "val",
-) -> None:
+) -> list[tuple[str, Figure]]:
     """Plot ground truth grid heatmaps.
 
     Args:
         traj_data: Dict containing 'grids' of shape (B, nt, nx).
         grid_config: Dict with {nx, nt, dx, dt}.
-        logger: WandbLogger instance.
-        epoch: Current epoch.
-        mode: Mode string for logging prefix.
+
+    Returns:
+        List of (log_key, figure) pairs.
     """
     grids = traj_data["grids"]
     nx, nt, dx, dt = (
@@ -377,6 +376,7 @@ def plot_ground_truth_wandb(
     extent = _get_extent(nx, nt, dx, dt)
 
     B = grids.shape[0]
+    figures = []
     for b in range(min(B, 3)):
         fig, ax = plt.subplots(figsize=(8, 6))
         im = ax.imshow(
@@ -393,5 +393,6 @@ def plot_ground_truth_wandb(
         ax.set_title(f"Ground Truth (Sample {b + 1})")
         plt.colorbar(im, ax=ax, label="Density")
         plt.tight_layout()
-        _log_figure(logger, f"{mode}/ground_truth_sample_{b + 1}", fig, epoch)
-        plt.close(fig)
+        figures.append((f"ground_truth_sample_{b + 1}", fig))
+
+    return figures

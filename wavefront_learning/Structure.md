@@ -42,7 +42,8 @@ wavefront_learning/
 │   ├── supervised_trajectory.py   # SupervisedTrajectoryLoss (when GT available)
 │   ├── pde_residual.py            # PDEResidualLoss (conservation in smooth regions)
 │   ├── rh_residual.py             # RHResidualLoss (RH from sampled densities)
-│   └── acceleration.py            # AccelerationLoss (shock detection via acceleration)
+│   ├── acceleration.py            # AccelerationLoss (shock detection via acceleration)
+│   └── regularize_traj.py        # RegularizeTrajLoss (penalize erratic trajectory jumps)
 └── wandb/                 # W&B run logs (gitignored)
 ```
 
@@ -110,6 +111,7 @@ def forward(
 | `pde_residual.py` | `PDEResidualLoss` | PDE conservation in smooth regions |
 | `rh_residual.py` | `RHResidualLoss` | RH residual from sampled region densities |
 | `acceleration.py` | `AccelerationLoss` | Shock detection via high acceleration + missed shock term |
+| `regularize_traj.py` | `RegularizeTrajLoss` | Penalize erratic jumps between consecutive timesteps |
 
 #### CombinedLoss and Presets (`loss.py`)
 ```python
