@@ -16,7 +16,7 @@ from losses.collision import CollisionLoss
 from losses.existence_regularization import ICAnchoringLoss
 from losses.ic import ICLoss
 from losses.mse import MSELoss
-from losses.pde_residual import PDEResidualLoss
+from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
@@ -28,6 +28,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "trajectory": TrajectoryConsistencyLoss,
     "rh_residual": RHResidualLoss,
     "pde_residual": PDEResidualLoss,
+    "pde_shock_residual": PDEShockResidualLoss,
     "boundary": BoundaryLoss,
     "collision": CollisionLoss,
     "ic_anchoring": ICAnchoringLoss,
@@ -293,6 +294,10 @@ def create_loss_from_args(args) -> nn.Module:
         }
         loss_kwargs["rh_residual"] = {
             "dt": args.dt,
+        }
+        loss_kwargs["pde_shock_residual"] = {
+            "dt": args.dt,
+            "dx": args.dx,
         }
 
     return get_loss(args.loss, loss_kwargs=loss_kwargs)

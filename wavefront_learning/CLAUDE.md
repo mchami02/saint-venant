@@ -98,6 +98,7 @@ Individual losses (in `losses/`):
 | `existence_reg` | Anchor trajectories to IC positions |
 | `supervised_trajectory` | Supervised trajectory loss |
 | `pde_residual` | PDE conservation in smooth regions |
+| `pde_shock_residual` | PDE residual on GT, penalizing unpredicted shocks |
 | `rh_residual` | RH residual from region densities |
 
 Presets (in `loss.py`):

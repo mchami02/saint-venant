@@ -23,6 +23,7 @@ This document describes the neural network architectures and loss functions used
      - [ICAnchoringLoss](#icanchoringloss)
      - [SupervisedTrajectoryLoss](#supervisedtrajectoryloss)
      - [PDEResidualLoss](#pderesidualloss)
+     - [PDEShockResidualLoss](#pdeshockresidualloss)
      - [RHResidualLoss](#rhresidualloss)
      - [AccelerationLoss](#accelerationloss)
    - [CombinedLoss](#combinedloss)
@@ -852,6 +853,37 @@ $$\mathcal{L}_{total} = \mathcal{L}_{PDE} + w_{IC} \cdot \mathcal{L}_{IC}$$
 
 ---
 
+#### PDEShockResidualLoss
+
+**Location**: `losses/pde_residual.py`
+
+PDE residual loss computed on the **ground truth** grid. The GT residual is non-zero at actual shocks. Points near predicted discontinuities are masked out, so the loss only penalizes regions where the model **fails** to predict a nearby shock — rewarding correct shock placement.
+
+**Residual computation** (same as PDEResidualLoss):
+$$R_{GT}(t, x) = \frac{\rho_{GT}(t+\Delta t, x) - \rho_{GT}(t-\Delta t, x)}{2\Delta t} + \frac{f(\rho_{GT}(t, x+\Delta x)) - f(\rho_{GT}(t, x-\Delta x))}{2\Delta x}$$
+
+**Shock masking** (based on predicted positions):
+$$\text{mask}(t, x) = \prod_{d=1}^{D} \left[ 1 - \mathbb{1}_{|x - x_d(t)| < \delta} \cdot \mathbb{1}_{e_d(t) > 0.5} \cdot m_d \right]$$
+
+**Loss formula**:
+$$\mathcal{L}_{PDE\text{-}shock} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R_{GT}(t, x)^2 \cdot \text{mask}(t, x)$$
+
+**Interpretation**: The GT has large PDE residuals at its actual shocks. If the model correctly predicts shocks at those locations, they are masked out and don't contribute to the loss. If the model misses a shock, the residual there remains unmasked and drives the loss up.
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dt` | 0.004 | Time step size |
+| `dx` | 0.02 | Spatial step size |
+| `shock_buffer` | 0.05 | Buffer around predicted shocks for masking |
+
+**Required inputs**: `x_coords`, `disc_mask`
+**Required outputs**: `positions`, `existence`
+
+**Components returned**: `{"pde_shock_residual": float, "total": float}`
+
+---
+
 #### RHResidualLoss
 
 **Location**: `losses/rh_residual.py`
@@ -1087,6 +1119,7 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 | ICAnchoringLoss | `losses/existence_regularization.py` | Anchor trajectories to IC positions | All models |
 | SupervisedTrajectoryLoss | `losses/supervised_trajectory.py` | Direct supervision | When GT available |
 | PDEResidualLoss | `losses/pde_residual.py` | Conservation in smooth regions | Grid models |
+| PDEShockResidualLoss | `losses/pde_residual.py` | GT residual penalizing unpredicted shocks | Trajectory models |
 | RHResidualLoss | `losses/rh_residual.py` | RH at shocks (from densities) | Hybrid models |
 | AccelerationLoss | `losses/acceleration.py` | High acceleration = shock | Existence supervision |
 

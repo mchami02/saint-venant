@@ -113,6 +113,93 @@ def create_shock_mask(
     return mask
 
 
+class PDEShockResidualLoss(BaseLoss):
+    """PDE residual loss computed on the ground truth grid.
+
+    Computes drho/dt + df(rho)/dx = 0 on the ground truth density. The residual
+    is non-zero at actual shocks. Points near predicted discontinuities are
+    masked out, so the loss only penalizes regions where the model fails to
+    predict a nearby shock — effectively rewarding the model for correctly
+    locating discontinuities.
+
+    Args:
+        dt: Time step size.
+        dx: Spatial step size.
+        shock_buffer: Buffer distance around predicted shocks to exclude.
+    """
+
+    def __init__(
+        self,
+        dt: float = 0.004,
+        dx: float = 0.02,
+        shock_buffer: float = 0.05,
+    ):
+        super().__init__()
+        self.dt = dt
+        self.dx = dx
+        self.shock_buffer = shock_buffer
+
+    def forward(
+        self,
+        input_dict: dict[str, torch.Tensor],
+        output_dict: dict[str, torch.Tensor],
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Compute PDE residual of the ground truth, masked by predictions.
+
+        Args:
+            input_dict: Must contain:
+                - 'x_coords': (B, 1, nt, nx) spatial coordinates
+                - 'disc_mask': (B, D) validity mask
+            output_dict: Must contain:
+                - 'positions': (B, D, T) predicted shock positions
+                - 'existence': (B, D, T) existence probabilities
+            target: Ground truth grid (B, 1, nt, nx).
+
+        Returns:
+            Tuple of (loss, components_dict) where components_dict
+            contains 'pde_shock_residual' and 'total'.
+        """
+        positions = output_dict["positions"]
+        existence = output_dict["existence"]
+        x_coords = input_dict["x_coords"]
+        disc_mask = input_dict["disc_mask"]
+
+        # Squeeze channel dimension from ground truth
+        gt_density = target.squeeze(1)  # (B, nt, nx)
+
+        # Compute PDE residual on GT (interior points only)
+        residual = compute_pde_residual(gt_density, self.dt, self.dx)
+
+        # Create shock mask for interior points
+        if x_coords.dim() == 4:
+            x_coords_3d = x_coords.squeeze(1)
+        else:
+            x_coords_3d = x_coords
+
+        x_interior = x_coords_3d[:, 1:-1, 1:-1]  # (B, nt-2, nx-2)
+
+        # Mask: 1 where NOT near any predicted shock
+        mask = create_shock_mask(
+            positions[:, :, 1:-1],
+            existence[:, :, 1:-1],
+            x_interior,
+            disc_mask,
+            self.shock_buffer,
+        )
+
+        # Loss = residual where model does NOT predict a shock
+        masked_residual = residual * mask
+        n_valid = mask.sum().clamp(min=1)
+        loss = (masked_residual**2).sum() / n_valid
+
+        components = {
+            "pde_shock_residual": loss.item(),
+            "total": loss.item(),
+        }
+        return loss, components
+
+
 class PDEResidualLoss(BaseLoss):
     """PDE residual loss for conservation law in smooth regions.
 

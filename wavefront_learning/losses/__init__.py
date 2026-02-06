@@ -20,6 +20,7 @@ Trajectory Losses:
 
 Physics Losses:
 - PDEResidualLoss: PDE conservation in smooth regions
+- PDEShockResidualLoss: PDE residual on GT, penalizing unpredicted shocks
 - RHResidualLoss: Rankine-Hugoniot residual from sampled densities
 
 Utilities:
@@ -34,7 +35,12 @@ from .existence_regularization import ICAnchoringLoss
 from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_derivative
 from .ic import ICLoss
 from .mse import MSELoss
-from .pde_residual import PDEResidualLoss, compute_pde_residual, create_shock_mask
+from .pde_residual import (
+    PDEResidualLoss,
+    PDEShockResidualLoss,
+    compute_pde_residual,
+    create_shock_mask,
+)
 from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .supervised_trajectory import SupervisedTrajectoryLoss
@@ -56,6 +62,7 @@ __all__ = [
     "RegularizeTrajLoss",
     # Physics losses
     "PDEResidualLoss",
+    "PDEShockResidualLoss",
     "RHResidualLoss",
     # Utilities
     "greenshields_flux",

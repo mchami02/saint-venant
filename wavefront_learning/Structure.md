@@ -40,7 +40,7 @@ wavefront_learning/
 │   ├── collision.py               # CollisionLoss (shock merging)
 │   ├── existence_regularization.py # ICAnchoringLoss
 │   ├── supervised_trajectory.py   # SupervisedTrajectoryLoss (when GT available)
-│   ├── pde_residual.py            # PDEResidualLoss (conservation in smooth regions)
+│   ├── pde_residual.py            # PDEResidualLoss + PDEShockResidualLoss
 │   ├── rh_residual.py             # RHResidualLoss (RH from sampled densities)
 │   ├── acceleration.py            # AccelerationLoss (shock detection via acceleration)
 │   └── regularize_traj.py        # RegularizeTrajLoss (penalize erratic trajectory jumps)
@@ -108,7 +108,7 @@ def forward(
 | `collision.py` | `CollisionLoss` | Penalize colliding shocks |
 | `existence_regularization.py` | `ICAnchoringLoss` | Anchor trajectories to IC positions |
 | `supervised_trajectory.py` | `SupervisedTrajectoryLoss` | Supervised trajectory (when GT available) |
-| `pde_residual.py` | `PDEResidualLoss` | PDE conservation in smooth regions |
+| `pde_residual.py` | `PDEResidualLoss`, `PDEShockResidualLoss` | PDE conservation in smooth regions; GT residual penalizing unpredicted shocks |
 | `rh_residual.py` | `RHResidualLoss` | RH residual from sampled region densities |
 | `acceleration.py` | `AccelerationLoss` | Shock detection via high acceleration + missed shock term |
 | `regularize_traj.py` | `RegularizeTrajLoss` | Penalize erratic jumps between consecutive timesteps |
