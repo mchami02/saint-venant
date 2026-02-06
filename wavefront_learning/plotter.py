@@ -12,10 +12,12 @@ Each plot function signature:
 from plotting import (
     plot_existence_wandb,
     plot_grid_with_acceleration_wandb,
-    plot_grid_with_trajectory_wandb,
+    plot_grid_with_trajectory_existence_wandb,
     plot_ground_truth_wandb,
+    plot_gt_traj,
     plot_mse_error_wandb,
-    plot_prediction_with_trajectory_wandb,
+    plot_pred_traj,
+    plot_prediction_with_trajectory_existence_wandb,
     plot_region_weights_wandb,
     plot_trajectory_vs_analytical_wandb,
 )
@@ -24,28 +26,34 @@ from plotting import (
 # Each function signature: fn(traj_data, grid_config, logger, epoch, mode) -> None
 PLOTS: dict[str, callable] = {
     "ground_truth": plot_ground_truth_wandb,
-    "grid_with_trajectory": plot_grid_with_trajectory_wandb,
+    "grid_with_trajectory_existence": plot_grid_with_trajectory_existence_wandb,
     "grid_with_acceleration": plot_grid_with_acceleration_wandb,
     "trajectory_vs_analytical": plot_trajectory_vs_analytical_wandb,
     "existence": plot_existence_wandb,
-    "prediction_with_trajectory": plot_prediction_with_trajectory_wandb,
+    "prediction_with_trajectory_existence": plot_prediction_with_trajectory_existence_wandb,
     "mse_error": plot_mse_error_wandb,
     "region_weights": plot_region_weights_wandb,
+    "gt_traj": plot_gt_traj,
+    "pred_traj": plot_pred_traj,
 }
 
 # Presets for common configurations
 # Each preset lists which plots to generate
 PLOT_PRESETS: dict[str, list[str]] = {
     "shock_net": [
-        "grid_with_trajectory",  # Uses ground truth grid as background
+        "grid_with_trajectory_existence",  # Uses ground truth grid as background
         "grid_with_acceleration",  # Shows acceleration magnitude (shock locations)
     ],
     "hybrid": [
-        "prediction_with_trajectory",  # Uses predicted grid as background
+        "prediction_with_trajectory_existence",  # Uses predicted grid as background
         "mse_error",
-        "trajectory_vs_analytical",
         "existence",
         "region_weights",
+    ],
+    "traj_net": [
+        "gt_traj",  # Uses predicted grid as background
+        "pred_traj",
+        "mse_error",
     ],
 }
 

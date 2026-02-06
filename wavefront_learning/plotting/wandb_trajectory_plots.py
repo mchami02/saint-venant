@@ -217,7 +217,7 @@ def plot_trajectory_wandb(
     plt.close(fig)
 
 
-def plot_grid_with_trajectory_wandb(
+def plot_grid_with_trajectory_existence_wandb(
     traj_data: dict,
     grid_config: dict,
     logger,
@@ -422,6 +422,80 @@ def plot_existence_wandb(
         plt.colorbar(im, ax=ax, label="P(exists)")
         plt.tight_layout()
         _log_figure(logger, f"{mode}/existence_sample_{b + 1}", fig, epoch)
+        plt.close(fig)
+
+
+def plot_gt_traj(
+    traj_data: dict,
+    grid_config: dict,
+    logger,
+    epoch: int | None,
+    mode: str = "val",
+) -> None:
+    """Plot ground truth grid with predicted trajectory overlay (no existence).
+
+    Like plot_grid_with_trajectory_existence_wandb but plots full trajectories
+    without using existence probabilities to modulate alpha.
+
+    Args:
+        traj_data: Dict containing grids, positions, masks, times.
+        grid_config: Dict with {nx, nt, dx, dt}.
+        logger: WandbLogger instance.
+        epoch: Current epoch.
+        mode: Mode string for logging prefix.
+    """
+    grids = traj_data["grids"]
+    positions = traj_data["positions"]
+    masks = traj_data["masks"]
+    times = traj_data["times"]
+
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    if times.ndim > 1:
+        times = times[0]
+
+    B = grids.shape[0]
+    for b in range(min(B, 3)):
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        # Background: ground truth heatmap
+        im = ax.imshow(
+            grids[b],
+            extent=extent,
+            aspect="auto",
+            origin="lower",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+            alpha=0.8,
+        )
+        plt.colorbar(im, ax=ax, label="Density")
+
+        # Overlay: predicted trajectories (no existence modulation)
+        n_disc = int(masks[b].sum())
+        colors = _get_colors(n_disc)
+
+        for d in range(n_disc):
+            ax.plot(
+                positions[b, d],  # X = Space
+                times,  # Y = Time
+                color=colors[d],
+                linewidth=2.5,
+            )
+
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(f"GT Grid + Predicted Trajectories (Sample {b + 1})")
+        ax.set_xlim(0, nx * dx)
+        ax.set_ylim(0, nt * dt)
+        plt.tight_layout()
+        _log_figure(logger, f"{mode}/gt_traj_sample_{b + 1}", fig, epoch)
         plt.close(fig)
 
 

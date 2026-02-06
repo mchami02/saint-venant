@@ -10,6 +10,7 @@ This document describes the neural network architectures and loss functions used
 2. [Main Models](#main-models)
    - [ShockTrajectoryNet](#shocktrajectorynet)
    - [HybridDeepONet](#hybriddeepopnet)
+   - [TrajDeepONet](#trajdeeponet)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -19,7 +20,7 @@ This document describes the neural network architectures and loss functions used
      - [TrajectoryConsistencyLoss](#trajectoryconsistencyloss)
      - [BoundaryLoss](#boundaryloss)
      - [CollisionLoss](#collisionloss)
-     - [ExistenceRegularizationLoss](#existenceregularizationloss)
+     - [ICAnchoringLoss](#icanchoringloss)
      - [SupervisedTrajectoryLoss](#supervisedtrajectoryloss)
      - [PDEResidualLoss](#pderesidualloss)
      - [RHResidualLoss](#rhresidualloss)
@@ -40,6 +41,7 @@ models/
 ├── __init__.py              # Exports main models and BaseWavefrontModel
 ├── shock_trajectory_net.py  # ShockTrajectoryNet + build_shock_net()
 ├── hybrid_deeponet.py       # HybridDeepONet + build_hybrid_deeponet()
+├── traj_deeponet.py         # TrajDeepONet + build_traj_deeponet()
 └── base/                    # Reusable building blocks
     ├── __init__.py          # Re-exports all base components
     ├── base_model.py        # BaseWavefrontModel (abstract base class)
@@ -91,6 +93,7 @@ base/__init__.py      → imports all above
      ↓
 shock_trajectory_net.py  → imports from base
 hybrid_deeponet.py       → imports from base
+traj_deeponet.py         → imports from base
      ↓
 models/__init__.py       → imports main models
 ```
@@ -435,6 +438,160 @@ where $\rho_k$ is the density prediction from region trunk $k$.
 
 ---
 
+### TrajDeepONet
+
+**Location**: `models/traj_deeponet.py`
+
+Trajectory-conditioned DeepONet that predicts shock trajectories and uses them to condition a single density trunk. Key simplifications over HybridDeepONet:
+- **No existence head**: all input discontinuities persist through time
+- **Single trunk**: one network conditioned on boundary positions instead of K separate region trunks
+- **No GridAssembler**: the trunk directly outputs density
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          TrajDeepONet                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  Discontinuities (B, D, 3)     t_coords (B, 1, nt, nx)              │
+│         │                      x_coords (B, 1, nt, nx)              │
+│         ▼                              │                             │
+│  ┌──────────────────┐                  │                             │
+│  │DiscontinuityEncoder│                │                             │
+│  │     (Branch)       │                │                             │
+│  └──────────────────┘                  │                             │
+│         │                              │                             │
+│         ├───── per-disc (B,D,h) ───┐   │                             │
+│         │                          │   │                             │
+│         ▼ pooled (B,h)             │   │                             │
+│         │                          │   │                             │
+│         │    ┌─────────────┐       │   │                             │
+│         │    │ TimeEncoder │       │   │                             │
+│         │    └─────────────┘       │   │                             │
+│         │           │              │   │                             │
+│         │           ▼              │   │                             │
+│         │    ┌───────────────┐     │   │                             │
+│         │    │PositionDecoder│◄────┘   │                             │
+│         │    │ (no existence)│         │                             │
+│         │    └───────────────┘         │                             │
+│         │           │                  │                             │
+│         │    positions (B,D,T)         │                             │
+│         │           │                  │                             │
+│         │           ▼                  │                             │
+│         │    ┌────────────────┐        │                             │
+│         │    │compute_boundaries│◄──────┘                             │
+│         │    └────────────────┘                                      │
+│         │      │            │                                        │
+│         │   x_left       x_right                                     │
+│         │   (B,nt,nx)    (B,nt,nx)                                   │
+│         │      │            │                                        │
+│         ▼      ▼            ▼                                        │
+│  ┌──────────────────────────────────┐                                │
+│  │   BoundaryConditionedTrunk      │                                │
+│  │   Input: branch + (t, x,       │                                │
+│  │          x_left, x_right)       │                                │
+│  └──────────────────────────────────┘                                │
+│                    │                                                 │
+│                    ▼                                                 │
+│             output_grid (B, 1, nt, nx)                               │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Sub-Components
+
+##### PositionDecoder
+
+**Location**: `models/traj_deeponet.py`
+
+Simplified trajectory decoder that only predicts positions (no existence head).
+
+**Architecture**:
+```
+branch_emb: (B, D, branch_dim)
+trunk_emb: (B, T, trunk_dim)
+       │
+       ▼
+Bilinear Fusion: W_bilinear(branch ⊗ trunk) → (B, D, T, hidden_dim)
+       +
+Skip Paths: Linear(branch) + Linear(trunk)
+       │
+       ▼
+LayerNorm → Residual Blocks × num_res_blocks
+       │
+       ▼
+Position Head: Linear → GELU → Linear → clamp[0, 1]
+       │
+       ▼
+positions: (B, D, T)
+```
+
+##### compute_boundaries
+
+**Location**: `models/traj_deeponet.py`
+
+Computes left and right boundary discontinuity positions for each grid point.
+
+For each spatial point $x$ at time $t$ with $D$ discontinuities at positions $\{x_d(t)\}$:
+
+$$x_{left}(t, x) = \max_{d : x_d(t) \leq x,\ m_d = 1} x_d(t) \quad \text{(or 0 if none)}$$
+
+$$x_{right}(t, x) = \min_{d : x_d(t) > x,\ m_d = 1} x_d(t) \quad \text{(or 1 if none)}$$
+
+**Input/Output**:
+- Input: `positions` $(B, D, n_t)$, `x_coords` $(B, n_t, n_x)$, `disc_mask` $(B, D)$
+- Output: `left_bound` $(B, n_t, n_x)$, `right_bound` $(B, n_t, n_x)$
+
+##### BoundaryConditionedTrunk
+
+**Location**: `models/traj_deeponet.py`
+
+Single trunk that predicts density conditioned on boundary positions.
+
+**Architecture**:
+```
+Inputs: t (B,nt,nx), x (B,nt,nx), x_left (B,nt,nx), x_right (B,nt,nx)
+       │
+       ▼
+Fourier encode (shared spatial encoder for x, x_left, x_right):
+  γ_t(t) with L_t frequencies
+  γ_x(x), γ_x(x_left), γ_x(x_right) with L_x frequencies
+       │
+       ▼
+Concatenate: [γ_t, γ_x, γ_x_left, γ_x_right]
+       │
+       ▼
+Coord MLP: [Linear + GELU + LayerNorm] × num_layers → coord_emb
+       │
+       └──────────────────┐
+                          ▼
+branch_emb (B, h) ──► Bilinear Fusion + Skip Paths
+                          │
+                          ▼
+                    LayerNorm → Residual Blocks × num_res_blocks
+                          │
+                          ▼
+                    Density Head: Linear → GELU → Linear → Sigmoid
+                          │
+                          ▼
+                    Output: (B, nt, nx) ∈ [0, 1]
+```
+
+#### Input/Output Format
+
+**Input** (dictionary):
+- `discontinuities`: $(B, D, 3)$ - initial shock features $[x_0, \rho_L, \rho_R]$
+- `disc_mask`: $(B, D)$ - validity mask
+- `t_coords`: $(B, 1, n_t, n_x)$ - query times
+- `x_coords`: $(B, 1, n_t, n_x)$ - query positions
+
+**Output** (dictionary):
+- `positions`: $(B, D, T)$ - shock positions (all discontinuities persist)
+- `output_grid`: $(B, 1, n_t, n_x)$ - predicted density grid
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -599,32 +756,36 @@ where $\mathbb{1}_{colliding}(x_i, x_j) = 1$ if $|x_i - x_j| < \epsilon_{collisi
 
 ---
 
-#### ExistenceRegularizationLoss
+#### ICAnchoringLoss
 
 **Location**: `losses/existence_regularization.py`
 
-IC anchoring constraint that enforces predicted trajectories to start at the correct IC discontinuity positions when existence at t=0 is high.
+IC anchoring constraint that enforces predicted trajectories to start at the correct IC discontinuity positions. Optionally weighted by existence probability when the model predicts existence.
 
-**Formula**:
+**Formula** (with existence):
 $$\mathcal{L}_{anchor} = \frac{1}{N} \sum_{b,d} e^{(b,d)}_0 \cdot \left( x^{(b,d)}_{pred,0} - x^{(b,d)}_{IC} \right)^2$$
 
+**Formula** (without existence):
+$$\mathcal{L}_{anchor} = \frac{1}{N} \sum_{b,d} \left( x^{(b,d)}_{pred,0} - x^{(b,d)}_{IC} \right)^2$$
+
 where:
-- $e^{(b,d)}_0$ = existence probability at t=0 for discontinuity d in batch b
+- $e^{(b,d)}_0$ = existence probability at t=0 for discontinuity d in batch b (if available)
 - $x^{(b,d)}_{pred,0}$ = predicted position at t=0
 - $x^{(b,d)}_{IC}$ = IC discontinuity position from `discontinuities[:, :, 0]`
 - N = number of valid discontinuities (sum of `disc_mask`)
 
 **Interpretation**:
-- If existence at t=0 is high (~1), the position error is fully penalized
-- If existence at t=0 is low (~0), position error is ignored
-- This creates a soft constraint: "if you claim it exists, place it correctly"
+- Without existence: all valid discontinuities are penalized equally for position errors at t=0
+- With existence at t=0 high (~1): full penalty for position errors
+- With existence at t=0 low (~0): position errors are ignored
 
 **Configuration**: No parameters.
 
 **Required inputs**: `discontinuities`, `disc_mask`
-**Required outputs**: `positions`, `existence`
+**Required outputs**: `positions`
+**Optional outputs**: `existence` (weights loss by existence probability at t=0)
 
-**Components returned**: `{"existence_reg": float}`
+**Components returned**: `{"ic_anchoring": float}`
 
 ---
 
@@ -914,6 +1075,7 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 |-----------|-----------|-----------|-------------|
 | ShockTrajectoryNet | Discontinuities $(B, D, 3)$ | Positions, Existence $(B, D, T)$ | Pure trajectory prediction |
 | HybridDeepONet | Discontinuities + coordinates | Trajectories + Full grid | Combined trajectory + solution |
+| TrajDeepONet | Discontinuities + coordinates | Positions + Full grid | Boundary-conditioned single trunk |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
@@ -922,7 +1084,7 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 | TrajectoryConsistencyLoss | `losses/trajectory_consistency.py` | Analytical RH trajectories | Trajectory models |
 | BoundaryLoss | `losses/boundary.py` | Domain constraints | All models |
 | CollisionLoss | `losses/collision.py` | Shock merging | Multi-shock models |
-| ExistenceRegularizationLoss | `losses/existence_regularization.py` | Prevent trivial solutions | All models |
+| ICAnchoringLoss | `losses/existence_regularization.py` | Anchor trajectories to IC positions | All models |
 | SupervisedTrajectoryLoss | `losses/supervised_trajectory.py` | Direct supervision | When GT available |
 | PDEResidualLoss | `losses/pde_residual.py` | Conservation in smooth regions | Grid models |
 | RHResidualLoss | `losses/rh_residual.py` | RH at shocks (from densities) | Hybrid models |

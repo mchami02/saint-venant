@@ -1,6 +1,6 @@
 """Boundary loss for shock trajectories.
 
-Penalizes existence of shocks outside the spatial domain.
+Penalizes predicted positions outside the spatial domain.
 """
 
 import torch
@@ -9,10 +9,10 @@ from .base import BaseLoss
 
 
 class BoundaryLoss(BaseLoss):
-    """Loss penalizing existence of shocks outside the domain.
+    """Loss penalizing predicted positions outside the domain.
 
-    When a shock exits the domain [domain_min, domain_max], its existence
-    probability should be 0.
+    Applies a quadratic penalty on how far positions exceed the domain
+    boundaries [domain_min, domain_max], regardless of existence.
 
     Args:
         domain_min: Minimum domain boundary (default 0.0).
@@ -37,24 +37,18 @@ class BoundaryLoss(BaseLoss):
                 - 'disc_mask': (B, D) validity mask
             output_dict: Must contain:
                 - 'positions': (B, D, T) predicted positions
-                - 'existence': (B, D, T) existence probabilities
             target: Target tensor (unused).
 
         Returns:
             Tuple of (loss tensor, components dict with 'boundary' key).
         """
         predicted_positions = output_dict["positions"]
-        predicted_existence = output_dict["existence"]
         mask = input_dict["disc_mask"]
 
-        # Check which positions are outside the domain
-        outside = (predicted_positions < self.domain_min) | (
-            predicted_positions > self.domain_max
-        )
-        outside = outside.float()  # (B, D, T)
-
-        # Penalize existence when outside
-        penalty = outside * (predicted_existence**2)
+        # Quadratic penalty for how far outside the domain
+        below = torch.clamp(self.domain_min - predicted_positions, min=0.0)
+        above = torch.clamp(predicted_positions - self.domain_max, min=0.0)
+        penalty = below**2 + above**2  # (B, D, T)
 
         # Apply mask
         mask_exp = mask.unsqueeze(-1)  # (B, D, 1)

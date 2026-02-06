@@ -13,7 +13,7 @@ Trajectory Losses:
 - TrajectoryConsistencyLoss: Enforces Rankine-Hugoniot trajectory consistency
 - BoundaryLoss: Penalizes shocks outside domain
 - CollisionLoss: Penalizes colliding shocks
-- ExistenceRegularizationLoss: Prevents existence collapse
+- ICAnchoringLoss: Anchors trajectories to IC positions
 - SupervisedTrajectoryLoss: Supervised trajectory loss when GT available
 - AccelerationLoss: Penalizes low existence where GT has high acceleration
 
@@ -29,7 +29,7 @@ from .acceleration import AccelerationLoss, compute_acceleration
 from .base import BaseLoss
 from .boundary import BoundaryLoss
 from .collision import CollisionLoss
-from .existence_regularization import ExistenceRegularizationLoss
+from .existence_regularization import ICAnchoringLoss
 from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_derivative
 from .ic import ICLoss
 from .mse import MSELoss
@@ -48,7 +48,7 @@ __all__ = [
     "TrajectoryConsistencyLoss",
     "BoundaryLoss",
     "CollisionLoss",
-    "ExistenceRegularizationLoss",
+    "ICAnchoringLoss",
     "SupervisedTrajectoryLoss",
     "AccelerationLoss",
     # Physics losses

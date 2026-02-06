@@ -27,7 +27,8 @@ wavefront_learning/
 │   ├── base.py                    # BaseWavefrontModel abstract class
 │   ├── shock_trajectory_net.py    # ShockTrajectoryNet (DeepONet-like)
 │   ├── region_trunk.py            # SpaceTimeEncoder, RegionTrunk, RegionTrunkSet
-│   └── hybrid_deeponet.py         # HybridDeepONet (trajectory + grid prediction)
+│   ├── hybrid_deeponet.py         # HybridDeepONet (trajectory + grid prediction)
+│   └── traj_deeponet.py           # TrajDeepONet (trajectory-conditioned single trunk)
 ├── losses/
 │   ├── __init__.py                # Package exports all loss classes
 │   ├── base.py                    # BaseLoss abstract class (unified interface)
@@ -37,7 +38,7 @@ wavefront_learning/
 │   ├── trajectory_consistency.py  # TrajectoryConsistencyLoss (RH trajectory)
 │   ├── boundary.py                # BoundaryLoss (shocks outside domain)
 │   ├── collision.py               # CollisionLoss (shock merging)
-│   ├── existence_regularization.py # ExistenceRegularizationLoss
+│   ├── existence_regularization.py # ICAnchoringLoss
 │   ├── supervised_trajectory.py   # SupervisedTrajectoryLoss (when GT available)
 │   ├── pde_residual.py            # PDEResidualLoss (conservation in smooth regions)
 │   ├── rh_residual.py             # RHResidualLoss (RH from sampled densities)
@@ -70,6 +71,13 @@ wavefront_learning/
   - Grid Assembly: Soft region assignment using sigmoid boundaries
   - Output: `{positions, existence, output_grid, region_densities, region_weights}`
 
+- **TrajDeepONet** (`models/traj_deeponet.py`): Trajectory-conditioned single trunk
+  - Branch: DiscontinuityEncoder
+  - Trajectory: TimeEncoder + PositionDecoder (no existence head)
+  - Single BoundaryConditionedTrunk: takes (t, x, x_left, x_right) + branch
+  - No GridAssembler: trunk directly outputs density
+  - Output: `{positions, output_grid}`
+
 ### Model Components
 - **SpaceTimeEncoder** (`models/region_trunk.py`): Encodes (t, x) coordinates using Fourier features
 - **RegionTrunk** (`models/region_trunk.py`): Predicts density in a specific region
@@ -97,7 +105,7 @@ def forward(
 | `trajectory_consistency.py` | `TrajectoryConsistencyLoss` | Match predicted to analytical RH trajectory |
 | `boundary.py` | `BoundaryLoss` | Penalize shocks outside domain |
 | `collision.py` | `CollisionLoss` | Penalize colliding shocks |
-| `existence_regularization.py` | `ExistenceRegularizationLoss` | Prevent existence collapse |
+| `existence_regularization.py` | `ICAnchoringLoss` | Anchor trajectories to IC positions |
 | `supervised_trajectory.py` | `SupervisedTrajectoryLoss` | Supervised trajectory (when GT available) |
 | `pde_residual.py` | `PDEResidualLoss` | PDE conservation in smooth regions |
 | `rh_residual.py` | `RHResidualLoss` | RH residual from sampled region densities |

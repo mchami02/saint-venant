@@ -17,8 +17,7 @@ from loss import LOSS_PRESETS, LOSSES, get_loss
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
 from plotter import PLOT_PRESETS, plot_wandb
-from plotting import plot_comparison_wandb
-from test import run_profiler, run_sanity_check, test_model
+from test import collect_samples, run_profiler, run_sanity_check, test_model
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -153,7 +152,7 @@ def train_epoch(
     train_loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
-) -> tuple[float, dict[str, float], dict[str, float] | None]:
+) -> tuple[float, dict[str, float], dict[str, float] | None, dict[str, np.ndarray]]:
     """Train for one epoch.
 
     Args:
@@ -163,8 +162,9 @@ def train_epoch(
         optimizer: Optimizer.
 
     Returns:
-        Tuple of (average_loss, loss_components, grid_metrics | None).
+        Tuple of (average_loss, loss_components, grid_metrics | None, samples).
         grid_metrics is None for trajectory-only models (ShockNet).
+        samples is a dict with all model outputs, input context, and target.
     """
     model.train()
     total_loss = 0.0
@@ -199,14 +199,17 @@ def train_epoch(
         all_targets_tensor = torch.cat(all_targets, dim=0)
         grid_metrics = compute_metrics(all_preds_tensor, all_targets_tensor)
 
-    return avg_loss, avg_loss_components, grid_metrics
+    # Collect samples from last batch for plotting
+    samples = collect_samples(pred, batch_input, batch_target)
+
+    return avg_loss, avg_loss_components, grid_metrics, samples
 
 
 def validate_epoch(
     model: nn.Module,
     val_loader: DataLoader,
     loss_fn: nn.Module,
-) -> tuple[float, dict[str, float], dict[str, float] | None]:
+) -> tuple[float, dict[str, float], dict[str, float] | None, dict[str, np.ndarray]]:
     """Validate for one epoch.
 
     Args:
@@ -215,8 +218,9 @@ def validate_epoch(
         loss_fn: Loss function.
 
     Returns:
-        Tuple of (average_loss, loss_components, grid_metrics | None).
+        Tuple of (average_loss, loss_components, grid_metrics | None, samples).
         grid_metrics is None for trajectory-only models (ShockNet).
+        samples is a dict with all model outputs, input context, and target.
     """
     model.eval()
     total_loss = 0.0
@@ -265,149 +269,10 @@ def validate_epoch(
         all_targets_tensor = torch.cat(all_targets, dim=0)
         grid_metrics = compute_metrics(all_preds_tensor, all_targets_tensor)
 
-    return avg_loss, avg_loss_components, grid_metrics
+    # Collect samples from last batch for plotting
+    samples = collect_samples(pred, batch_input, batch_target)
 
-
-def sample_predictions(
-    model: nn.Module,
-    val_loader: DataLoader,
-    num_samples: int = 3,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Sample predictions from validation set for visualization.
-
-    Args:
-        model: Trained model.
-        val_loader: Validation data loader.
-        num_samples: Number of samples to collect.
-
-    Returns:
-        Tuple of (ground_truths, predictions) as numpy arrays.
-    """
-    model.eval()
-    gts, preds = [], []
-
-    with torch.no_grad():
-        for batch_input, batch_target in val_loader:
-            if isinstance(batch_input, dict):
-                batch_input = {
-                    k: v.to(device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch_input.items()
-                }
-            else:
-                batch_input = batch_input.to(device)
-
-            pred = model(batch_input)
-
-            # Skip if model returns dict (trajectory model)
-            if isinstance(pred, dict):
-                return None, None
-
-            for i in range(min(num_samples - len(gts), batch_target.shape[0])):
-                gts.append(batch_target[i].squeeze(0).cpu().numpy())
-                preds.append(pred[i].squeeze(0).cpu().numpy())
-
-            if len(gts) >= num_samples:
-                break
-
-    return np.array(gts), np.array(preds)
-
-
-def sample_trajectory_predictions(
-    model: nn.Module,
-    val_loader: DataLoader,
-    num_samples: int = 3,
-) -> dict[str, np.ndarray] | None:
-    """Sample trajectory predictions from validation set for visualization.
-
-    Args:
-        model: Trained trajectory model.
-        val_loader: Validation data loader.
-        num_samples: Number of samples to collect.
-
-    Returns:
-        Dict with 'positions', 'existence', 'discontinuities', 'masks', 'times', 'grids'
-        as numpy arrays, or None if not a trajectory model.
-        For HybridDeepONet, also includes 'output_grid', 'region_densities', 'region_weights'.
-    """
-    model.eval()
-    positions_list = []
-    existence_list = []
-    disc_list = []
-    mask_list = []
-    grids_list = []
-    output_grid_list = []
-    region_densities_list = []
-    region_weights_list = []
-    times = None
-    is_hybrid = False
-
-    with torch.no_grad():
-        for batch_input, batch_target in val_loader:
-            if isinstance(batch_input, dict):
-                batch_input_device = {
-                    k: v.to(device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch_input.items()
-                }
-            else:
-                return None  # Not a trajectory model
-
-            pred = model(batch_input_device)
-
-            # Check if this is a trajectory model
-            if not isinstance(pred, dict) or "positions" not in pred:
-                return None
-
-            # Check if this is a HybridDeepONet
-            if "output_grid" in pred:
-                is_hybrid = True
-
-            # Get times from input
-            if times is None:
-                t_coords = batch_input["t_coords"]  # (B, 1, nt, nx)
-                times = t_coords[0, 0, :, 0].cpu().numpy()  # (nt,)
-
-            batch_size = pred["positions"].shape[0]
-            for i in range(min(num_samples - len(positions_list), batch_size)):
-                positions_list.append(pred["positions"][i].cpu().numpy())
-                existence_list.append(pred["existence"][i].cpu().numpy())
-                disc_list.append(batch_input["discontinuities"][i].cpu().numpy())
-                mask_list.append(batch_input["disc_mask"][i].cpu().numpy())
-                # Store the ground truth grid for overlay plotting
-                grids_list.append(batch_target[i].squeeze(0).cpu().numpy())
-
-                # HybridDeepONet specific outputs
-                if is_hybrid:
-                    output_grid_list.append(
-                        pred["output_grid"][i].squeeze(0).cpu().numpy()
-                    )
-                    region_densities_list.append(
-                        pred["region_densities"][i].cpu().numpy()
-                    )
-                    region_weights_list.append(pred["region_weights"][i].cpu().numpy())
-
-            if len(positions_list) >= num_samples:
-                break
-
-    if not positions_list:
-        return None
-
-    result = {
-        "positions": np.array(positions_list),
-        "existence": np.array(existence_list),
-        "discontinuities": np.array(disc_list),
-        "masks": np.array(mask_list),
-        "times": times,
-        "grids": np.array(grids_list),
-    }
-
-    # Add HybridDeepONet specific outputs
-    if is_hybrid:
-        result["output_grid"] = np.array(output_grid_list)
-        result["region_densities"] = np.array(region_densities_list)
-        result["region_weights"] = np.array(region_weights_list)
-        result["is_hybrid"] = True
-
-    return result
+    return avg_loss, avg_loss_components, grid_metrics, samples
 
 
 def train_model(
@@ -453,12 +318,12 @@ def train_model(
 
     for epoch in progress_bar:
         # Train
-        train_loss, train_loss_components, train_metrics = train_epoch(
+        train_loss, train_loss_components, train_metrics, train_samples = train_epoch(
             model, train_loader, loss_fn, optimizer
         )
 
         # Validate
-        val_loss, val_loss_components, val_metrics = validate_epoch(
+        val_loss, val_loss_components, val_metrics, val_samples = validate_epoch(
             model, val_loader, loss_fn
         )
 
@@ -476,59 +341,14 @@ def train_model(
 
         # Plot every 5 epochs
         if (epoch + 1) % 5 == 0:
-            # Try trajectory predictions first (for ShockNet-like models)
-            # Plot training samples
-            traj_data_train = sample_trajectory_predictions(
-                model, train_loader, num_samples=2
+            plot_wandb(
+                train_samples, grid_config, logger, epoch + 1,
+                mode="train", preset=args.plot,
             )
-            if traj_data_train is not None:
-                plot_wandb(
-                    traj_data_train,
-                    grid_config,
-                    logger,
-                    epoch + 1,
-                    mode="train",
-                    preset=args.plot,
-                )
-
-            # Plot validation samples
-            traj_data = sample_trajectory_predictions(
-                model, val_loader, num_samples=2
+            plot_wandb(
+                val_samples, grid_config, logger, epoch + 1,
+                mode="val", preset=args.plot,
             )
-            if traj_data is not None:
-                plot_wandb(
-                    traj_data,
-                    grid_config,
-                    logger,
-                    epoch + 1,
-                    mode="val",
-                    preset=args.plot,
-                )
-            else:
-                # Standard grid-based models - plot both train and val
-                gts_train, preds_train = sample_predictions(
-                    model, train_loader, num_samples=2
-                )
-                if gts_train is not None:
-                    plot_comparison_wandb(
-                        gts_train,
-                        preds_train,
-                        grid_config,
-                        logger,
-                        epoch + 1,
-                        mode="train",
-                    )
-
-                gts, preds = sample_predictions(model, val_loader, num_samples=2)
-                if gts is not None:
-                    plot_comparison_wandb(
-                        gts,
-                        preds,
-                        grid_config,
-                        logger,
-                        epoch + 1,
-                        mode="val",
-                    )
 
         # Check for improvement
         if val_loss < best_val_loss * 0.99:  # 1% improvement threshold

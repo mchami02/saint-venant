@@ -16,12 +16,65 @@ from logger import WandbLogger, init_logger
 from loss import get_loss
 from metrics import compute_metrics
 from plotter import PLOT_PRESETS, plot_wandb
-from plotting import plot_comparison_wandb
 from torch.profiler import ProfilerActivity, profile, schedule
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+
+
+def collect_samples(
+    pred: dict | torch.Tensor,
+    batch_input: dict | torch.Tensor,
+    batch_target: torch.Tensor,
+    num_samples: int = 2,
+) -> dict[str, np.ndarray]:
+    """Collect sample predictions from a batch for plotting.
+
+    Iterates through the model output dict to automatically collect all outputs.
+
+    Args:
+        pred: Model prediction (dict or tensor).
+        batch_input: Input batch (dict or tensor).
+        batch_target: Target batch tensor.
+        num_samples: Number of samples to collect.
+
+    Returns:
+        Dict with all model outputs, input context, and target as numpy arrays.
+    """
+    samples = {}
+
+    if isinstance(pred, dict):
+        for k, v in pred.items():
+            if isinstance(v, torch.Tensor):
+                arr = v[:num_samples].detach().cpu().numpy()
+                # Squeeze channel dim for grid outputs: (B, 1, H, W) -> (B, H, W)
+                if arr.ndim == 4 and arr.shape[1] == 1:
+                    arr = arr.squeeze(1)
+                samples[k] = arr
+
+    # Add input context for trajectory plots
+    if isinstance(batch_input, dict):
+        if "discontinuities" in batch_input:
+            samples["discontinuities"] = (
+                batch_input["discontinuities"][:num_samples].detach().cpu().numpy()
+            )
+        if "disc_mask" in batch_input:
+            samples["masks"] = (
+                batch_input["disc_mask"][:num_samples].detach().cpu().numpy()
+            )
+        if "t_coords" in batch_input:
+            samples["times"] = (
+                batch_input["t_coords"][0, 0, :, 0].detach().cpu().numpy()
+            )
+
+    # Add target (ground truth grid)
+    grids = batch_target[:num_samples].detach().cpu().numpy()
+    if grids.ndim == 4 and grids.shape[1] == 1:
+        grids = grids.squeeze(1)
+    samples["grids"] = grids
+
+    return samples
 
 
 def test_model(
@@ -54,32 +107,10 @@ def test_model(
         grid_config = {"nx": 50, "nt": 250, "dx": 0.02, "dt": 0.004}
 
     model.eval()
-
-    all_preds = []
-    all_targets = []
     batch_metrics = []
-    is_trajectory_model = False
-    is_hybrid_model = False
-
-    # For trajectory models: collect data for plotting
-    traj_positions = []
-    traj_existence = []
-    traj_discontinuities = []
-    traj_masks = []
-    traj_grids = []
-    traj_times = None
-
-    # For HybridDeepONet: additional outputs
-    hybrid_output_grids = []
-    hybrid_region_densities = []
-    hybrid_region_weights = []
 
     with torch.no_grad():
         for batch_input, batch_target in tqdm(test_loader, desc="Testing"):
-            # Store original batch_input for trajectory data
-            batch_input_orig = batch_input
-            batch_target_orig = batch_target
-
             # Move to device
             if isinstance(batch_input, dict):
                 batch_input = {
@@ -93,59 +124,17 @@ def test_model(
             # Forward pass
             pred = model(batch_input)
 
-            # Handle trajectory models (dict output)
+            # Compute metrics
             if isinstance(pred, dict):
-                is_trajectory_model = True
-
-                # Check if HybridDeepONet
                 if "output_grid" in pred:
-                    is_hybrid_model = True
-                    # Compute grid-based metrics for HybridDeepONet
-                    grid_metrics = compute_metrics(pred["output_grid"], batch_target)
-                    batch_metrics.append(grid_metrics)
+                    batch_metrics.append(
+                        compute_metrics(pred["output_grid"], batch_target)
+                    )
                 elif loss_fn is not None:
-                    # Use new signature: (input_dict, output_dict, target)
                     _, components = loss_fn(batch_input, pred, batch_target)
                     batch_metrics.append(components)
-
-                # Collect trajectory data for plotting (only first few samples)
-                if len(traj_positions) < num_plots:
-                    batch_size = pred["positions"].shape[0]
-                    for i in range(min(num_plots - len(traj_positions), batch_size)):
-                        traj_positions.append(pred["positions"][i].cpu().numpy())
-                        traj_existence.append(pred["existence"][i].cpu().numpy())
-                        traj_discontinuities.append(
-                            batch_input_orig["discontinuities"][i].cpu().numpy()
-                        )
-                        traj_masks.append(
-                            batch_input_orig["disc_mask"][i].cpu().numpy()
-                        )
-                        traj_grids.append(batch_target_orig[i].squeeze(0).cpu().numpy())
-
-                        # HybridDeepONet specific
-                        if is_hybrid_model:
-                            hybrid_output_grids.append(
-                                pred["output_grid"][i].squeeze(0).cpu().numpy()
-                            )
-                            hybrid_region_densities.append(
-                                pred["region_densities"][i].cpu().numpy()
-                            )
-                            hybrid_region_weights.append(
-                                pred["region_weights"][i].cpu().numpy()
-                            )
-
-                    if traj_times is None:
-                        t_coords = batch_input_orig["t_coords"]
-                        traj_times = t_coords[0, 0, :, 0].cpu().numpy()
             else:
-                # Standard models (tensor output)
-                metrics = compute_metrics(pred, batch_target)
-                batch_metrics.append(metrics)
-
-                # Store for plotting
-                for i in range(batch_target.shape[0]):
-                    all_preds.append(pred[i].squeeze(0).cpu().numpy())
-                    all_targets.append(batch_target[i].squeeze(0).cpu().numpy())
+                batch_metrics.append(compute_metrics(pred, batch_target))
 
     # Aggregate metrics
     if batch_metrics:
@@ -163,63 +152,14 @@ def test_model(
         print(f"  {key}: {value:.6f}")
     print("-" * 40)
 
-    # Log to W&B if logger provided (use summary for test metrics)
+    # Log to W&B and plot
     if logger is not None:
         logger.log_summary({f"test/metrics/{k}": v for k, v in avg_metrics.items()})
 
-        if is_hybrid_model and traj_positions:
-            # Build traj_data dict for hybrid model
-            traj_data = {
-                "grids": np.array(traj_grids),
-                "output_grid": np.array(hybrid_output_grids),
-                "positions": np.array(traj_positions),
-                "existence": np.array(traj_existence),
-                "discontinuities": np.array(traj_discontinuities),
-                "masks": np.array(traj_masks),
-                "region_densities": np.array(hybrid_region_densities),
-                "region_weights": np.array(hybrid_region_weights),
-                "times": traj_times,
-                "is_hybrid": True,
-            }
-            plot_wandb(
-                traj_data,
-                grid_config,
-                logger,
-                epoch=None,
-                mode="test",
-                preset=plot_preset,
-            )
-        elif is_trajectory_model and traj_positions:
-            # Build traj_data dict for trajectory model
-            traj_data = {
-                "grids": np.array(traj_grids),
-                "positions": np.array(traj_positions),
-                "existence": np.array(traj_existence),
-                "discontinuities": np.array(traj_discontinuities),
-                "masks": np.array(traj_masks),
-                "times": traj_times,
-            }
-            plot_wandb(
-                traj_data,
-                grid_config,
-                logger,
-                epoch=None,
-                mode="test",
-                preset=plot_preset,
-            )
-        elif not is_trajectory_model and all_targets:
-            # Plot comparison for standard models
-            gts = np.array(all_targets[:num_plots])
-            preds = np.array(all_preds[:num_plots])
-            plot_comparison_wandb(
-                gts,
-                preds,
-                grid_config,
-                logger,
-                epoch=None,
-                mode="test",
-                use_summary=False,
-            )
+        samples = collect_samples(pred, batch_input, batch_target, num_samples=num_plots)
+        plot_wandb(
+            samples, grid_config, logger, epoch=None, mode="test", preset=plot_preset
+        )
 
     return avg_metrics
 

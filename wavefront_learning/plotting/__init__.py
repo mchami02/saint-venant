@@ -34,7 +34,8 @@ from .grid_plots import (
 from .hybrid_plots import (
     plot_hybrid_predictions_wandb,
     plot_mse_error_wandb,
-    plot_prediction_with_trajectory_wandb,
+    plot_pred_traj,
+    plot_prediction_with_trajectory_existence_wandb,
     plot_region_weights_wandb,
 )
 from .trajectory_plots import (
@@ -49,7 +50,8 @@ from .trajectory_plots import (
 from .wandb_trajectory_plots import (
     plot_existence_wandb,
     plot_grid_with_acceleration_wandb,
-    plot_grid_with_trajectory_wandb,
+    plot_grid_with_trajectory_existence_wandb,
+    plot_gt_traj,
     plot_trajectory_on_grid_wandb,
     plot_trajectory_vs_analytical_wandb,
     plot_trajectory_wandb,
@@ -80,13 +82,16 @@ __all__ = [
     # Trajectory plots (W&B / PLOTS registry)
     "plot_trajectory_on_grid_wandb",
     "plot_trajectory_wandb",
-    "plot_grid_with_trajectory_wandb",
+    "plot_grid_with_trajectory_existence_wandb",
     "plot_grid_with_acceleration_wandb",
     "plot_trajectory_vs_analytical_wandb",
     "plot_existence_wandb",
     # Hybrid plots
     "plot_hybrid_predictions_wandb",
-    "plot_prediction_with_trajectory_wandb",
+    "plot_prediction_with_trajectory_existence_wandb",
+    "plot_pred_traj",
     "plot_mse_error_wandb",
     "plot_region_weights_wandb",
+    # Trajectory-only plots (no existence)
+    "plot_gt_traj",
 ]

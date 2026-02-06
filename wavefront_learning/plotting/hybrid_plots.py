@@ -390,7 +390,7 @@ def plot_hybrid_predictions_wandb(
     plt.close(fig)
 
 
-def plot_prediction_with_trajectory_wandb(
+def plot_prediction_with_trajectory_existence_wandb(
     traj_data: dict,
     grid_config: dict,
     logger,
@@ -468,6 +468,84 @@ def plot_prediction_with_trajectory_wandb(
         _log_figure(
             logger, f"{mode}/prediction_with_trajectory_sample_{b + 1}", fig, epoch
         )
+        plt.close(fig)
+
+
+def plot_pred_traj(
+    traj_data: dict,
+    grid_config: dict,
+    logger,
+    epoch: int | None,
+    mode: str = "val",
+) -> None:
+    """Plot predicted grid with trajectory overlay (no existence).
+
+    Like plot_prediction_with_trajectory_existence_wandb but plots full
+    trajectories without filtering by existence probability.
+
+    Args:
+        traj_data: Dict containing output_grid, positions, masks, times.
+        grid_config: Dict with {nx, nt, dx, dt}.
+        logger: WandbLogger instance.
+        epoch: Current epoch.
+        mode: Mode string for logging prefix.
+    """
+    if "output_grid" not in traj_data:
+        return  # Skip if not a hybrid model
+
+    output_grid = traj_data["output_grid"]
+    positions = traj_data["positions"]
+    masks = traj_data["masks"]
+    times = traj_data["times"]
+
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    if times.ndim > 1:
+        times = times[0]
+
+    B = output_grid.shape[0]
+    for b in range(min(B, 3)):
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        # Background: predicted grid heatmap
+        im = ax.imshow(
+            output_grid[b],
+            extent=extent,
+            aspect="auto",
+            origin="lower",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+            alpha=0.8,
+        )
+        plt.colorbar(im, ax=ax, label="Density")
+
+        # Overlay: predicted trajectories (no existence filtering)
+        n_disc = int(masks[b].sum())
+        colors = _get_colors(n_disc)
+
+        for d in range(n_disc):
+            ax.plot(
+                positions[b, d],  # X = Space
+                times,  # Y = Time
+                color=colors[d],
+                linewidth=2,
+                linestyle="--",
+            )
+
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(f"Predicted Grid + Trajectories (Sample {b + 1})")
+        ax.set_xlim(0, nx * dx)
+        ax.set_ylim(0, nt * dt)
+        plt.tight_layout()
+        _log_figure(logger, f"{mode}/pred_traj_sample_{b + 1}", fig, epoch)
         plt.close(fig)
 
 

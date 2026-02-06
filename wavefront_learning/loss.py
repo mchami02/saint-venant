@@ -13,7 +13,7 @@ from losses.acceleration import AccelerationLoss
 from losses.base import BaseLoss
 from losses.boundary import BoundaryLoss
 from losses.collision import CollisionLoss
-from losses.existence_regularization import ExistenceRegularizationLoss
+from losses.existence_regularization import ICAnchoringLoss
 from losses.ic import ICLoss
 from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss
@@ -29,7 +29,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "pde_residual": PDEResidualLoss,
     "boundary": BoundaryLoss,
     "collision": CollisionLoss,
-    "existence_reg": ExistenceRegularizationLoss,
+    "ic_anchoring": ICAnchoringLoss,
     "supervised_trajectory": SupervisedTrajectoryLoss,
     "ic": ICLoss,
     "acceleration": AccelerationLoss,
@@ -42,15 +42,20 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         # ("rh_residual", 1.0, {"mode": "gt"}),
         ("boundary", 1.0),
         ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-        ("existence_reg", 0.1),
+        ("ic_anchoring", 0.1),
     ],
     "hybrid": [
         ("mse", 1.0),
         ("rh_residual", 1.0),
         ("pde_residual", 0.1),
         ("ic", 10.0),
-        ("existence_reg", 0.01),
+        ("ic_anchoring", 0.01),
     ],
+    "traj_net": [
+        ("mse", 1.0),
+        ("ic_anchoring", 0.1),
+        ("boundary", 1.0)
+    ]
 }
 
 

@@ -6,11 +6,13 @@ import torch
 import torch.nn as nn
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.shock_trajectory_net import build_shock_net
+from models.traj_deeponet import build_traj_deeponet
 
 # Registry of available models
 MODELS = {
     "ShockNet": build_shock_net,
     "HybridDeepONet": build_hybrid_deeponet,
+    "TrajDeepONet": build_traj_deeponet,
 }
 
 def get_model(model_name: str, args: dict) -> nn.Module:

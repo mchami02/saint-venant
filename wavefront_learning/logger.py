@@ -270,32 +270,25 @@ def init_logger(args: Namespace, project: str = "wavefront-learning") -> WandbLo
     )
 
 
-def log_epoch_metrics(
+def log_values(
     logger: WandbLogger,
-    epoch: int,
-    train_loss: float,
-    val_loss: float,
-    learning_rate: float,
-    additional_metrics: dict | None = None,
+    values: dict[str, float],
+    step: int,
+    mode: str,
+    category: str,
 ) -> None:
-    """Log standard epoch metrics.
+    """Log a dictionary of values with a structured key prefix.
+
+    Keys are logged as {mode}/{category}/{key}.
 
     Args:
         logger: WandbLogger instance.
-        epoch: Current epoch number.
-        train_loss: Training loss for the epoch.
-        val_loss: Validation loss for the epoch.
-        learning_rate: Current learning rate.
-        additional_metrics: Optional additional metrics to log.
+        values: Dictionary of metric names to values.
+        step: Current step (epoch number).
+        mode: One of "train", "val", "test".
+        category: One of "loss", "metrics".
     """
-    metrics = {
-        "train/loss": train_loss,
-        "val/loss": val_loss,
-        "train/lr": learning_rate,
-        "epoch": epoch,
-    }
-
-    if additional_metrics:
-        metrics.update(additional_metrics)
-
-    logger.log_metrics(metrics, step=epoch)
+    logger.log_metrics(
+        {f"{mode}/{category}/{k}": v for k, v in values.items()},
+        step=step,
+    )

@@ -95,7 +95,7 @@ Individual losses (in `losses/`):
 | `trajectory` | Trajectory consistency (analytical RH) |
 | `boundary` | Penalize shocks outside domain |
 | `collision` | Penalize colliding shocks |
-| `existence_reg` | Prevent existence collapse |
+| `existence_reg` | Anchor trajectories to IC positions |
 | `supervised_trajectory` | Supervised trajectory loss |
 | `pde_residual` | PDE conservation in smooth regions |
 | `rh_residual` | RH residual from region densities |
