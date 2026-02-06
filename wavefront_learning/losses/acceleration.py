@@ -312,7 +312,9 @@ class AccelerationLoss(BaseLoss):
             Tuple of (loss tensor, components dict with 'acceleration' key).
         """
         positions = output_dict["positions"]
-        existence = output_dict["existence"]
+        existence = output_dict.get(
+            "existence", torch.ones_like(positions)
+        )
         x_coords = input_dict["x_coords"]
         disc_mask = input_dict["disc_mask"]
 
