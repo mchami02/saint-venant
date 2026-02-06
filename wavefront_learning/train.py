@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
-from logger import WandbLogger, init_logger, log_epoch_metrics
+from logger import WandbLogger, init_logger, log_values
 from loss import LOSS_PRESETS, LOSSES, get_loss
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
@@ -415,7 +415,7 @@ def train_model(
     train_loader: DataLoader,
     val_loader: DataLoader,
     args: argparse.Namespace,
-    logger: WandbLogger | None = None,
+    logger: WandbLogger,
     grid_config: dict | None = None,
 ) -> nn.Module:
     """Full training loop with early stopping.
@@ -425,7 +425,7 @@ def train_model(
         train_loader: Training data loader.
         val_loader: Validation data loader.
         args: Training arguments.
-        logger: Optional W&B logger.
+        logger: W&B logger.
         grid_config: Dict with {nx, nt, dx, dt} for plotting.
 
     Returns:
@@ -467,84 +467,68 @@ def train_model(
         current_lr = optimizer.param_groups[0]["lr"]
 
         # Log metrics
-        if logger is not None:
-            log_epoch_metrics(logger, epoch + 1, train_loss, val_loss, current_lr)
-            # Log loss components
-            logger.log_metrics(
-                {f"train/loss/{k}": v for k, v in train_loss_components.items()},
-                step=epoch + 1,
+        step = epoch + 1
+        logger.log_metrics({"train/lr": current_lr}, step=step)
+        log_values(logger, train_loss_components, step, "train", "loss")
+        log_values(logger, val_loss_components, step, "val", "loss")
+        log_values(logger, train_metrics, step, "train", "metrics")
+        log_values(logger, val_metrics, step, "val", "metrics")
+
+        # Plot every 5 epochs
+        if (epoch + 1) % 5 == 0:
+            # Try trajectory predictions first (for ShockNet-like models)
+            # Plot training samples
+            traj_data_train = sample_trajectory_predictions(
+                model, train_loader, num_samples=2
             )
-            logger.log_metrics(
-                {f"val/loss/{k}": v for k, v in val_loss_components.items()},
-                step=epoch + 1,
-            )
-            # Log grid metrics (MSE, MAE, etc.) if available
-            if train_metrics is not None:
-                logger.log_metrics(
-                    {f"train/metrics/{k}": v for k, v in train_metrics.items()},
-                    step=epoch + 1,
-                )
-            if val_metrics is not None:
-                logger.log_metrics(
-                    {f"val/metrics/{k}": v for k, v in val_metrics.items()},
-                    step=epoch + 1,
+            if traj_data_train is not None:
+                plot_wandb(
+                    traj_data_train,
+                    grid_config,
+                    logger,
+                    epoch + 1,
+                    mode="train",
+                    preset=args.plot,
                 )
 
-            # Plot every 5 epochs
-            if (epoch + 1) % 5 == 0:
-                # Try trajectory predictions first (for ShockNet-like models)
-                # Plot training samples
-                traj_data_train = sample_trajectory_predictions(
+            # Plot validation samples
+            traj_data = sample_trajectory_predictions(
+                model, val_loader, num_samples=2
+            )
+            if traj_data is not None:
+                plot_wandb(
+                    traj_data,
+                    grid_config,
+                    logger,
+                    epoch + 1,
+                    mode="val",
+                    preset=args.plot,
+                )
+            else:
+                # Standard grid-based models - plot both train and val
+                gts_train, preds_train = sample_predictions(
                     model, train_loader, num_samples=2
                 )
-                if traj_data_train is not None:
-                    plot_wandb(
-                        traj_data_train,
+                if gts_train is not None:
+                    plot_comparison_wandb(
+                        gts_train,
+                        preds_train,
                         grid_config,
                         logger,
                         epoch + 1,
                         mode="train",
-                        preset=args.plot,
                     )
 
-                # Plot validation samples
-                traj_data = sample_trajectory_predictions(
-                    model, val_loader, num_samples=2
-                )
-                if traj_data is not None:
-                    plot_wandb(
-                        traj_data,
+                gts, preds = sample_predictions(model, val_loader, num_samples=2)
+                if gts is not None:
+                    plot_comparison_wandb(
+                        gts,
+                        preds,
                         grid_config,
                         logger,
                         epoch + 1,
                         mode="val",
-                        preset=args.plot,
                     )
-                else:
-                    # Standard grid-based models - plot both train and val
-                    gts_train, preds_train = sample_predictions(
-                        model, train_loader, num_samples=2
-                    )
-                    if gts_train is not None:
-                        plot_comparison_wandb(
-                            gts_train,
-                            preds_train,
-                            grid_config,
-                            logger,
-                            epoch + 1,
-                            mode="train",
-                        )
-
-                    gts, preds = sample_predictions(model, val_loader, num_samples=2)
-                    if gts is not None:
-                        plot_comparison_wandb(
-                            gts,
-                            preds,
-                            grid_config,
-                            logger,
-                            epoch + 1,
-                            mode="val",
-                        )
 
         # Check for improvement
         if val_loss < best_val_loss * 0.99:  # 1% improvement threshold
