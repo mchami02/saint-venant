@@ -820,7 +820,7 @@ $$\mathcal{L}_{exist} = \frac{1}{|\mathcal{V}|} \sum_{(b,d,t) \in \mathcal{V}} B
 
 **Location**: `losses/pde_residual.py`
 
-Physics-informed loss enforcing the conservation law in smooth regions (away from shocks).
+Physics-informed loss enforcing the conservation law on the predicted grid over all interior points (no shock masking).
 
 **Physical equation**:
 $$\frac{\partial \rho}{\partial t} + \frac{\partial f(\rho)}{\partial x} = 0$$
@@ -828,12 +828,8 @@ $$\frac{\partial \rho}{\partial t} + \frac{\partial f(\rho)}{\partial x} = 0$$
 **Residual computation** (central finite differences):
 $$R(t, x) = \frac{\rho(t+\Delta t, x) - \rho(t-\Delta t, x)}{2\Delta t} + \frac{f(\rho(t, x+\Delta x)) - f(\rho(t, x-\Delta x))}{2\Delta x}$$
 
-**Shock masking**:
-Points within `shock_buffer` distance from predicted shocks are excluded:
-$$\text{mask}(t, x) = \prod_{d=1}^{D} \left[ 1 - \mathbb{1}_{|x - x_d(t)| < \delta} \cdot \mathbb{1}_{e_d(t) > 0.5} \cdot m_d \right]$$
-
 **Loss formula**:
-$$\mathcal{L}_{PDE} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R(t, x)^2 \cdot \text{mask}(t, x)$$
+$$\mathcal{L}_{PDE} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R(t, x)^2$$
 
 **Optional IC loss** (if `ic_weight > 0`):
 $$\mathcal{L}_{total} = \mathcal{L}_{PDE} + w_{IC} \cdot \mathcal{L}_{IC}$$
@@ -843,11 +839,10 @@ $$\mathcal{L}_{total} = \mathcal{L}_{PDE} + w_{IC} \cdot \mathcal{L}_{IC}$$
 |-----------|---------|-------------|
 | `dt` | 0.004 | Time step size |
 | `dx` | 0.02 | Spatial step size |
-| `shock_buffer` | 0.05 | Buffer around shocks for masking |
 | `ic_weight` | 0.0 | Weight for IC loss (0 = disabled) |
 
-**Required inputs**: `x_coords`, `disc_mask`
-**Required outputs**: `output_grid`, `positions`, `existence`
+**Required inputs**: None
+**Required outputs**: `output_grid`
 
 **Components returned**: `{"pde_residual": float, "ic": float (if enabled), "total": float}`
 

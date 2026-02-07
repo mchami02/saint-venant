@@ -202,10 +202,10 @@ class PDEShockResidualLoss(BaseLoss):
 
 
 class PDEResidualLoss(BaseLoss):
-    """PDE residual loss for conservation law in smooth regions.
+    """PDE residual loss for conservation law on the predicted grid.
 
-    Enforces drho/dt + df(rho)/dx = 0 using central finite differences,
-    with shock masking to exclude points near predicted discontinuities.
+    Enforces drho/dt + df(rho)/dx = 0 using central finite differences
+    over all interior points. No shock masking is applied.
 
     Optionally includes an initial condition (IC) loss that penalizes
     deviation from the target IC at t=0.
@@ -213,7 +213,6 @@ class PDEResidualLoss(BaseLoss):
     Args:
         dt: Time step size.
         dx: Spatial step size.
-        shock_buffer: Buffer distance around shocks to exclude.
         ic_weight: Weight for IC loss (higher = prioritize IC accuracy).
     """
 
@@ -221,13 +220,11 @@ class PDEResidualLoss(BaseLoss):
         self,
         dt: float = 0.004,
         dx: float = 0.02,
-        shock_buffer: float = 0.05,
         ic_weight: float = 0.0,
     ):
         super().__init__()
         self.dt = dt
         self.dx = dx
-        self.shock_buffer = shock_buffer
         self.ic_weight = ic_weight
 
     def forward(
@@ -239,14 +236,9 @@ class PDEResidualLoss(BaseLoss):
         """Compute PDE residual loss with optional IC loss.
 
         Args:
-            input_dict: Must contain:
-                - 'x_coords': (B, 1, nt, nx) spatial coordinates
-                - 'disc_mask': (B, D) validity mask
+            input_dict: Not used by this loss.
             output_dict: Must contain:
                 - 'output_grid': (B, 1, nt, nx) predicted grid
-                - 'positions': (B, D, T) predicted shock positions
-              Optionally contains:
-                - 'existence': (B, D, T) existence probabilities
             target: Target grid (B, 1, nt, nx) for optional IC loss.
 
         Returns:
@@ -254,10 +246,6 @@ class PDEResidualLoss(BaseLoss):
             contains 'pde_residual', 'ic' (if ic_weight > 0), and 'total'.
         """
         output_grid = output_dict["output_grid"]
-        positions = output_dict["positions"]
-        existence = output_dict.get("existence", torch.ones_like(positions))
-        x_coords = input_dict["x_coords"]
-        disc_mask = input_dict["disc_mask"]
 
         # Squeeze channel dimension
         density = output_grid.squeeze(1)  # (B, nt, nx)
@@ -265,29 +253,7 @@ class PDEResidualLoss(BaseLoss):
         # Compute PDE residual (interior points only)
         residual = compute_pde_residual(density, self.dt, self.dx)  # (B, nt-2, nx-2)
 
-        # Create shock mask for interior points
-        if x_coords.dim() == 4:
-            x_coords_3d = x_coords.squeeze(1)
-        else:
-            x_coords_3d = x_coords
-
-        # Interior x coordinates
-        x_interior = x_coords_3d[:, 1:-1, 1:-1]  # (B, nt-2, nx-2)
-
-        # Create mask (using interior coordinates)
-        mask = create_shock_mask(
-            positions[:, :, 1:-1],  # Interior time points
-            existence[:, :, 1:-1],
-            x_interior,
-            disc_mask,
-            self.shock_buffer,
-        )
-
-        # Apply mask and compute mean squared residual
-        masked_residual = residual * mask
-        n_valid = mask.sum().clamp(min=1)
-
-        pde_loss = (masked_residual**2).sum() / n_valid
+        pde_loss = (residual**2).mean()
 
         # Compute IC loss if weight > 0
         components = {
