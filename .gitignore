@@ -15,3 +15,4 @@ wavefront_learning/.env
 build/
 wandb/
 *.npz
+launch.json

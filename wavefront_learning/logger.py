@@ -238,6 +238,23 @@ class WandbLogger:
         """Set current epoch for context."""
         self._current_epoch = epoch
 
+    def watch_model(
+        self,
+        model: torch.nn.Module,
+        log: str = "all",
+        log_freq: int = 10000,
+    ) -> None:
+        """Watch model for gradient/parameter tracking.
+
+        Args:
+            model: PyTorch model to watch.
+            log: What to log ("gradients", "parameters", "all", or None).
+            log_freq: Logging frequency in batches.
+        """
+        if not self.enabled or self.run is None:
+            return
+        wandb.watch(model, log=log, log_freq=log_freq)
+
     def finish(self) -> None:
         """Finish the logging run."""
         if self.enabled and self.run is not None:

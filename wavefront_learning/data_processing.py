@@ -69,7 +69,7 @@ def extract_discontinuities_from_grid(
     ic_grid: np.ndarray,
     dx: float,
     max_discontinuities: int = 10,
-    threshold: float = 0.1,
+    threshold: float = 0.01,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Extract discontinuity points from a discretized initial condition.
 

@@ -445,18 +445,10 @@ def main():
     # Run sanity check before logging
     run_sanity_check(model, train_loader, val_loader, args, device)
 
-    # Initialize logger
-    logger = None
-    if not args.no_wandb:
-        logger = init_logger(args)
-        logger.log_metrics({"model/parameters": num_params})
-
-        # Watch model for gradient/parameter tracking
-        import wandb
-
-        # Use high log_freq to avoid step counter conflicts with epoch-based logging
-        # Gradients are logged every log_freq batches; high value means rare gradient logs
-        wandb.watch(model, log="all", log_freq=10000)
+    # Initialize logger (no-ops when args.no_wandb is True)
+    logger = init_logger(args)
+    logger.log_metrics({"model/parameters": num_params})
+    logger.watch_model(model)
 
     # Run profiler if requested
     if args.profile:
@@ -485,9 +477,8 @@ def main():
     )
 
     # Log final model
-    if logger is not None:
-        logger.log_model(model, args.model, metadata=vars(args))
-        logger.finish()
+    logger.log_model(model, args.model, metadata=vars(args))
+    logger.finish()
 
     print(f"\nModel saved to: {args.save_path}")
 
