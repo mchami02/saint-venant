@@ -205,7 +205,18 @@ def preprocess_wavefront_data(
         target_grid = torch.from_numpy(grids[idx]).to(torch.float32).unsqueeze(0)
 
         # Extract IC from first time step
-        ic_grid = grids[idx, 0, :]
+        ic_grid = grids[idx, 0, :].copy()
+
+        # Clean IC: remove isolated cells (same as ICCleaner in operator_learning)
+        for i in range(1, len(ic_grid) - 1):
+            left_val = ic_grid[i - 1]
+            curr_val = ic_grid[i]
+            right_val = ic_grid[i + 1]
+            if curr_val != left_val and curr_val != right_val:
+                if abs(curr_val - left_val) <= abs(curr_val - right_val):
+                    ic_grid[i] = left_val
+                else:
+                    ic_grid[i] = right_val
 
         # Extract discontinuity representation
         discontinuities, disc_mask = extract_discontinuities_from_grid(
