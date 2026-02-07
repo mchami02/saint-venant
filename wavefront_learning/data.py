@@ -17,6 +17,36 @@ from data_processing import get_wavefront_data
 from torch.utils.data import Dataset
 
 
+class ICCleaner:
+    """Cleaner that removes isolated cells in the target grid's initial condition.
+
+    A cell is considered isolated if its value differs from both its left and
+    right neighbors. Such cells are replaced with the value of the neighbor
+    they are numerically closest to.
+    """
+
+    def __call__(self, input_data, target_grid):
+        target_grid = target_grid.clone()
+        ic = target_grid[0, 0, :]  # Initial condition: shape (nx,)
+        nx = ic.shape[0]
+
+        for i in range(1, nx - 1):
+            left_val = ic[i - 1]
+            curr_val = ic[i]
+            right_val = ic[i + 1]
+
+            if curr_val != left_val and curr_val != right_val:
+                left_dist = abs(curr_val - left_val)
+                right_dist = abs(curr_val - right_val)
+
+                if left_dist <= right_dist:
+                    ic[i] = left_val
+                else:
+                    ic[i] = right_val
+
+        return input_data, target_grid
+
+
 class WavefrontDataset(Dataset):
     """Dataset for wavefront prediction training.
 
@@ -32,12 +62,24 @@ class WavefrontDataset(Dataset):
     """
 
     def __init__(self, processed_data: list, transform=None):
+        if transform is None:
+            transform = [ICCleaner()]
         self.processed_data = processed_data
         self.transform = transform
+        self._transform_grids()
 
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
         return len(self.processed_data)
+    
+    def _transform_grids(self):
+        transformed_data = []
+        for input_data, target_grid in self.processed_data:
+            for transform in self.transform:
+                input_data, target_grid = transform(input_data, target_grid)
+            transformed_data.append((input_data, target_grid))
+        self.processed_data = transformed_data
+        print(f"Transformed {len(transformed_data)} grids")
 
     def __getitem__(self, idx: int) -> tuple[dict, torch.Tensor]:
         """Return a single sample (input_data, target) pair.
@@ -51,9 +93,6 @@ class WavefrontDataset(Dataset):
                 - target_grid: tensor of shape (1, nt, nx)
         """
         input_data, target_grid = self.processed_data[idx]
-
-        if self.transform is not None:
-            input_data, target_grid = self.transform(input_data, target_grid)
 
         return input_data, target_grid
 
