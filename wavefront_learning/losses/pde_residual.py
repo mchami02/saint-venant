@@ -114,30 +114,29 @@ def create_shock_mask(
 
 
 class PDEShockResidualLoss(BaseLoss):
-    """PDE residual loss computed on the ground truth grid.
+    """PDE residual loss on the ground truth, weighted by distance to shocks.
 
-    Computes drho/dt + df(rho)/dx = 0 on the ground truth density. The residual
-    is non-zero at actual shocks. Points near predicted discontinuities are
-    masked out, so the loss only penalizes regions where the model fails to
-    predict a nearby shock — effectively rewarding the model for correctly
-    locating discontinuities.
+    Computes drho/dt + df(rho)/dx on the ground truth density (non-zero at
+    actual shocks), then weights each cell's squared residual by its distance
+    to the nearest predicted discontinuity. Cells near a predicted shock
+    contribute little; cells far from any prediction contribute more.
+
+    This provides a smooth gradient signal (vs. a hard binary mask) that
+    rewards the model for moving predicted trajectories toward actual shocks.
 
     Args:
         dt: Time step size.
         dx: Spatial step size.
-        shock_buffer: Buffer distance around predicted shocks to exclude.
     """
 
     def __init__(
         self,
         dt: float = 0.004,
         dx: float = 0.02,
-        shock_buffer: float = 0.05,
     ):
         super().__init__()
         self.dt = dt
         self.dx = dx
-        self.shock_buffer = shock_buffer
 
     def forward(
         self,
@@ -145,7 +144,7 @@ class PDEShockResidualLoss(BaseLoss):
         output_dict: dict[str, torch.Tensor],
         target: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Compute PDE residual of the ground truth, masked by predictions.
+        """Compute distance-weighted PDE residual of the ground truth.
 
         Args:
             input_dict: Must contain:
@@ -172,27 +171,39 @@ class PDEShockResidualLoss(BaseLoss):
         # Compute PDE residual on GT (interior points only)
         residual = compute_pde_residual(gt_density, self.dt, self.dx)
 
-        # Create shock mask for interior points
+        # Prepare interior spatial coordinates
         if x_coords.dim() == 4:
             x_coords_3d = x_coords.squeeze(1)
         else:
             x_coords_3d = x_coords
-
         x_interior = x_coords_3d[:, 1:-1, 1:-1]  # (B, nt-2, nx-2)
 
-        # Mask: 1 where NOT near any predicted shock
-        mask = create_shock_mask(
-            positions[:, :, 1:-1],
-            existence[:, :, 1:-1],
-            x_interior,
-            disc_mask,
-            self.shock_buffer,
-        )
+        # Interior positions/existence (trim boundary time steps)
+        pos_int = positions[:, :, 1:-1]  # (B, D, nt-2)
+        exist_int = existence[:, :, 1:-1]  # (B, D, nt-2)
 
-        # Loss = residual where model does NOT predict a shock
-        masked_residual = residual * mask
-        n_valid = mask.sum().clamp(min=1)
-        loss = (masked_residual**2).sum() / n_valid
+        # Compute min distance to nearest active predicted shock per cell
+        # pos_int: (B, D, nt-2) -> (B, D, nt-2, 1)
+        # x_interior: (B, nt-2, nx-2) -> (B, 1, nt-2, nx-2)
+        dist = torch.abs(
+            x_interior.unsqueeze(1) - pos_int.unsqueeze(-1)
+        )  # (B, D, nt-2, nx-2)
+
+        # Weight by existence and disc_mask; set inactive shocks to large dist
+        B, D = disc_mask.shape
+        active = (
+            (exist_int > 0.5).float()
+            * disc_mask.view(B, D, 1).float()
+        )  # (B, D, nt-2)
+        large = torch.tensor(1e6, device=dist.device)
+        # Where inactive, replace distance with large value so it's ignored by min
+        dist = dist * active.unsqueeze(-1) + large * (1 - active.unsqueeze(-1))
+
+        # Min distance across all discontinuities: (B, nt-2, nx-2)
+        min_dist = dist.min(dim=1).values
+
+        # Weight = distance (close to shock -> small weight, far -> large weight)
+        loss = (residual**2 * min_dist).mean()
 
         components = {
             "pde_shock_residual": loss.item(),

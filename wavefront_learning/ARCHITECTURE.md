@@ -852,28 +852,30 @@ $$\mathcal{L}_{total} = \mathcal{L}_{PDE} + w_{IC} \cdot \mathcal{L}_{IC}$$
 
 **Location**: `losses/pde_residual.py`
 
-PDE residual loss computed on the **ground truth** grid. The GT residual is non-zero at actual shocks. Points near predicted discontinuities are masked out, so the loss only penalizes regions where the model **fails** to predict a nearby shock — rewarding correct shock placement.
+PDE residual loss computed on the **ground truth** grid, weighted by distance to the nearest predicted shock. The GT residual is non-zero at actual shocks. Each cell's squared residual is multiplied by its distance to the nearest active predicted discontinuity, providing a smooth gradient signal that rewards the model for moving predictions toward actual shocks.
 
 **Residual computation** (same as PDEResidualLoss):
 $$R_{GT}(t, x) = \frac{\rho_{GT}(t+\Delta t, x) - \rho_{GT}(t-\Delta t, x)}{2\Delta t} + \frac{f(\rho_{GT}(t, x+\Delta x)) - f(\rho_{GT}(t, x-\Delta x))}{2\Delta x}$$
 
-**Shock masking** (based on predicted positions):
-$$\text{mask}(t, x) = \prod_{d=1}^{D} \left[ 1 - \mathbb{1}_{|x - x_d(t)| < \delta} \cdot \mathbb{1}_{e_d(t) > 0.5} \cdot m_d \right]$$
+**Distance weighting**:
+$$d_{min}(t, x) = \min_{d \in \mathcal{A}} |x - x_d(t)|$$
+
+where $\mathcal{A} = \{d : e_d(t) > 0.5 \text{ and } m_d = 1\}$ is the set of active predicted shocks.
 
 **Loss formula**:
-$$\mathcal{L}_{PDE\text{-}shock} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R_{GT}(t, x)^2 \cdot \text{mask}(t, x)$$
+$$\mathcal{L}_{PDE\text{-}shock} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R_{GT}(t, x)^2 \cdot d_{min}(t, x)$$
 
-**Interpretation**: The GT has large PDE residuals at its actual shocks. If the model correctly predicts shocks at those locations, they are masked out and don't contribute to the loss. If the model misses a shock, the residual there remains unmasked and drives the loss up.
+**Interpretation**: The GT has large PDE residuals at actual shocks. If the model predicts a shock nearby, $d_{min}$ is small and the residual contributes little. If the prediction is far away, $d_{min}$ is large and the loss is high. Unlike a binary mask, this provides smooth gradients that guide trajectories toward the correct locations.
 
 **Configuration**:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `dt` | 0.004 | Time step size |
 | `dx` | 0.02 | Spatial step size |
-| `shock_buffer` | 0.05 | Buffer around predicted shocks for masking |
 
 **Required inputs**: `x_coords`, `disc_mask`
-**Required outputs**: `positions`, `existence`
+**Required outputs**: `positions`
+**Optional outputs**: `existence`
 
 **Components returned**: `{"pde_shock_residual": float, "total": float}`
 
