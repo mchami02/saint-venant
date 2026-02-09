@@ -15,10 +15,7 @@ from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import init_logger
 from model import load_model
 from plotter import PLOT_PRESETS
-from testing import (
-    test_high_res,
-    test_model,
-)
+from testing import test_model
 from torch.utils.data import DataLoader
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
@@ -77,6 +74,7 @@ def main():
     # Extract model registry name from checkpoint config
     checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
     model_name = checkpoint.get("config", {}).get("model", type(model).__name__)
+    args.model = model_name
 
     print(f"Model loaded: {model_name}")
     print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -101,27 +99,18 @@ def main():
     # Initialize logger
     logger = None
     if not args.no_wandb:
-        args.model = model_name
         logger = init_logger(args, project="wavefront-learning-test")
 
-    # Run evaluation
+    # Run full evaluation (standard + high-res)
+    print("\nRunning final evaluation on test set...")
     metrics = test_model(
         model=model,
         test_loader=test_loader,
+        args=args,
         device=device,
         logger=logger,
         grid_config=grid_config,
         num_plots=args.num_plots,
-        plot_preset=args.plot,
-    )
-
-    # High-resolution test
-    print("\nRunning high-resolution evaluation (2x)...")
-    test_high_res(
-        model=model,
-        args=args,
-        device=device,
-        logger=logger,
         plot_preset=args.plot,
     )
 

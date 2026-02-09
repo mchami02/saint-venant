@@ -21,7 +21,6 @@ from testing import (
     collect_samples,
     run_profiler,
     run_sanity_check,
-    test_high_res,
     test_model,
 )
 from torch.utils.data import DataLoader
@@ -348,12 +347,20 @@ def train_model(
         # Plot every 5 epochs
         if (epoch + 1) % 5 == 0:
             plot(
-                train_samples, grid_config, logger, epoch + 1,
-                mode="train", preset=args.plot,
+                train_samples,
+                grid_config,
+                logger,
+                epoch + 1,
+                mode="train",
+                preset=args.plot,
             )
             plot(
-                val_samples, grid_config, logger, epoch + 1,
-                mode="val", preset=args.plot,
+                val_samples,
+                grid_config,
+                logger,
+                epoch + 1,
+                mode="val",
+                preset=args.plot,
             )
 
         # Check for improvement
@@ -462,7 +469,7 @@ def main():
     if args.epochs > 0:
         model = train_model(model, train_loader, val_loader, args, logger, grid_config)
 
-    # Final test
+    # Final test (standard + high-res)
     print("\nRunning final evaluation on test set...")
     loss_kwargs = {
         "pde_residual": {"dt": args.dt, "dx": args.dx},
@@ -472,22 +479,11 @@ def main():
     test_model(
         model=model,
         test_loader=test_loader,
-        device=device,
-        logger=logger,
-        loss_fn=loss_fn,
-        grid_config=grid_config,
-        epoch=args.epochs + 1,  # Log after final training epoch
-        plot_preset=args.plot,
-    )
-
-    # High-resolution test
-    print("\nRunning high-resolution evaluation (2x)...")
-    test_high_res(
-        model=model,
         args=args,
         device=device,
         logger=logger,
         loss_fn=loss_fn,
+        grid_config=grid_config,
         plot_preset=args.plot,
     )
 

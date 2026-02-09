@@ -5,14 +5,22 @@ Submodules:
 - test_results: Evaluation metrics, sample collection, and performance measurement
 """
 
-from testing.test_results import collect_samples, test_high_res, test_model
+from testing.test_results import (
+    collect_samples,
+    eval_high_res,
+    eval_inference_time,
+    eval_model,
+    test_model,
+)
 from testing.test_running import run_inference, run_profiler, run_sanity_check
 
 __all__ = [
     "collect_samples",
+    "eval_high_res",
+    "eval_inference_time",
+    "eval_model",
     "run_inference",
     "run_profiler",
     "run_sanity_check",
-    "test_high_res",
     "test_model",
 ]
