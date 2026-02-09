@@ -1,20 +1,17 @@
-"""W&B-specific trajectory plotting functions.
+"""Trajectory plotting functions for the PLOTS registry.
 
-This module provides trajectory plotting functions designed for W&B logging
-and compatible with the PLOTS registry in plotter.py.
+This module provides trajectory plotting functions compatible with the
+PLOTS registry in plotter.py.
 
 Plot functions compatible with the PLOTS registry:
-- plot_grid_with_trajectory_wandb: GT grid with predicted trajectory overlay
-- plot_trajectory_vs_analytical_wandb: Predicted vs RH trajectories
-- plot_existence_wandb: Existence probability heatmap
-- plot_grid_with_acceleration_wandb: Grid + trajectory alongside acceleration grid
-
-Other trajectory plotting functions:
-- plot_trajectory_on_grid_wandb: Legacy trajectory on grid (uses detailed API)
-- plot_trajectory_wandb: Legacy trajectory plots (uses detailed API)
+- plot_grid_with_trajectory_existence: GT grid with predicted trajectory overlay
+- plot_trajectory_vs_analytical: Predicted vs RH trajectories
+- plot_existence: Existence probability heatmap
+- plot_grid_with_acceleration: Grid + trajectory alongside acceleration grid
+- plot_gt_traj: GT grid + trajectories (no existence modulation)
 
 All functions return list[tuple[str, Figure]] of (log_key, figure) pairs.
-Logging to W&B is handled by plot_wandb() in plotter.py.
+Logging is handled by plot() in plotter.py.
 """
 
 from __future__ import annotations
@@ -32,7 +29,7 @@ from .trajectory_plots import (
 )
 
 
-def plot_trajectory_on_grid_wandb(
+def plot_trajectory_on_grid_multi(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:
@@ -85,7 +82,7 @@ def plot_trajectory_on_grid_wandb(
     return figures
 
 
-def plot_trajectory_wandb(
+def plot_trajectory(
     traj_data: dict,
     grid_config: dict,  # noqa: ARG001
 ) -> list[tuple[str, Figure]]:
@@ -212,7 +209,7 @@ def plot_trajectory_wandb(
     return figures
 
 
-def plot_grid_with_trajectory_existence_wandb(
+def plot_grid_with_trajectory_existence(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:
@@ -292,7 +289,7 @@ def plot_grid_with_trajectory_existence_wandb(
     return figures
 
 
-def plot_trajectory_vs_analytical_wandb(
+def plot_trajectory_vs_analytical(
     traj_data: dict,
     grid_config: dict,  # noqa: ARG001
 ) -> list[tuple[str, Figure]]:
@@ -364,7 +361,7 @@ def plot_trajectory_vs_analytical_wandb(
     return figures
 
 
-def plot_existence_wandb(
+def plot_existence(
     traj_data: dict,
     grid_config: dict,  # noqa: ARG001
 ) -> list[tuple[str, Figure]]:
@@ -421,7 +418,7 @@ def plot_gt_traj(
 ) -> list[tuple[str, Figure]]:
     """Plot ground truth grid with predicted trajectory overlay (no existence).
 
-    Like plot_grid_with_trajectory_existence_wandb but plots full trajectories
+    Like plot_grid_with_trajectory_existence but plots full trajectories
     without using existence probabilities to modulate alpha.
 
     Args:
@@ -488,7 +485,7 @@ def plot_gt_traj(
     return figures
 
 
-def plot_grid_with_acceleration_wandb(
+def plot_grid_with_acceleration(
     traj_data: dict,
     grid_config: dict,
     accel_threshold: float = 1.0,

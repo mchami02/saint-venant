@@ -4,9 +4,9 @@ This module provides visualization functions specifically for the HybridDeepONet
 including region assignments and comprehensive hybrid predictions.
 
 Includes plot functions compatible with the PLOTS registry in plotter.py:
-- plot_prediction_with_trajectory_wandb: Predicted grid + trajectory overlay
-- plot_mse_error_wandb: MSE error heatmap
-- plot_region_weights_wandb: Region weight visualization
+- plot_prediction_with_trajectory_existence: Predicted grid + trajectory overlay
+- plot_mse_error: MSE error heatmap
+- plot_region_weights: Region weight visualization
 """
 
 from __future__ import annotations
@@ -246,7 +246,7 @@ def _create_comparison_table(
     wandb.log(log_dict)
 
 
-def plot_hybrid_predictions_wandb(
+def plot_hybrid_predictions(
     traj_data: dict,
     grid_config: dict,
     logger,
@@ -390,7 +390,7 @@ def plot_hybrid_predictions_wandb(
     plt.close(fig)
 
 
-def plot_prediction_with_trajectory_existence_wandb(
+def plot_prediction_with_trajectory_existence(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:
@@ -474,7 +474,7 @@ def plot_pred_traj(
 ) -> list[tuple[str, Figure]]:
     """Plot predicted grid with trajectory overlay (no existence).
 
-    Like plot_prediction_with_trajectory_existence_wandb but plots full
+    Like plot_prediction_with_trajectory_existence but plots full
     trajectories without filtering by existence probability.
 
     Args:
@@ -545,7 +545,7 @@ def plot_pred_traj(
     return figures
 
 
-def plot_mse_error_wandb(
+def plot_mse_error(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:
@@ -597,7 +597,7 @@ def plot_mse_error_wandb(
     return figures
 
 
-def plot_region_weights_wandb(
+def plot_region_weights(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:

@@ -16,7 +16,7 @@ from logger import WandbLogger, init_logger, log_values
 from loss import LOSS_PRESETS, LOSSES, get_loss
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
-from plotter import PLOT_PRESETS, plot_wandb
+from plotter import PLOT_PRESETS, plot
 from testing import (
     collect_samples,
     run_profiler,
@@ -347,11 +347,11 @@ def train_model(
 
         # Plot every 5 epochs
         if (epoch + 1) % 5 == 0:
-            plot_wandb(
+            plot(
                 train_samples, grid_config, logger, epoch + 1,
                 mode="train", preset=args.plot,
             )
-            plot_wandb(
+            plot(
                 val_samples, grid_config, logger, epoch + 1,
                 mode="val", preset=args.plot,
             )

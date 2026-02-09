@@ -3,41 +3,43 @@
 This module provides:
 - PLOTS: Registry of available plot functions
 - PLOT_PRESETS: Pre-configured plot combinations for common use cases
-- plot_wandb(): Main entry point that runs plots based on preset
+- plot(): Main entry point that runs plots based on preset
 
 Each plot function signature:
     fn(traj_data, grid_config) -> list[tuple[str, Figure]]
 
 Returns a list of (log_key, figure) pairs. Logging and cleanup is handled
-centrally by plot_wandb().
+centrally by plot().
 """
 
 import matplotlib.pyplot as plt
 from plotting import (
     _log_figure,
-    plot_existence_wandb,
-    plot_grid_with_acceleration_wandb,
-    plot_grid_with_trajectory_existence_wandb,
-    plot_ground_truth_wandb,
+    plot_existence,
+    plot_grid_with_acceleration,
+    plot_grid_with_trajectory_existence,
+    plot_ground_truth,
     plot_gt_traj,
-    plot_mse_error_wandb,
+    plot_mse_error,
+    plot_pred,
     plot_pred_traj,
-    plot_prediction_with_trajectory_existence_wandb,
-    plot_region_weights_wandb,
-    plot_trajectory_vs_analytical_wandb,
+    plot_prediction_with_trajectory_existence,
+    plot_region_weights,
+    plot_trajectory_vs_analytical,
 )
 
 # Registry of individual plot functions
 # Each function signature: fn(traj_data, grid_config) -> list[tuple[str, Figure]]
 PLOTS: dict[str, callable] = {
-    "ground_truth": plot_ground_truth_wandb,
-    "grid_with_trajectory_existence": plot_grid_with_trajectory_existence_wandb,
-    "grid_with_acceleration": plot_grid_with_acceleration_wandb,
-    "trajectory_vs_analytical": plot_trajectory_vs_analytical_wandb,
-    "existence": plot_existence_wandb,
-    "prediction_with_trajectory_existence": plot_prediction_with_trajectory_existence_wandb,
-    "mse_error": plot_mse_error_wandb,
-    "region_weights": plot_region_weights_wandb,
+    "ground_truth": plot_ground_truth,
+    "pred": plot_pred,
+    "grid_with_trajectory_existence": plot_grid_with_trajectory_existence,
+    "grid_with_acceleration": plot_grid_with_acceleration,
+    "trajectory_vs_analytical": plot_trajectory_vs_analytical,
+    "existence": plot_existence,
+    "prediction_with_trajectory_existence": plot_prediction_with_trajectory_existence,
+    "mse_error": plot_mse_error,
+    "region_weights": plot_region_weights,
     "gt_traj": plot_gt_traj,
     "pred_traj": plot_pred_traj,
 }
@@ -50,28 +52,27 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "grid_with_acceleration",  # Shows acceleration magnitude (shock locations)
     ],
     "hybrid": [
+        "pred",  # Predicted grid heatmap
         "prediction_with_trajectory_existence",  # Uses predicted grid as background
         "mse_error",
         "existence",
         "region_weights",
     ],
     "traj_net": [
-        "gt_traj",  # Uses predicted grid as background
+        "gt_traj",
         "pred_traj",
+        "pred",  # Predicted grid heatmap
         "mse_error",
     ],
-    "fno": [
+    "grid_only": [
         "ground_truth",
-        "mse_error",
-    ],
-    "deeponet": [
-        "ground_truth",
+        "pred",  # Predicted grid heatmap
         "mse_error",
     ],
 }
 
 
-def plot_wandb(
+def plot(
     traj_data: dict,
     grid_config: dict,
     logger,
@@ -82,7 +83,7 @@ def plot_wandb(
     """Main plotting entry point.
 
     Calls plot functions from the registry, then logs the returned figures
-    to W&B and closes them.
+    and closes them.
 
     Args:
         traj_data: Data dict from sample_trajectory_predictions().

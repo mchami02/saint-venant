@@ -10,7 +10,7 @@ import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger
 from metrics import compute_metrics
-from plotter import plot_wandb
+from plotter import plot
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -151,7 +151,7 @@ def test_model(
         logger.log_summary({f"{mode}/metrics/{k}": v for k, v in avg_metrics.items()})
 
         samples = collect_samples(pred, batch_input, batch_target, num_samples=num_plots)
-        plot_wandb(
+        plot(
             samples, grid_config, logger, epoch=None, mode=mode, preset=plot_preset
         )
 

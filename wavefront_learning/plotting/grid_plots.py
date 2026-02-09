@@ -4,7 +4,8 @@ This module provides functions for comparing ground truth vs prediction grids,
 error maps, and W&B logging of grid visualizations.
 
 Includes plot functions compatible with the PLOTS registry in plotter.py:
-- plot_ground_truth_wandb: Ground truth grid heatmaps
+- plot_ground_truth: Ground truth grid heatmaps
+- plot_pred: Predicted grid heatmaps
 """
 
 from __future__ import annotations
@@ -143,7 +144,7 @@ def plot_error_map(
     return fig
 
 
-def plot_comparison_wandb(
+def plot_comparison(
     ground_truth: np.ndarray,
     prediction: np.ndarray,
     grid_config: dict,
@@ -353,7 +354,7 @@ def plot_grid_comparison(
     return fig
 
 
-def plot_ground_truth_wandb(
+def plot_ground_truth(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:
@@ -394,5 +395,53 @@ def plot_ground_truth_wandb(
         plt.colorbar(im, ax=ax, label="Density")
         plt.tight_layout()
         figures.append((f"ground_truth_sample_{b + 1}", fig))
+
+    return figures
+
+
+def plot_pred(
+    traj_data: dict,
+    grid_config: dict,
+) -> list[tuple[str, Figure]]:
+    """Plot predicted grid heatmaps.
+
+    Args:
+        traj_data: Dict containing 'output_grid' of shape (B, nt, nx).
+        grid_config: Dict with {nx, nt, dx, dt}.
+
+    Returns:
+        List of (log_key, figure) pairs.
+    """
+    if "output_grid" not in traj_data:
+        return []
+
+    output_grid = traj_data["output_grid"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+    extent = _get_extent(nx, nt, dx, dt)
+
+    B = output_grid.shape[0]
+    figures = []
+    for b in range(min(B, 3)):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.imshow(
+            output_grid[b],
+            extent=extent,
+            aspect="auto",
+            origin="lower",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+        )
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(f"Prediction (Sample {b + 1})")
+        plt.colorbar(im, ax=ax, label="Density")
+        plt.tight_layout()
+        figures.append((f"pred_sample_{b + 1}", fig))
 
     return figures
