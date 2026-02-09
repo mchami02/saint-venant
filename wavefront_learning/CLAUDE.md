@@ -124,13 +124,24 @@ LOSSES = {
 
 ## Adding a New Model
 
-1. Implement your model class inheriting from `BaseWavefrontModel` in `models/`
+1. Implement your model class in `models/` with a `build_*` factory function
 2. Register it in `model.py`:
+   - Add to `MODELS` dict (name → builder function)
+   - Add to `MODEL_TRANSFORM` dict (name → transform string or `None`)
+3. Add a loss preset in `loss.py` `LOSS_PRESETS` dict
+4. Add a plot preset in `plotter.py` `PLOT_PRESETS` dict
+
 ```python
-from models.my_model import MyModel
-MODELS = {
-    "my_model": MyModel,
-}
+# model.py
+from models.my_model import build_my_model
+MODELS = { ..., "MyModel": build_my_model }
+MODEL_TRANSFORM = { ..., "MyModel": None }  # or "ToGridInput", "FlattenDiscontinuities"
+
+# loss.py
+LOSS_PRESETS = { ..., "my_model": [("mse", 1.0), ("ic", 10.0)] }
+
+# plotter.py
+PLOT_PRESETS = { ..., "my_model": ["ground_truth", "mse_error"] }
 ```
 
 ## Code Style Guidelines

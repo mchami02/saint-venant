@@ -64,6 +64,10 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "ground_truth",
         "mse_error",
     ],
+    "deeponet": [
+        "ground_truth",
+        "mse_error",
+    ],
 }
 
 

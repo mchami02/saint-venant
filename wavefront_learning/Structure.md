@@ -33,6 +33,7 @@ wavefront_learning/
 │   ├── region_trunk.py            # SpaceTimeEncoder, RegionTrunk, RegionTrunkSet
 │   ├── hybrid_deeponet.py         # HybridDeepONet (trajectory + grid prediction)
 │   ├── traj_deeponet.py           # TrajDeepONet (trajectory-conditioned single trunk)
+│   ├── deeponet.py                # Classic DeepONet baseline (branch-trunk dot product)
 │   └── fno_wrapper.py             # FNO wrapper (neuralop FNO with dict output)
 ├── losses/
 │   ├── __init__.py                # Package exports all loss classes
@@ -83,6 +84,15 @@ wavefront_learning/
   - Single BoundaryConditionedTrunk: takes (t, x, x_left, x_right) + branch
   - No GridAssembler: trunk directly outputs density
   - Output: `{positions, output_grid}`
+
+- **DeepONet** (`models/deeponet.py`): Classic DeepONet baseline
+  - Branch: MLP encoding flattened IC at t=0
+  - Trunk: MLP encoding (t, x) coordinate pairs
+  - Dot product fusion + learned bias
+  - Uses `ToGridInput` transform: IC reconstructed on grid + coordinate channels
+  - Input: tensor `(B, 3, nt, nx)` — [ic_masked, t_coords, x_coords]
+  - Output: `{output_grid: (B, 1, nt, nx)}`
+  - Default: hidden_dim=128, latent_dim=64, 4 layers each
 
 - **FNO** (`models/fno_wrapper.py`): Fourier Neural Operator baseline
   - Wraps `neuralop.models.FNO` with dict output interface
@@ -381,6 +391,13 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
 cd wavefront_learning
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
   --model HybridDeepONet --loss hybrid --epochs 100 --n_samples 1000
+```
+
+### Training DeepONet (grid baseline)
+```bash
+cd wavefront_learning
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
+  --model DeepONet --loss deeponet --epochs 100 --n_samples 1000
 ```
 
 ### Training FNO (grid baseline)

@@ -68,6 +68,9 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "fno": [
         ("mse", 1.0),
     ],
+    "deeponet": [
+        ("mse", 1.0),
+    ],
 }
 
 

@@ -593,6 +593,95 @@ branch_emb (B, h) ──► Bilinear Fusion + Skip Paths
 
 ---
 
+### DeepONet (Baseline)
+
+**Location**: `models/deeponet.py`
+
+Classic DeepONet architecture used as a baseline. Branch network encodes the initial condition, trunk network encodes query coordinates, and their dot product produces the output.
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        DeepONet                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Input: (B, 3, nt, nx)                                          │
+│  channels = [ic_masked, t_coords, x_coords]                     │
+│                                                                  │
+│  IC at t=0: (B, nx)         Coordinates: (B, nt*nx, 2)          │
+│         │                              │                         │
+│         ▼                              ▼                         │
+│  ┌──────────────┐              ┌──────────────┐                  │
+│  │ Branch MLP   │              │  Trunk MLP   │                  │
+│  │ nx → hidden  │              │  2 → hidden  │                  │
+│  │ → latent_dim │              │  → latent_dim│                  │
+│  └──────────────┘              └──────────────┘                  │
+│         │                              │                         │
+│         │  (B, latent_dim)             │  (B, nt*nx, latent_dim) │
+│         └──────────────┬───────────────┘                         │
+│                        │                                         │
+│                        ▼                                         │
+│              Dot Product + Bias                                  │
+│              Σ_p branch_p · trunk_p + b                          │
+│                        │                                         │
+│                        ▼                                         │
+│              Reshape to (B, 1, nt, nx)                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Branch Network
+
+MLP that encodes the initial condition:
+
+$$\text{Branch}: \mathbb{R}^{n_x} \to \mathbb{R}^{p}$$
+
+```
+IC (B, nx) → [Linear + GELU] × L → Linear → (B, p)
+```
+
+where $L$ = `num_branch_layers` (default: 4), $p$ = `latent_dim` (default: 64).
+
+#### Trunk Network
+
+MLP that encodes query coordinates:
+
+$$\text{Trunk}: \mathbb{R}^{2} \to \mathbb{R}^{p}$$
+
+```
+(t, x) (B, nt*nx, 2) → [Linear + GELU] × L → Linear → (B, nt*nx, p)
+```
+
+where $L$ = `num_trunk_layers` (default: 4).
+
+#### Output
+
+$$\rho(t, x) = \sum_{k=1}^{p} b_k \cdot \tau_k(t, x) + \beta$$
+
+where $b_k$ is the $k$-th branch output, $\tau_k$ is the $k$-th trunk output, and $\beta$ is a learned bias.
+
+#### Input/Output Format
+
+**Input**: tensor $(B, 3, n_t, n_x)$ from `ToGridInputTransform`
+- Channel 0: IC masked (IC at t=0, -1 elsewhere)
+- Channel 1: $t$ coordinates
+- Channel 2: $x$ coordinates
+
+**Output** (dictionary):
+- `output_grid`: $(B, 1, n_t, n_x)$ - predicted solution
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 128 | Hidden layer width |
+| `latent_dim` | 64 | Dot-product dimension |
+| `num_branch_layers` | 4 | Branch MLP depth |
+| `num_trunk_layers` | 4 | Trunk MLP depth |
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -1105,6 +1194,7 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 | ShockTrajectoryNet | Discontinuities $(B, D, 3)$ | Positions, Existence $(B, D, T)$ | Pure trajectory prediction |
 | HybridDeepONet | Discontinuities + coordinates | Trajectories + Full grid | Combined trajectory + solution |
 | TrajDeepONet | Discontinuities + coordinates | Positions + Full grid | Boundary-conditioned single trunk |
+| DeepONet | Grid tensor $(B, 3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
