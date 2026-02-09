@@ -5,6 +5,7 @@ from argparse import Namespace
 import torch
 import torch.nn as nn
 from models.deeponet import build_deeponet
+from models.encoder_decoder import build_encoder_decoder, build_encoder_decoder_cross
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.shock_trajectory_net import build_shock_net
@@ -18,6 +19,8 @@ MODELS = {
     "NoTrajDeepONet": build_no_traj_deeponet,
     "FNO": build_fno,
     "DeepONet": build_deeponet,
+    "EncoderDecoder": build_encoder_decoder,
+    "EncoderDecoderCross": build_encoder_decoder_cross,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -28,7 +31,10 @@ MODEL_TRANSFORM = {
     "NoTrajDeepONet": None,
     "FNO": "ToGridInput",
     "DeepONet": "ToGridInput",
+    "EncoderDecoder": "ToGridInput",
+    "EncoderDecoderCross": "ToGridInput",
 }
+
 
 def get_model(model_name: str, args: dict) -> nn.Module:
     """Create a model instance based on name and arguments.

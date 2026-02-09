@@ -42,7 +42,7 @@ def build_fno(args: dict) -> FNOWrapper:
     return FNOWrapper(
         n_modes=(n_modes_t, n_modes_x),
         hidden_channels=hidden_channels,
-        in_channels=1,
+        in_channels=3,
         out_channels=1,
         n_layers=n_layers,
     )

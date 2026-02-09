@@ -7,13 +7,17 @@ This module contains reusable components used by main models:
 - Regions: RegionTrunk, RegionTrunkSet
 - Assemblers: GridAssembler
 - Base class: BaseWavefrontModel
+- Encoder-Decoder components: Encoder, AxialDecoder, CrossDecoder
 """
 
 from .assemblers import GridAssembler
+from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
 from .blocks import ResidualBlock
+from .cross_decoder import CrossDecoder
 from .decoders import TrajectoryDecoder
-from .encoders import (
+from .transformer_encoder import Encoder
+from .feature_encoders import (
     DiscontinuityEncoder,
     FourierFeatures,
     SpaceTimeEncoder,
@@ -38,4 +42,8 @@ __all__ = [
     "RegionTrunkSet",
     # Assemblers
     "GridAssembler",
+    # Encoder-Decoder components
+    "Encoder",
+    "AxialDecoder",
+    "CrossDecoder",
 ]

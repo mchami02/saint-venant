@@ -34,7 +34,20 @@ wavefront_learning/
 │   ├── hybrid_deeponet.py         # HybridDeepONet (trajectory + grid prediction)
 │   ├── traj_deeponet.py           # TrajDeepONet (trajectory-conditioned single trunk)
 │   ├── deeponet.py                # Classic DeepONet baseline (branch-trunk dot product)
-│   └── fno_wrapper.py             # FNO wrapper (neuralop FNO with dict output)
+│   ├── fno_wrapper.py             # FNO wrapper (neuralop FNO with dict output)
+│   ├── encoder_decoder.py         # EncoderDecoder (transformer encoder + axial/cross decoder)
+│   ├── base/
+│   │   ├── __init__.py            # Re-exports all base components
+│   │   ├── base_model.py          # BaseWavefrontModel abstract class
+│   │   ├── feature_encoders.py     # FourierFeatures, TimeEncoder, DiscontinuityEncoder, SpaceTimeEncoder
+│   │   ├── decoders.py            # TrajectoryDecoder
+│   │   ├── blocks.py              # ResidualBlock
+│   │   ├── regions.py             # RegionTrunk, RegionTrunkSet
+│   │   ├── assemblers.py          # GridAssembler
+│   │   ├── transformer_encoder.py  # Tokenizer + Transformer Encoder (used by EncoderDecoder)
+│   │   ├── axial_decoder.py       # FourierTokenizer + AxialAttention + AxialDecoder
+│   │   ├── cross_decoder.py       # CrossDecoderLayer + CrossDecoder w/ Nadaraya-Watson
+│   │   └── shock_gnn.py           # GatedMPNNLayer + ShockGNN correction (optional, needs torch_geometric)
 ├── losses/
 │   ├── __init__.py                # Package exports all loss classes
 │   ├── base.py                    # BaseLoss abstract class (unified interface)
@@ -100,6 +113,16 @@ wavefront_learning/
   - Input: tensor `(B, 3, nt, nx)` — [ic_masked, t_coords, x_coords]
   - Output: `{output_grid: (B, 1, nt, nx)}`
   - Default: hidden_channels=16, n_layers=2, ~43k parameters
+
+- **EncoderDecoder** (`models/encoder_decoder.py`): Transformer encoder-decoder
+  - Encoder: Transformer processing masked IC conditions (non-masked grid points)
+  - Decoder: Axial attention (factored time+space) or Cross attention (Nadaraya-Watson latent grid)
+  - Optional ShockGNN correction (requires torch_geometric, disabled by default)
+  - Uses `ToGridInput` transform: IC reconstructed on grid + coordinate channels
+  - Input: tensor `(B, 3, nt, nx)` — [ic_masked, t_coords, x_coords]
+  - Output: `{output_grid: (B, 1, nt, nx)}`
+  - Variants: `EncoderDecoder` (axial), `EncoderDecoderCross` (cross)
+  - Default: hidden_dim=64, 2 encoder layers, 2 decoder layers
 
 ### Model Components
 - **SpaceTimeEncoder** (`models/region_trunk.py`): Encodes (t, x) coordinates using Fourier features

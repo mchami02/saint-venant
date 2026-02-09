@@ -147,6 +147,7 @@ PLOT_PRESETS = { ..., "my_model": ["ground_truth", "mse_error"] }
 ## Code Style Guidelines
 
 - **File size limit**: Keep files under 600 lines. If a file grows beyond this, split it into logical modules.
+- **Model file placement**: Only standalone models (with their own `build_*` factory, registered in `MODELS`) belong directly in `models/`. All sub-modules, building blocks, and shared components must go in `models/base/`.
 
 ## Dependencies
 

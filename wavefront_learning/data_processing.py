@@ -65,6 +65,56 @@ def get_nfv_dataset(
     return grids
 
 
+def clean_piecewise_constant_ic(ic_grid: np.ndarray, max_passes: int = 1) -> np.ndarray:
+    """Remove discretization artifacts from a piecewise constant initial condition.
+
+    When a piecewise constant function with continuous breakpoints is
+    discretized onto a grid, cells at breakpoint locations may receive
+    intermediate values. This function removes such isolated cells by
+    replacing them with their nearest-valued neighbor.
+
+    Performs a left-to-right sweep: each interior cell that differs from
+    both neighbors is replaced by the numerically closest neighbor. The
+    sweep cascades, so adjacent artifact cells are also cleaned.
+
+    Args:
+        ic_grid: 1D array of shape (nx,). Modified in place.
+        max_passes: Number of cleaning passes. Default 1 suffices for
+            typical 1-2 cell artifacts. Set to 0 to run until convergence.
+
+    Returns:
+        The same array (modified in place).
+    """
+    n = len(ic_grid)
+    if n <= 2:
+        return ic_grid
+
+    pass_count = 0
+    run_until_convergence = max_passes <= 0
+
+    while True:
+        changed = False
+        for i in range(1, n - 1):
+            left_val = ic_grid[i - 1]
+            curr_val = ic_grid[i]
+            right_val = ic_grid[i + 1]
+
+            if curr_val != left_val and curr_val != right_val:
+                if abs(curr_val - left_val) <= abs(curr_val - right_val):
+                    ic_grid[i] = left_val
+                else:
+                    ic_grid[i] = right_val
+                changed = True
+
+        pass_count += 1
+        if not run_until_convergence and pass_count >= max_passes:
+            break
+        if run_until_convergence and not changed:
+            break
+
+    return ic_grid
+
+
 def extract_discontinuities_from_grid(
     ic_grid: np.ndarray,
     dx: float,
@@ -207,16 +257,8 @@ def preprocess_wavefront_data(
         # Extract IC from first time step
         ic_grid = grids[idx, 0, :].copy()
 
-        # Clean IC: remove isolated cells (same as ICCleaner in operator_learning)
-        for i in range(1, len(ic_grid) - 1):
-            left_val = ic_grid[i - 1]
-            curr_val = ic_grid[i]
-            right_val = ic_grid[i + 1]
-            if curr_val != left_val and curr_val != right_val:
-                if abs(curr_val - left_val) <= abs(curr_val - right_val):
-                    ic_grid[i] = left_val
-                else:
-                    ic_grid[i] = right_val
+        # Clean IC: remove discretization artifacts at breakpoints
+        clean_piecewise_constant_ic(ic_grid)
 
         # Extract discontinuity representation
         discontinuities, disc_mask = extract_discontinuities_from_grid(

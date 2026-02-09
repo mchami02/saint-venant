@@ -120,8 +120,8 @@ class ToGridInputTransform:
         ic_masked = ic_expanded.clone()
         ic_masked[:, 1:, :] = -1
 
-        # Stack: [ic_masked, t_coords, x_coords]
-        full_input = ic_masked
+        # Stack: [ic_masked, t_coords, x_coords] -> (3, nt, nx)
+        full_input = torch.cat([ic_masked, t_coords, x_coords], dim=0)
 
         return full_input, target_grid
 
