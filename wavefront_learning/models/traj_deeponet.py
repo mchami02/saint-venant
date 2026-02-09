@@ -175,14 +175,17 @@ class BoundaryConditionedTrunk(nn.Module):
         num_layers: int = 2,
         num_res_blocks: int = 2,
         dropout: float = 0.1,
+        with_boundaries: bool = True,
     ):
         super().__init__()
+        self.with_boundaries = with_boundaries
 
         self.fourier_t = FourierFeatures(num_frequencies=num_frequencies_t)
         self.fourier_x = FourierFeatures(num_frequencies=num_frequencies_x)
 
-        # Input: fourier(t) + fourier(x) + fourier(x_left) + fourier(x_right)
-        input_dim = self.fourier_t.output_dim + 3 * self.fourier_x.output_dim
+        # Input: fourier(t) + fourier(x) [+ fourier(x_left) + fourier(x_right)]
+        num_spatial = 3 if with_boundaries else 1
+        input_dim = self.fourier_t.output_dim + num_spatial * self.fourier_x.output_dim
 
         layers = []
         in_dim = input_dim
@@ -217,8 +220,8 @@ class BoundaryConditionedTrunk(nn.Module):
         branch_emb: torch.Tensor,
         t_coords: torch.Tensor,
         x_coords: torch.Tensor,
-        left_bound: torch.Tensor,
-        right_bound: torch.Tensor,
+        left_bound: torch.Tensor | None = None,
+        right_bound: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Predict density conditioned on boundary positions.
 
@@ -226,8 +229,8 @@ class BoundaryConditionedTrunk(nn.Module):
             branch_emb: Pooled branch embedding (B, branch_dim).
             t_coords: Time coordinates (B, nt, nx).
             x_coords: Space coordinates (B, nt, nx).
-            left_bound: Left boundary positions (B, nt, nx).
-            right_bound: Right boundary positions (B, nt, nx).
+            left_bound: Left boundary positions (B, nt, nx). Required if with_boundaries=True.
+            right_bound: Right boundary positions (B, nt, nx). Required if with_boundaries=True.
 
         Returns:
             Predicted density (B, nt, nx) in [0, 1].
@@ -237,17 +240,19 @@ class BoundaryConditionedTrunk(nn.Module):
         # Flatten to (B*nt*nx,)
         t_flat = t_coords.reshape(-1)
         x_flat = x_coords.reshape(-1)
-        left_flat = left_bound.reshape(-1)
-        right_flat = right_bound.reshape(-1)
 
-        # Fourier encode (shared spatial encoder for x, x_left, x_right)
+        # Fourier encode
         t_enc = self.fourier_t(t_flat)
         x_enc = self.fourier_x(x_flat)
-        left_enc = self.fourier_x(left_flat)
-        right_enc = self.fourier_x(right_flat)
 
-        # Concatenate and project
-        coord_features = torch.cat([t_enc, x_enc, left_enc, right_enc], dim=-1)
+        if self.with_boundaries:
+            left_flat = left_bound.reshape(-1)
+            right_flat = right_bound.reshape(-1)
+            left_enc = self.fourier_x(left_flat)
+            right_enc = self.fourier_x(right_flat)
+            coord_features = torch.cat([t_enc, x_enc, left_enc, right_enc], dim=-1)
+        else:
+            coord_features = torch.cat([t_enc, x_enc], dim=-1)
         coord_emb = self.coord_mlp(coord_features)  # (B*nt*nx, hidden_dim)
 
         # Expand branch for all grid points
@@ -296,9 +301,11 @@ class TrajDeepONet(nn.Module):
         num_coord_layers: int = 2,
         num_res_blocks: int = 2,
         dropout: float = 0.1,
+        with_traj: bool = True,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
+        self.with_traj = with_traj
 
         # Branch: encode discontinuities
         self.branch = DiscontinuityEncoder(
@@ -310,23 +317,24 @@ class TrajDeepONet(nn.Module):
             dropout=dropout,
         )
 
-        # Trajectory: time encoder + position decoder
-        self.time_encoder = TimeEncoder(
-            hidden_dim=hidden_dim,
-            output_dim=hidden_dim,
-            num_frequencies=num_frequencies_t,
-            num_layers=num_time_layers,
-        )
+        # Trajectory: time encoder + position decoder (only when with_traj)
+        if self.with_traj:
+            self.time_encoder = TimeEncoder(
+                hidden_dim=hidden_dim,
+                output_dim=hidden_dim,
+                num_frequencies=num_frequencies_t,
+                num_layers=num_time_layers,
+            )
 
-        self.position_decoder = PositionDecoder(
-            branch_dim=hidden_dim,
-            trunk_dim=hidden_dim,
-            hidden_dim=hidden_dim,
-            num_res_blocks=num_res_blocks,
-            dropout=dropout,
-        )
+            self.position_decoder = PositionDecoder(
+                branch_dim=hidden_dim,
+                trunk_dim=hidden_dim,
+                hidden_dim=hidden_dim,
+                num_res_blocks=num_res_blocks,
+                dropout=dropout,
+            )
 
-        # Single trunk conditioned on boundaries
+        # Single trunk (conditioned on boundaries only when with_traj)
         self.trunk = BoundaryConditionedTrunk(
             branch_dim=hidden_dim,
             hidden_dim=hidden_dim,
@@ -335,6 +343,7 @@ class TrajDeepONet(nn.Module):
             num_layers=num_coord_layers,
             num_res_blocks=num_res_blocks,
             dropout=dropout,
+            with_boundaries=with_traj,
         )
 
     def forward(
@@ -369,25 +378,36 @@ class TrajDeepONet(nn.Module):
         n_valid = disc_mask.sum(dim=1, keepdim=True).clamp(min=1)  # (B, 1)
         branch_pooled = branch_sum / n_valid  # (B, hidden)
 
-        # === TRAJECTORY ===
-        query_times = t_coords[:, :, 0]  # (B, nt)
-        trunk_emb = self.time_encoder(query_times)  # (B, T, hidden)
-        positions = self.position_decoder(branch_emb, trunk_emb, disc_mask)  # (B, D, T)
+        if self.with_traj:
+            # === TRAJECTORY ===
+            query_times = t_coords[:, :, 0]  # (B, nt)
+            trunk_emb = self.time_encoder(query_times)  # (B, T, hidden)
+            positions = self.position_decoder(
+                branch_emb, trunk_emb, disc_mask
+            )  # (B, D, T)
 
-        # === BOUNDARIES ===
-        left_bound, right_bound = compute_boundaries(positions, x_coords, disc_mask)
+            # === BOUNDARIES ===
+            left_bound, right_bound = compute_boundaries(
+                positions, x_coords, disc_mask
+            )
 
-        # === TRUNK ===
-        density = self.trunk(
-            branch_pooled, t_coords, x_coords, left_bound, right_bound
-        )  # (B, nt, nx)
+            # === TRUNK ===
+            density = self.trunk(
+                branch_pooled, t_coords, x_coords, left_bound, right_bound
+            )  # (B, nt, nx)
 
+            output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
+
+            return {
+                "positions": positions,
+                "output_grid": output_grid,
+            }
+
+        # === TRUNK (no trajectory conditioning) ===
+        density = self.trunk(branch_pooled, t_coords, x_coords)  # (B, nt, nx)
         output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
 
-        return {
-            "positions": positions,
-            "output_grid": output_grid,
-        }
+        return {"output_grid": output_grid}
 
     def count_parameters(self) -> int:
         """Count trainable parameters."""
@@ -422,4 +442,37 @@ def build_traj_deeponet(args: dict) -> TrajDeepONet:
         num_coord_layers=args.get("num_coord_layers", 2),
         num_res_blocks=args.get("num_res_blocks", 2),
         dropout=args.get("dropout", 0.05),
+    )
+
+
+def build_no_traj_deeponet(args: dict) -> TrajDeepONet:
+    """Build TrajDeepONet without trajectory conditioning (NoTrajDeepONet).
+
+    Same architecture as TrajDeepONet but with trajectory prediction and
+    boundary conditioning disabled. The trunk operates on (t, x) only.
+
+    Args:
+        args: Configuration dictionary with optional keys:
+            - hidden_dim (default 32)
+            - num_frequencies_t (default 8)
+            - num_frequencies_x (default 8)
+            - num_disc_frequencies (default 8)
+            - num_disc_layers (default 2)
+            - num_coord_layers (default 2)
+            - num_res_blocks (default 2)
+            - dropout (default 0.05)
+
+    Returns:
+        Configured TrajDeepONet instance with with_traj=False.
+    """
+    return TrajDeepONet(
+        hidden_dim=args.get("hidden_dim", 32),
+        num_frequencies_t=args.get("num_frequencies_t", 8),
+        num_frequencies_x=args.get("num_frequencies_x", 8),
+        num_disc_frequencies=args.get("num_disc_frequencies", 8),
+        num_disc_layers=args.get("num_disc_layers", 2),
+        num_coord_layers=args.get("num_coord_layers", 2),
+        num_res_blocks=args.get("num_res_blocks", 2),
+        dropout=args.get("dropout", 0.05),
+        with_traj=False,
     )
