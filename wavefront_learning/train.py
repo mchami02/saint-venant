@@ -71,6 +71,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nt", type=int, default=250, help="Time steps")
     parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
     parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
+    parser.add_argument(
+        "--only_shocks", action="store_true", help="Generate only shock waves (no rarefactions)"
+    )
 
     # Output
     parser.add_argument(
@@ -418,6 +421,7 @@ def main():
         n_samples=args.n_samples,
         grid_config=grid_config,
         model_name=args.model,
+        only_shocks=args.only_shocks,
     )
 
     train_loader = DataLoader(

@@ -290,7 +290,7 @@ def get_wavefront_data(
     np.random.seed(random_seed)
 
     # Try to download from HuggingFace (shared mchami/grids repo)
-    grids = download_grids(nx, nt, dx, dt, max_steps)
+    grids = download_grids(nx, nt, dx, dt, max_steps, only_shocks)
 
     if grids is not None and len(grids) >= n_samples:
         print(f"Using cached data from mchami/grids ({len(grids)} samples available)")
@@ -303,7 +303,7 @@ def get_wavefront_data(
         # Upload to HuggingFace for caching
         if upload_to_hf:
             try:
-                upload_grids(grids, nx, nt, dx, dt, max_steps)
+                upload_grids(grids, nx, nt, dx, dt, max_steps, only_shocks)
             except Exception as e:
                 print(f"Failed to upload to HuggingFace: {e}")
 
