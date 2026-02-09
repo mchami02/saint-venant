@@ -202,6 +202,11 @@ class PDEShockResidualLoss(BaseLoss):
         # Min distance across all discontinuities: (B, nt-2, nx-2)
         min_dist = dist.min(dim=1).values
 
+        # Where no active discontinuity exists, min_dist still equals the
+        # sentinel (1e6). Zero these out so cells with no active disc
+        # contribute nothing instead of an enormous spurious loss.
+        min_dist = torch.where(min_dist >= large, torch.zeros_like(min_dist), min_dist)
+
         # Weight = distance (close to shock -> small weight, far -> large weight)
         loss = (residual**2 * min_dist).mean()
 
