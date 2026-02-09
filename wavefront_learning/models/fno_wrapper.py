@@ -34,15 +34,15 @@ def build_fno(args: dict) -> FNOWrapper:
             - hidden_channels: FNO hidden width (default: 16)
             - n_layers: Number of FNO layers (default: 2)
     """
-    n_modes_t = args.get("n_modes_t", 16)
-    n_modes_x = args.get("n_modes_x", 8)
-    hidden_channels = args.get("hidden_channels", 16)
+    n_modes_t = args.get("n_modes_t", 32)
+    n_modes_x = args.get("n_modes_x", 16)
+    hidden_channels = args.get("hidden_channels", 32)
     n_layers = args.get("n_layers", 2)
 
     return FNOWrapper(
         n_modes=(n_modes_t, n_modes_x),
         hidden_channels=hidden_channels,
-        in_channels=3,
+        in_channels=1,
         out_channels=1,
         n_layers=n_layers,
     )
