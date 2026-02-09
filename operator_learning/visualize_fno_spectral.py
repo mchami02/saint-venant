@@ -557,9 +557,7 @@ def main():
     model = create_model(args).to(device)
     
     if os.path.exists(args.model_path):
-        state_dict = torch.load(args.model_path, map_location=device, weights_only=False)
-        state_dict.pop('_metadata', None)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(torch.load(args.model_path, map_location=device, weights_only=False))
         print("Model weights loaded successfully!")
     else:
         print(f"Warning: Model path {args.model_path} not found. Using random weights.")

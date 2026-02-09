@@ -334,8 +334,7 @@ def train_model(model, train_loader, val_loader, args, experiment):
     # Plot training history
     # plot_training_history(train_losses, val_losses)
     state_dict = torch.load(args.save_path, weights_only=False)
-    state_dict.pop('_metadata', None)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=False)
     return model
 
 def main():
@@ -359,7 +358,7 @@ def main():
     model = create_model(args, device)
     if args.model_path is not None:
         state_dict = torch.load('operator.pth', weights_only=False)
-        state_dict.pop('_metadata', None)
+        state_dict = {k: v for k, v in state_dict.items() if k != '_metadata'}
         model.load_state_dict(state_dict)
     summary(model)
     

@@ -19,11 +19,6 @@ class OperatorModel(torch.nn.Module):
         self.metadata = kwargs
         self.model = model(**kwargs)
 
-    def state_dict(self, *args, **kwargs):
-        sd = super().state_dict(*args, **kwargs)
-        sd.pop('_metadata', None)
-        return sd
-
     def forward(self, x):
         return self.model(x)
 
