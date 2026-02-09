@@ -2,469 +2,26 @@
 
 This is a standalone script that can be run with:
     python test.py --model_path path/to/model.pth
+
+Functions are organized into submodules:
+- testing.test_running: sanity checks, profiling, inference
+- testing.test_results: evaluation metrics and sample collection
 """
 
 import argparse
-import tempfile
-from pathlib import Path
 
-import numpy as np
 import torch
-import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
-from logger import WandbLogger, init_logger
-from loss import get_loss
-from metrics import compute_metrics
-from plotter import PLOT_PRESETS, plot_wandb
-from torch.profiler import ProfilerActivity, profile, schedule
+from logger import init_logger
+from model import load_model
+from plotter import PLOT_PRESETS
+from testing import (
+    test_high_res,
+    test_model,
+)
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
-
-
-def collect_samples(
-    pred: dict | torch.Tensor,
-    batch_input: dict | torch.Tensor,
-    batch_target: torch.Tensor,
-    num_samples: int = 2,
-) -> dict[str, np.ndarray]:
-    """Collect sample predictions from a batch for plotting.
-
-    Iterates through the model output dict to automatically collect all outputs.
-
-    Args:
-        pred: Model prediction (dict or tensor).
-        batch_input: Input batch (dict or tensor).
-        batch_target: Target batch tensor.
-        num_samples: Number of samples to collect.
-
-    Returns:
-        Dict with all model outputs, input context, and target as numpy arrays.
-    """
-    samples = {}
-
-    if isinstance(pred, dict):
-        for k, v in pred.items():
-            if isinstance(v, torch.Tensor):
-                arr = v[:num_samples].detach().cpu().numpy()
-                # Squeeze channel dim for grid outputs: (B, 1, H, W) -> (B, H, W)
-                if arr.ndim == 4 and arr.shape[1] == 1:
-                    arr = arr.squeeze(1)
-                samples[k] = arr
-
-    # Add input context for trajectory plots
-    if isinstance(batch_input, dict):
-        if "discontinuities" in batch_input:
-            samples["discontinuities"] = (
-                batch_input["discontinuities"][:num_samples].detach().cpu().numpy()
-            )
-        if "disc_mask" in batch_input:
-            samples["masks"] = (
-                batch_input["disc_mask"][:num_samples].detach().cpu().numpy()
-            )
-        if "t_coords" in batch_input:
-            samples["times"] = (
-                batch_input["t_coords"][0, 0, :, 0].detach().cpu().numpy()
-            )
-
-    # Add target (ground truth grid)
-    grids = batch_target[:num_samples].detach().cpu().numpy()
-    if grids.ndim == 4 and grids.shape[1] == 1:
-        grids = grids.squeeze(1)
-    samples["grids"] = grids
-
-    return samples
-
-
-def test_model(
-    model: nn.Module,
-    test_loader: DataLoader,
-    device: torch.device,
-    logger: WandbLogger | None = None,
-    loss_fn: nn.Module | None = None,
-    grid_config: dict | None = None,
-    num_plots: int = 3,
-    epoch: int = 0,  # noqa: ARG001 - kept for API compat, now unused
-    plot_preset: str | None = None,
-) -> dict[str, float]:
-    """Evaluate model on test dataset.
-
-    Args:
-        model: Trained model to evaluate.
-        test_loader: DataLoader for test data.
-        device: Computation device.
-        logger: Optional WandbLogger for logging results.
-        loss_fn: Optional loss function for trajectory models.
-        grid_config: Dict with {nx, nt, dx, dt} for plotting. Defaults provided if None.
-        num_plots: Number of samples to plot.
-
-    Returns:
-        Dictionary of evaluation metrics.
-    """
-    # Default grid_config if not provided
-    if grid_config is None:
-        grid_config = {"nx": 50, "nt": 250, "dx": 0.02, "dt": 0.004}
-
-    model.eval()
-    batch_metrics = []
-
-    with torch.no_grad():
-        for batch_input, batch_target in tqdm(test_loader, desc="Testing"):
-            # Move to device
-            if isinstance(batch_input, dict):
-                batch_input = {
-                    k: v.to(device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch_input.items()
-                }
-            else:
-                batch_input = batch_input.to(device)
-            batch_target = batch_target.to(device)
-
-            # Forward pass
-            pred = model(batch_input)
-
-            # Compute metrics
-            if isinstance(pred, dict):
-                if "output_grid" in pred:
-                    batch_metrics.append(
-                        compute_metrics(pred["output_grid"], batch_target)
-                    )
-                elif loss_fn is not None:
-                    _, components = loss_fn(batch_input, pred, batch_target)
-                    batch_metrics.append(components)
-            else:
-                batch_metrics.append(compute_metrics(pred, batch_target))
-
-    # Aggregate metrics
-    if batch_metrics:
-        avg_metrics = {
-            key: np.mean([m[key] for m in batch_metrics])
-            for key in batch_metrics[0].keys()
-        }
-    else:
-        avg_metrics = {}
-
-    # Print results
-    print("\nTest Results:")
-    print("-" * 40)
-    for key, value in avg_metrics.items():
-        print(f"  {key}: {value:.6f}")
-    print("-" * 40)
-
-    # Log to W&B and plot
-    if logger is not None:
-        logger.log_summary({f"test/metrics/{k}": v for k, v in avg_metrics.items()})
-
-        samples = collect_samples(pred, batch_input, batch_target, num_samples=num_plots)
-        plot_wandb(
-            samples, grid_config, logger, epoch=None, mode="test", preset=plot_preset
-        )
-
-    return avg_metrics
-
-
-def run_inference(
-    model: nn.Module,
-    input_data: dict | torch.Tensor,
-    device: torch.device,
-) -> torch.Tensor:
-    """Run inference on input data.
-
-    Args:
-        model: Trained model.
-        input_data: Input tensor or dict.
-        device: Computation device.
-
-    Returns:
-        Model prediction tensor.
-    """
-    model.eval()
-
-    with torch.no_grad():
-        if isinstance(input_data, dict):
-            input_data = {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v
-                for k, v in input_data.items()
-            }
-        else:
-            input_data = input_data.to(device)
-
-        pred = model(input_data)
-
-    return pred
-
-
-def run_sanity_check(
-    model: nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    args: argparse.Namespace,
-    device: torch.device,
-) -> bool:
-    """Run sanity checks to verify all code paths before training.
-
-    Performs 4 checks:
-    1. Forward pass on training batch
-    2. Forward pass on validation batch
-    3. Loss computation
-    4. Backward pass (gradient check)
-
-    Args:
-        model: Model to check.
-        train_loader: Training data loader.
-        val_loader: Validation data loader.
-        args: Training arguments (needs loss, dt, dx, smooth_loss_type).
-        device: Computation device.
-
-    Returns:
-        True if all checks pass.
-
-    Raises:
-        RuntimeError: If any check fails.
-    """
-    print("\n" + "=" * 50)
-    print("Running sanity checks...")
-    print("=" * 50)
-
-    model.train()
-
-    # Get loss function - build kwargs for losses that need dt/dx
-    loss_kwargs = {
-        "pde_residual": {"dt": args.dt, "dx": args.dx},
-        "rh_residual": {"dt": args.dt},
-    }
-    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
-
-    # [1/4] Forward pass on training batch
-    print("\n[1/4] Testing forward pass on training batch...")
-    train_batch = next(iter(train_loader))
-    batch_input, batch_target = train_batch
-
-    # Move to device
-    if isinstance(batch_input, dict):
-        batch_input = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
-            for k, v in batch_input.items()
-        }
-    else:
-        batch_input = batch_input.to(device)
-    batch_target = batch_target.to(device)
-
-    try:
-        pred = model(batch_input)
-        if isinstance(pred, dict):
-            print(f"  Output type: dict with keys {list(pred.keys())}")
-            for k, v in pred.items():
-                if isinstance(v, torch.Tensor):
-                    print(f"    {k}: shape={v.shape}, dtype={v.dtype}")
-        else:
-            print(f"  Output shape: {pred.shape}")
-        print("  [PASS] Forward pass on training batch")
-    except Exception as e:
-        raise RuntimeError(f"[FAIL] Forward pass on training batch: {e}") from e
-
-    # [2/4] Forward pass on validation batch
-    print("\n[2/4] Testing forward pass on validation batch...")
-    val_batch = next(iter(val_loader))
-    val_input, val_target = val_batch
-
-    # Move to device
-    if isinstance(val_input, dict):
-        val_input = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
-            for k, v in val_input.items()
-        }
-    else:
-        val_input = val_input.to(device)
-    val_target = val_target.to(device)
-
-    try:
-        model.eval()
-        with torch.no_grad():
-            val_pred = model(val_input)
-        if isinstance(val_pred, dict):
-            print(f"  Output type: dict with keys {list(val_pred.keys())}")
-        else:
-            print(f"  Output shape: {val_pred.shape}")
-        print("  [PASS] Forward pass on validation batch")
-    except Exception as e:
-        raise RuntimeError(f"[FAIL] Forward pass on validation batch: {e}") from e
-
-    # [3/4] Loss computation
-    print("\n[3/4] Testing loss computation...")
-    model.train()
-    try:
-        # Re-run forward pass for fresh computation graph
-        pred = model(batch_input)
-        # Use new signature: (input_dict, output_dict, target)
-        loss, components = loss_fn(batch_input, pred, batch_target)
-        print(f"  Loss value: {loss.item():.6f}")
-        print(f"  Loss components: {list(components.keys())}")
-        for k, v in components.items():
-            print(f"    {k}: {v:.6f}")
-        print("  [PASS] Loss computation")
-    except Exception as e:
-        raise RuntimeError(f"[FAIL] Loss computation: {e}") from e
-
-    # [4/4] Backward pass
-    print("\n[4/4] Testing backward pass...")
-    try:
-        loss.backward()
-        grad_count = 0
-        total_params = 0
-        for _name, param in model.named_parameters():
-            total_params += 1
-            if param.grad is not None:
-                grad_count += 1
-        print(f"  Parameters with gradients: {grad_count}/{total_params}")
-        if grad_count == 0:
-            raise RuntimeError("No gradients computed!")
-        print("  [PASS] Backward pass")
-    except Exception as e:
-        raise RuntimeError(f"[FAIL] Backward pass: {e}") from e
-
-    # Clean up gradients
-    model.zero_grad()
-
-    print("\n" + "=" * 50)
-    print("Sanity check passed!")
-    print("=" * 50 + "\n")
-
-    return True
-
-
-def run_profiler(
-    model: nn.Module,
-    train_loader: DataLoader,
-    args: argparse.Namespace,
-    device: torch.device,
-    logger: WandbLogger | None = None,
-    num_steps: int = 10,
-    warmup_steps: int = 2,
-) -> None:
-    """Profile training steps and optionally upload trace to wandb.
-
-    Args:
-        model: Model to profile.
-        train_loader: Training data loader.
-        args: Training arguments (needs loss, dt, dx, smooth_loss_type).
-        device: Computation device.
-        logger: Optional WandbLogger for uploading artifacts.
-        num_steps: Number of active profiling steps.
-        warmup_steps: Number of warmup steps before profiling.
-    """
-    import wandb
-
-    print("\n" + "=" * 50)
-    print("Running profiler...")
-    print("=" * 50)
-
-    # Get loss function - build kwargs for losses that need dt/dx
-    loss_kwargs = {
-        "pde_residual": {"dt": args.dt, "dx": args.dx},
-        "rh_residual": {"dt": args.dt},
-    }
-    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-
-    # Determine profiler activities
-    activities = [ProfilerActivity.CPU]
-    if torch.cuda.is_available():
-        activities.append(ProfilerActivity.CUDA)
-
-    # Create profiler schedule
-    prof_schedule = schedule(
-        wait=0,
-        warmup=warmup_steps,
-        active=num_steps,
-        repeat=1,
-    )
-
-    model.train()
-    data_iter = iter(train_loader)
-
-    total_steps = warmup_steps + num_steps
-    print(f"  Warmup steps: {warmup_steps}")
-    print(f"  Active steps: {num_steps}")
-    print(f"  Total steps: {total_steps}")
-
-    with profile(
-        activities=activities,
-        schedule=prof_schedule,
-        on_trace_ready=lambda p: None,  # We'll export manually
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-    ) as prof:
-        for step in range(total_steps):
-            try:
-                batch_input, batch_target = next(data_iter)
-            except StopIteration:
-                data_iter = iter(train_loader)
-                batch_input, batch_target = next(data_iter)
-
-            # Move to device
-            if isinstance(batch_input, dict):
-                batch_input = {
-                    k: v.to(device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch_input.items()
-                }
-            else:
-                batch_input = batch_input.to(device)
-            batch_target = batch_target.to(device)
-
-            # Training step
-            optimizer.zero_grad()
-            pred = model(batch_input)
-            # Use new signature: (input_dict, output_dict, target)
-            loss, _ = loss_fn(batch_input, pred, batch_target)
-            loss.backward()
-            optimizer.step()
-
-            prof.step()
-
-            if step < warmup_steps:
-                print(f"  Step {step + 1}/{total_steps} (warmup)")
-            else:
-                print(f"  Step {step + 1}/{total_steps} (profiling)")
-
-    # Generate summary table
-    sort_by = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total"
-    summary_table = prof.key_averages().table(sort_by=sort_by, row_limit=30)
-    print("\nProfiler Summary:")
-    print(summary_table)
-
-    # Export trace and upload to wandb
-    if logger is not None and logger.enabled and logger.run is not None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            trace_path = Path(tmpdir) / "trace.json"
-            summary_path = Path(tmpdir) / "summary.txt"
-
-            # Export Chrome trace
-            prof.export_chrome_trace(str(trace_path))
-
-            # Save summary
-            with open(summary_path, "w") as f:
-                f.write(summary_table)
-
-            # Create and upload artifact
-            run_id = logger.run.id
-            artifact = wandb.Artifact(
-                f"profiler-trace-{run_id}",
-                type="profile",
-                description="PyTorch profiler trace and summary",
-            )
-            artifact.add_file(str(trace_path), name="trace.json")
-            artifact.add_file(str(summary_path), name="summary.txt")
-            logger.run.log_artifact(artifact)
-
-            print(f"\n  Uploaded profiler artifact: profiler-trace-{run_id}")
-
-    print("\n" + "=" * 50)
-    print("Profiling complete!")
-    print("=" * 50 + "\n")
 
 
 def parse_args() -> argparse.Namespace:
@@ -514,39 +71,12 @@ def main():
     print(f"Using device: {device}")
     print(f"Loading model from: {args.model_path}")
 
-    # Load checkpoint
+    # Load model from checkpoint (uses config stored in checkpoint)
+    model = load_model(args.model_path, device)
+
+    # Extract model registry name from checkpoint config
     checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
-
-    # Extract model config from checkpoint if available
-    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-        state_dict = checkpoint["model_state_dict"]
-        model_config = checkpoint.get("config", {})
-    else:
-        state_dict = checkpoint
-        model_config = {}
-
-    # Import model creation - this requires model.py to have proper model registry
-    from model import MODELS
-
-    # Try to determine model type from checkpoint or use default
-    model_name = model_config.get("model", "fno")
-
-    if model_name not in MODELS:
-        print(
-            f"Warning: Model '{model_name}' not found in registry. Available: {list(MODELS.keys())}"
-        )
-        print("Please ensure your model is registered in model.py")
-        return
-
-    # Create model with config
-    model_class = MODELS[model_name]
-    model = model_class(
-        in_channels=model_config.get("in_channels", 3),
-        out_channels=model_config.get("out_channels", 1),
-        hidden_channels=model_config.get("hidden_channels", 64),
-    )
-    model.load_state_dict(state_dict)
-    model = model.to(device)
+    model_name = checkpoint.get("config", {}).get("model", type(model).__name__)
 
     print(f"Model loaded: {model_name}")
     print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -555,10 +85,8 @@ def main():
     print("\nGenerating test data...")
     _, _, test_dataset = get_wavefront_datasets(
         n_samples=args.n_samples,
-        nx=args.nx,
-        nt=args.nt,
-        dx=args.dx,
-        dt=args.dt,
+        grid_config=grid_config,
+        model_name=model_name,
         train_ratio=0.0,  # All data for testing
         val_ratio=0.0,
     )
@@ -584,6 +112,16 @@ def main():
         logger=logger,
         grid_config=grid_config,
         num_plots=args.num_plots,
+        plot_preset=args.plot,
+    )
+
+    # High-resolution test
+    print("\nRunning high-resolution evaluation (2x)...")
+    test_high_res(
+        model=model,
+        args=args,
+        device=device,
+        logger=logger,
         plot_preset=args.plot,
     )
 

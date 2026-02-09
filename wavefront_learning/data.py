@@ -85,7 +85,7 @@ class ToGridInputTransform:
     the raw discontinuity information as additional channels.
     """
 
-    def __init__(self, nx: int, nt: int):
+    def __init__(self, nx: int, nt: int, **kwargs):
         self.nx = nx
         self.nt = nt
 
@@ -126,6 +126,13 @@ class ToGridInputTransform:
         return full_input, target_grid
 
 
+# Registry of available transforms (string name -> class)
+TRANSFORMS = {
+    "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
+    "ToGridInput": ToGridInputTransform,
+}
+
+
 def collate_wavefront_batch(batch):
     """Custom collate function for WavefrontDataset.
 
@@ -161,10 +168,8 @@ def collate_wavefront_batch(batch):
 
 def get_wavefront_datasets(
     n_samples: int,
-    nx: int,
-    nt: int,
-    dx: float,
-    dt: float,
+    grid_config: dict,
+    model_name: str,
     max_steps: int = 3,
     max_discontinuities: int = 10,
     train_ratio: float = 0.8,
@@ -179,10 +184,8 @@ def get_wavefront_datasets(
 
     Args:
         n_samples: Total number of samples.
-        nx: Number of spatial grid points.
-        nt: Number of time steps.
-        dx: Spatial step size.
-        dt: Time step size.
+        grid_config: Dict with keys nx, nt, dx, dt.
+        model_name: Model name (key into MODEL_TRANSFORM for per-model transforms).
         max_steps: Maximum number of pieces in piecewise constant IC.
         max_discontinuities: Maximum number of discontinuities to support.
         train_ratio: Fraction of data for training.
@@ -193,6 +196,13 @@ def get_wavefront_datasets(
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset).
     """
+    from model import MODEL_TRANSFORM
+
+    nx = grid_config["nx"]
+    nt = grid_config["nt"]
+    dx = grid_config["dx"]
+    dt = grid_config["dt"]
+
     np.random.seed(random_seed)
 
     # Get preprocessed data (handles HF download/upload internally)
@@ -207,6 +217,17 @@ def get_wavefront_datasets(
         random_seed=random_seed,
         max_discontinuities=max_discontinuities,
     )
+
+    # Resolve per-model transform
+    transform_name = MODEL_TRANSFORM.get(model_name)
+    transform = None
+    if transform_name is not None:
+        if transform_name not in TRANSFORMS:
+            raise ValueError(
+                f"Transform '{transform_name}' not found. "
+                f"Available: {list(TRANSFORMS.keys())}"
+            )
+        transform = TRANSFORMS[transform_name](**grid_config)
 
     # Shuffle indices
     indices = np.arange(len(processed))
@@ -225,9 +246,9 @@ def get_wavefront_datasets(
     val_processed = [processed[i] for i in val_idx]
     test_processed = [processed[i] for i in test_idx]
 
-    train_dataset = WavefrontDataset(train_processed)
-    val_dataset = WavefrontDataset(val_processed)
-    test_dataset = WavefrontDataset(test_processed)
+    train_dataset = WavefrontDataset(train_processed, transform=transform)
+    val_dataset = WavefrontDataset(val_processed, transform=transform)
+    test_dataset = WavefrontDataset(test_processed, transform=transform)
 
     print(
         f"Created datasets: train={len(train_dataset)}, "

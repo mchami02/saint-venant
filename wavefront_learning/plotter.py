@@ -60,6 +60,10 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred_traj",
         "mse_error",
     ],
+    "fno": [
+        "ground_truth",
+        "mse_error",
+    ],
 }
 
 

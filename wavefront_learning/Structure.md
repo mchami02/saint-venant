@@ -6,7 +6,11 @@ wavefront_learning/
 ├── CLAUDE.md              # Claude Code guidance for this module
 ├── Structure.md           # This file - folder structure documentation
 ├── train.py               # Main training script (standalone)
-├── test.py                # Testing/evaluation script (standalone)
+├── test.py                # Testing CLI entry point (standalone)
+├── testing/               # Testing utilities subpackage
+│   ├── __init__.py        # Re-exports all test functions
+│   ├── test_running.py    # Sanity checks, profiling, inference (model runs correctly)
+│   └── test_results.py    # Evaluation metrics, sample collection, high-res testing
 ├── data.py                # Dataset classes, transforms, get_wavefront_datasets()
 ├── data_loading.py        # HuggingFace upload/download utilities
 ├── data_processing.py     # Grid generation, discontinuity extraction, preprocessing
@@ -28,7 +32,8 @@ wavefront_learning/
 │   ├── shock_trajectory_net.py    # ShockTrajectoryNet (DeepONet-like)
 │   ├── region_trunk.py            # SpaceTimeEncoder, RegionTrunk, RegionTrunkSet
 │   ├── hybrid_deeponet.py         # HybridDeepONet (trajectory + grid prediction)
-│   └── traj_deeponet.py           # TrajDeepONet (trajectory-conditioned single trunk)
+│   ├── traj_deeponet.py           # TrajDeepONet (trajectory-conditioned single trunk)
+│   └── fno_wrapper.py             # FNO wrapper (neuralop FNO with dict output)
 ├── losses/
 │   ├── __init__.py                # Package exports all loss classes
 │   ├── base.py                    # BaseLoss abstract class (unified interface)
@@ -78,6 +83,13 @@ wavefront_learning/
   - Single BoundaryConditionedTrunk: takes (t, x, x_left, x_right) + branch
   - No GridAssembler: trunk directly outputs density
   - Output: `{positions, output_grid}`
+
+- **FNO** (`models/fno_wrapper.py`): Fourier Neural Operator baseline
+  - Wraps `neuralop.models.FNO` with dict output interface
+  - Uses `ToGridInput` transform: IC reconstructed on grid + coordinate channels
+  - Input: tensor `(B, 3, nt, nx)` — [ic_masked, t_coords, x_coords]
+  - Output: `{output_grid: (B, 1, nt, nx)}`
+  - Default: hidden_channels=16, n_layers=2, ~43k parameters
 
 ### Model Components
 - **SpaceTimeEncoder** (`models/region_trunk.py`): Encodes (t, x) coordinates using Fourier features
@@ -251,7 +263,7 @@ Other utility functions:
 
 ### Sanity Check
 
-Before training starts, `run_sanity_check()` verifies all code paths:
+Before training starts, `run_sanity_check()` (from `testing/test_running.py`) verifies all code paths:
 1. **[1/4] Forward pass on training batch** - Logs output shapes
 2. **[2/4] Forward pass on validation batch** - Verifies consistency
 3. **[3/4] Loss computation** - Tests loss function with model output
@@ -369,6 +381,13 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
 cd wavefront_learning
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
   --model HybridDeepONet --loss hybrid --epochs 100 --n_samples 1000
+```
+
+### Training FNO (grid baseline)
+```bash
+cd wavefront_learning
+PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
+  --model FNO --loss fno --epochs 100 --n_samples 1000
 ```
 
 ### Testing

@@ -4,6 +4,7 @@ from argparse import Namespace
 
 import torch
 import torch.nn as nn
+from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.shock_trajectory_net import build_shock_net
 from models.traj_deeponet import build_traj_deeponet
@@ -13,6 +14,15 @@ MODELS = {
     "ShockNet": build_shock_net,
     "HybridDeepONet": build_hybrid_deeponet,
     "TrajDeepONet": build_traj_deeponet,
+    "FNO": build_fno,
+}
+
+# Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
+MODEL_TRANSFORM = {
+    "ShockNet": None,
+    "HybridDeepONet": None,
+    "TrajDeepONet": None,
+    "FNO": "ToGridInput",
 }
 
 def get_model(model_name: str, args: dict) -> nn.Module:

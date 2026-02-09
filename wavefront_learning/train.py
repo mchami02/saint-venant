@@ -17,7 +17,13 @@ from loss import LOSS_PRESETS, LOSSES, get_loss
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
 from plotter import PLOT_PRESETS, plot_wandb
-from test import collect_samples, run_profiler, run_sanity_check, test_model
+from testing import (
+    collect_samples,
+    run_profiler,
+    run_sanity_check,
+    test_high_res,
+    test_model,
+)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -403,10 +409,8 @@ def main():
     print("\nGenerating datasets...")
     train_dataset, val_dataset, test_dataset = get_wavefront_datasets(
         n_samples=args.n_samples,
-        nx=args.nx,
-        nt=args.nt,
-        dx=args.dx,
-        dt=args.dt,
+        grid_config=grid_config,
+        model_name=args.model,
     )
 
     train_loader = DataLoader(
@@ -473,6 +477,17 @@ def main():
         loss_fn=loss_fn,
         grid_config=grid_config,
         epoch=args.epochs + 1,  # Log after final training epoch
+        plot_preset=args.plot,
+    )
+
+    # High-resolution test
+    print("\nRunning high-resolution evaluation (2x)...")
+    test_high_res(
+        model=model,
+        args=args,
+        device=device,
+        logger=logger,
+        loss_fn=loss_fn,
         plot_preset=args.plot,
     )
 
