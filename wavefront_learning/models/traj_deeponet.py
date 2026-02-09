@@ -441,7 +441,7 @@ def build_traj_deeponet(args: dict) -> TrajDeepONet:
         num_time_layers=args.get("num_time_layers", 2),
         num_coord_layers=args.get("num_coord_layers", 2),
         num_res_blocks=args.get("num_res_blocks", 2),
-        dropout=args.get("dropout", 0.05),
+        dropout=args.get("dropout", 0.0),
     )
 
 
@@ -473,6 +473,6 @@ def build_no_traj_deeponet(args: dict) -> TrajDeepONet:
         num_disc_layers=args.get("num_disc_layers", 2),
         num_coord_layers=args.get("num_coord_layers", 2),
         num_res_blocks=args.get("num_res_blocks", 2),
-        dropout=args.get("dropout", 0.05),
+        dropout=args.get("dropout", 0.0),
         with_traj=False,
     )
