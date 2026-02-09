@@ -84,6 +84,7 @@ def load_model(
         )
 
     model = get_model(model_name, config)
+    state_dict.pop("_metadata", None)
     model.load_state_dict(state_dict, strict=True)
     model = model.to(device)
     model.eval()
