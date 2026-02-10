@@ -121,22 +121,26 @@ class PDEShockResidualLoss(BaseLoss):
     to the nearest predicted discontinuity. Cells near a predicted shock
     contribute little; cells far from any prediction contribute more.
 
-    This provides a smooth gradient signal (vs. a hard binary mask) that
-    rewards the model for moving predicted trajectories toward actual shocks.
+    Additionally penalizes false-positive shocks: for each predicted shock,
+    finds the nearest cell with high PDE residual. Shocks in smooth regions
+    (low residual everywhere nearby) receive a large penalty.
 
     Args:
         dt: Time step size.
         dx: Spatial step size.
+        fp_weight: Weight for the false-positive shock penalty term.
     """
 
     def __init__(
         self,
         dt: float = 0.004,
         dx: float = 0.02,
+        fp_weight: float = 1.0,
     ):
         super().__init__()
         self.dt = dt
         self.dx = dx
+        self.fp_weight = fp_weight
 
     def forward(
         self,
@@ -158,7 +162,8 @@ class PDEShockResidualLoss(BaseLoss):
 
         Returns:
             Tuple of (loss, components_dict) where components_dict
-            contains 'pde_shock_residual' and 'total'.
+            contains 'pde_shock_residual_miss', 'pde_shock_residual_fp',
+            'pde_shock_residual', and 'total'.
         """
         positions = output_dict["positions"]
         existence = output_dict.get("existence", torch.ones_like(positions))
@@ -193,15 +198,24 @@ class PDEShockResidualLoss(BaseLoss):
             x_interior.unsqueeze(1) - pos_int.unsqueeze(-1)
         )  # (B, D, nt-2, nx-2)
 
-        # Per cell: min over discontinuities of dist / (combined + eps)
-        # Inactive shocks (combined ≈ 0) produce large scores, ignored by min
-        eps = 1e-6
-        min_score = (dist / (combined.unsqueeze(-1) + eps)).min(dim=1).values  # (B, nt-2, nx-2)
+        eps = 1.0
 
-        # Weight PDE residual by min_score
-        loss = (residual**2 * min_score).mean()
+        # --- Miss penalty (per-cell view): find nearest predicted shock ---
+        # Inactive shocks (combined ≈ 0) produce large scores, ignored by min
+        min_score = (dist / (combined.unsqueeze(-1) + eps)).min(dim=1).values  # (B, nt-2, nx-2)
+        miss_loss = (residual**2 * min_score).mean()
+
+        # --- False positive penalty (per-shock view): find nearest high-residual cell ---
+        # For each shock, min_x(dist / (residual² + eps)) is small only if a
+        # high-residual cell is nearby (real shock). Large in smooth regions.
+        fp_score = (dist / ((residual**2).unsqueeze(1) + eps)).min(dim=-1).values  # (B, D, nt-2)
+        fp_loss = (combined * fp_score).mean()
+
+        loss = miss_loss + self.fp_weight * fp_loss
 
         components = {
+            "pde_shock_residual_miss": miss_loss.item(),
+            "pde_shock_residual_fp": fp_loss.item(),
             "pde_shock_residual": loss.item(),
             "total": loss.item(),
         }
