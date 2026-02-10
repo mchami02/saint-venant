@@ -25,6 +25,7 @@ from .base import (
     ResidualBlock,
     TimeEncoder,
 )
+from .base.transformer_encoder import EncoderLayer
 
 
 class PositionDecoder(nn.Module):
@@ -137,7 +138,9 @@ def compute_boundaries(
     is_left = (pos <= x) & mask
     left_vals = torch.where(is_left, pos, torch.full_like(pos, -float("inf")))
     left_bound = left_vals.max(dim=1).values  # (B, nt, nx)
-    left_bound = torch.where(left_bound.isinf(), torch.zeros_like(left_bound), left_bound)
+    left_bound = torch.where(
+        left_bound.isinf(), torch.zeros_like(left_bound), left_bound
+    )
 
     # Right boundary: smallest position > x among valid discs
     is_right = (pos > x) & mask
@@ -212,7 +215,6 @@ class BoundaryConditionedTrunk(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.GELU(),
             nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid(),
         )
 
     def forward(
@@ -305,6 +307,8 @@ class TrajDeepONet(nn.Module):
         dropout: float = 0.1,
         with_traj: bool = True,
         classifier: bool = False,
+        num_interaction_layers: int = 2,
+        num_attention_heads: int = 4,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -328,6 +332,14 @@ class TrajDeepONet(nn.Module):
             num_frequencies=num_disc_frequencies,
             num_layers=num_disc_layers,
             dropout=dropout,
+        )
+
+        # Cross-discontinuity self-attention
+        self.disc_interaction = nn.ModuleList(
+            [
+                EncoderLayer(hidden_dim, num_heads=num_attention_heads)
+                for _ in range(num_interaction_layers)
+            ]
         )
 
         # Trajectory: time encoder + position decoder (only when with_traj)
@@ -386,6 +398,12 @@ class TrajDeepONet(nn.Module):
 
         # === BRANCH ===
         branch_emb = self.branch(discontinuities, disc_mask)  # (B, D, hidden)
+
+        # === CROSS-DISCONTINUITY INTERACTION ===
+        key_padding_mask = ~disc_mask.bool()  # True = ignore
+        for layer in self.disc_interaction:
+            branch_emb = layer(branch_emb, key_padding_mask=key_padding_mask)
+        branch_emb = branch_emb * disc_mask.unsqueeze(-1)  # re-zero padded
 
         # === CLASSIFIER (optional) ===
         if self.has_classifier:
@@ -476,6 +494,8 @@ def build_traj_deeponet(args: dict) -> TrajDeepONet:
         num_coord_layers=args.get("num_coord_layers", 2),
         num_res_blocks=args.get("num_res_blocks", 2),
         dropout=args.get("dropout", 0.0),
+        num_interaction_layers=args.get("num_interaction_layers", 2),
+        num_attention_heads=args.get("num_attention_heads", 4),
     )
 
 
@@ -502,6 +522,8 @@ def build_classifier_traj_deeponet(args: dict) -> TrajDeepONet:
         num_res_blocks=args.get("num_res_blocks", 2),
         dropout=args.get("dropout", 0.0),
         classifier=True,
+        num_interaction_layers=args.get("num_interaction_layers", 2),
+        num_attention_heads=args.get("num_attention_heads", 4),
     )
 
 
@@ -535,4 +557,6 @@ def build_no_traj_deeponet(args: dict) -> TrajDeepONet:
         num_res_blocks=args.get("num_res_blocks", 2),
         dropout=args.get("dropout", 0.0),
         with_traj=False,
+        num_interaction_layers=args.get("num_interaction_layers", 2),
+        num_attention_heads=args.get("num_attention_heads", 4),
     )
