@@ -270,6 +270,7 @@ class BoundaryConditionedTrunk(nn.Module):
             fused = block(fused)
 
         density = self.density_head(fused).squeeze(-1)  # (B*nt*nx,)
+        density = torch.clamp_max(torch.clamp_min(density, 0.0), 1.0)
         return density.reshape(B, nt, nx)
 
 
@@ -456,9 +457,6 @@ class TrajDeepONet(nn.Module):
         output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
 
         output = {"output_grid": output_grid}
-        if self.has_classifier:
-            nt = t_coords.shape[1]
-            output["existence"] = existence.unsqueeze(-1).expand(-1, -1, nt)
         return output
 
     def count_parameters(self) -> int:
