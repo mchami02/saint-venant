@@ -29,6 +29,7 @@ from .grid_plots import (
     plot_error_map,
     plot_grid_comparison,
     plot_ground_truth,
+    plot_pde_residual,
     plot_pred,
     plot_prediction_comparison,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "plot_comparison",
     "plot_grid_comparison",
     "plot_ground_truth",
+    "plot_pde_residual",
     "plot_pred",
     # Trajectory plots (core)
     "plot_shock_trajectories",

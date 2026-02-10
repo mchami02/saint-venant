@@ -354,6 +354,77 @@ def plot_grid_comparison(
     return fig
 
 
+def plot_pde_residual(
+    traj_data: dict,
+    grid_config: dict,
+) -> list[tuple[str, Figure]]:
+    """Plot PDE residual heatmap of the predicted grid.
+
+    Computes R = drho/dt + df(rho)/dx using central finite differences
+    (Greenshields flux f(rho) = rho(1 - rho)) and plots |R| as a heatmap.
+    The residual should be zero in smooth regions; large values indicate
+    conservation law violations.
+
+    Args:
+        traj_data: Dict containing 'output_grid' of shape (B, nt, nx).
+        grid_config: Dict with {nx, nt, dx, dt}.
+
+    Returns:
+        List of (log_key, figure) pairs.
+    """
+    if "output_grid" not in traj_data:
+        return []
+
+    output_grid = traj_data["output_grid"]
+    nx, nt, dx, dt = (
+        grid_config["nx"],
+        grid_config["nt"],
+        grid_config["dx"],
+        grid_config["dt"],
+    )
+
+    # Interior extent (central differences exclude 1 boundary point each side)
+    interior_extent = [dx, (nx - 1) * dx, dt, (nt - 1) * dt]
+
+    B = output_grid.shape[0]
+    figures = []
+    for b in range(min(B, 3)):
+        density = output_grid[b]  # (nt, nx)
+
+        # Greenshields flux: f(rho) = rho * (1 - rho)
+        flux = density * (1.0 - density)
+
+        # drho/dt using central difference in time
+        drho_dt = (density[2:, 1:-1] - density[:-2, 1:-1]) / (2.0 * dt)
+
+        # df/dx using central difference in space
+        df_dx = (flux[1:-1, 2:] - flux[1:-1, :-2]) / (2.0 * dx)
+
+        # PDE residual
+        residual = np.abs(drho_dt + df_dx)  # (nt-2, nx-2)
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        im = ax.imshow(
+            residual,
+            extent=interior_extent,
+            aspect="auto",
+            origin="lower",
+            cmap="hot",
+            vmin=0,
+        )
+        ax.set_xlabel("Space x")
+        ax.set_ylabel("Time t")
+        ax.set_title(
+            f"PDE Residual |drho/dt + df/dx| "
+            f"(Sample {b + 1}, mean={residual.mean():.4f})"
+        )
+        plt.colorbar(im, ax=ax, label="Absolute Residual")
+        plt.tight_layout()
+        figures.append((f"pde_residual_sample_{b + 1}", fig))
+
+    return figures
+
+
 def plot_ground_truth(
     traj_data: dict,
     grid_config: dict,

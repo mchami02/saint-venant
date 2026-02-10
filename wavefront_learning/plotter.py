@@ -21,6 +21,7 @@ from plotting import (
     plot_ground_truth,
     plot_gt_traj,
     plot_mse_error,
+    plot_pde_residual,
     plot_pred,
     plot_pred_traj,
     plot_prediction_with_trajectory_existence,
@@ -39,6 +40,7 @@ PLOTS: dict[str, callable] = {
     "existence": plot_existence,
     "prediction_with_trajectory_existence": plot_prediction_with_trajectory_existence,
     "mse_error": plot_mse_error,
+    "pde_residual": plot_pde_residual,
     "region_weights": plot_region_weights,
     "gt_traj": plot_gt_traj,
     "pred_traj": plot_pred_traj,
@@ -63,6 +65,7 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred_traj",
         "pred",  # Predicted grid heatmap
         "mse_error",
+        "pde_residual",
     ],
     "classifier_traj_net": [
         "gt_traj",
@@ -75,6 +78,7 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "ground_truth",
         "pred",  # Predicted grid heatmap
         "mse_error",
+        "pde_residual",
     ],
 }
 
