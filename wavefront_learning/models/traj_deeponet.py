@@ -275,8 +275,8 @@ class TrajDeepONet(nn.Module):
     """Trajectory-conditioned DeepONet for wavefront learning.
 
     Predicts shock trajectories and uses boundary positions to condition
-    a single density trunk. No existence prediction - all discontinuities
-    are assumed to persist through time.
+    a single density trunk. Optionally includes a classifier head that
+    predicts per-discontinuity existence (shock vs rarefaction).
 
     Args:
         hidden_dim: Hidden dimension for all networks.
@@ -288,6 +288,8 @@ class TrajDeepONet(nn.Module):
         num_coord_layers: MLP layers in coordinate encoder.
         num_res_blocks: Residual blocks in decoders.
         dropout: Dropout rate.
+        classifier: If True, add a classifier head predicting shock (1) vs
+            rarefaction (0) per discontinuity, constant across time.
     """
 
     def __init__(
@@ -302,10 +304,21 @@ class TrajDeepONet(nn.Module):
         num_res_blocks: int = 2,
         dropout: float = 0.1,
         with_traj: bool = True,
+        classifier: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.with_traj = with_traj
+        self.has_classifier = classifier
+
+        # Optional classifier: predicts shock (1) vs rarefaction (0) per discontinuity
+        if self.has_classifier:
+            self.classifier_head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.GELU(),
+                nn.Linear(hidden_dim // 2, 1),
+                nn.Sigmoid(),
+            )
 
         # Branch: encode discontinuities
         self.branch = DiscontinuityEncoder(
@@ -363,6 +376,8 @@ class TrajDeepONet(nn.Module):
             Dict containing:
                 - 'positions': (B, D, T) predicted trajectory positions
                 - 'output_grid': (B, 1, nt, nx) predicted density grid
+                - 'existence': (B, D, T) shock/rarefaction probability
+                  (only when classifier=True, constant across T)
         """
         discontinuities = batch_input["discontinuities"]
         disc_mask = batch_input["disc_mask"]
@@ -371,6 +386,12 @@ class TrajDeepONet(nn.Module):
 
         # === BRANCH ===
         branch_emb = self.branch(discontinuities, disc_mask)  # (B, D, hidden)
+
+        # === CLASSIFIER (optional) ===
+        if self.has_classifier:
+            existence = (
+                self.classifier_head(branch_emb).squeeze(-1) * disc_mask
+            )  # (B, D)
 
         # Pooled branch for trunk
         mask_exp = disc_mask.unsqueeze(-1)  # (B, D, 1)
@@ -387,8 +408,13 @@ class TrajDeepONet(nn.Module):
             )  # (B, D, T)
 
             # === BOUNDARIES ===
+            # When classifier is active, exclude rarefactions from boundary computation
+            if self.has_classifier:
+                effective_mask = disc_mask * (existence > 0.5).float()
+            else:
+                effective_mask = disc_mask
             left_bound, right_bound = compute_boundaries(
-                positions, x_coords, disc_mask
+                positions, x_coords, effective_mask
             )
 
             # === TRUNK ===
@@ -398,16 +424,24 @@ class TrajDeepONet(nn.Module):
 
             output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
 
-            return {
+            output = {
                 "positions": positions,
                 "output_grid": output_grid,
             }
+            if self.has_classifier:
+                # Expand to (B, D, T) — constant across time
+                output["existence"] = existence.unsqueeze(-1).expand_as(positions)
+            return output
 
         # === TRUNK (no trajectory conditioning) ===
         density = self.trunk(branch_pooled, t_coords, x_coords)  # (B, nt, nx)
         output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
 
-        return {"output_grid": output_grid}
+        output = {"output_grid": output_grid}
+        if self.has_classifier:
+            nt = t_coords.shape[1]
+            output["existence"] = existence.unsqueeze(-1).expand(-1, -1, nt)
+        return output
 
     def count_parameters(self) -> int:
         """Count trainable parameters."""
@@ -442,6 +476,32 @@ def build_traj_deeponet(args: dict) -> TrajDeepONet:
         num_coord_layers=args.get("num_coord_layers", 2),
         num_res_blocks=args.get("num_res_blocks", 2),
         dropout=args.get("dropout", 0.0),
+    )
+
+
+def build_classifier_traj_deeponet(args: dict) -> TrajDeepONet:
+    """Build TrajDeepONet with classifier head (ClassifierTrajDeepONet).
+
+    Same as TrajDeepONet but with an additional binary classifier that
+    predicts per-discontinuity existence (shock vs rarefaction).
+
+    Args:
+        args: Configuration dictionary (same keys as build_traj_deeponet).
+
+    Returns:
+        Configured TrajDeepONet instance with classifier=True.
+    """
+    return TrajDeepONet(
+        hidden_dim=args.get("hidden_dim", 32),
+        num_frequencies_t=args.get("num_frequencies_t", 8),
+        num_frequencies_x=args.get("num_frequencies_x", 8),
+        num_disc_frequencies=args.get("num_disc_frequencies", 8),
+        num_disc_layers=args.get("num_disc_layers", 2),
+        num_time_layers=args.get("num_time_layers", 2),
+        num_coord_layers=args.get("num_coord_layers", 2),
+        num_res_blocks=args.get("num_res_blocks", 2),
+        dropout=args.get("dropout", 0.0),
+        classifier=True,
     )
 
 

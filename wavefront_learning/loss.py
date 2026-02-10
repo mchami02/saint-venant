@@ -60,6 +60,13 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("boundary", 1.0),
         ("regularize_traj", 0.1),
     ],
+    "classifier_traj_net": [
+        ("mse", 1.0),
+        ("ic_anchoring", 0.1),
+        ("boundary", 1.0),
+        ("regularize_traj", 0.1),
+        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
+    ],
     "pde_shocks": [
         ("mse", 1.0),
         ("pde_shock_residual", 1.0),

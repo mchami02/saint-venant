@@ -64,6 +64,13 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",  # Predicted grid heatmap
         "mse_error",
     ],
+    "classifier_traj_net": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
     "grid_only": [
         "ground_truth",
         "pred",  # Predicted grid heatmap
