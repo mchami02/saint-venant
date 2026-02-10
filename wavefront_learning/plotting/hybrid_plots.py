@@ -521,18 +521,31 @@ def plot_pred_traj(
         )
         plt.colorbar(im, ax=ax, label="Density")
 
-        # Overlay: predicted trajectories (no existence filtering)
+        # Overlay: predicted trajectories
         n_disc = int(masks[b].sum())
         colors = _get_colors(n_disc)
+        has_existence = "existence" in traj_data
 
         for d in range(n_disc):
-            ax.plot(
-                positions[b, d],  # X = Space
-                times,  # Y = Time
-                color=colors[d],
-                linewidth=2,
-                linestyle="--",
-            )
+            if has_existence:
+                exist = traj_data["existence"][b, d]
+                for t_idx in range(len(times) - 1):
+                    if float(exist[t_idx]) >= 0.5:
+                        ax.plot(
+                            [positions[b, d, t_idx], positions[b, d, t_idx + 1]],
+                            [times[t_idx], times[t_idx + 1]],
+                            color=colors[d],
+                            linewidth=2,
+                            linestyle="--",
+                        )
+            else:
+                ax.plot(
+                    positions[b, d],
+                    times,
+                    color=colors[d],
+                    linewidth=2,
+                    linestyle="--",
+                )
 
         ax.set_xlabel("Space x")
         ax.set_ylabel("Time t")
