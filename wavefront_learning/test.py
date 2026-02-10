@@ -87,6 +87,7 @@ def main():
         model_name=model_name,
         train_ratio=0.0,  # All data for testing
         val_ratio=0.0,
+        only_shocks=False,
     )
 
     test_loader = DataLoader(

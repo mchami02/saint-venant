@@ -61,6 +61,7 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "region_weights",
     ],
     "traj_net": [
+        "ground_truth",
         "gt_traj",
         "pred_traj",
         "pred",  # Predicted grid heatmap

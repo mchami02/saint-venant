@@ -195,6 +195,7 @@ def eval_high_res(
         model_name=args.model,
         train_ratio=0.0,
         val_ratio=0.0,
+        only_shocks=False,
     )
 
     high_res_loader = DataLoader(
