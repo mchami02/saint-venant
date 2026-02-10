@@ -402,6 +402,11 @@ class TrajDeepONet(nn.Module):
 
         # === CROSS-DISCONTINUITY INTERACTION ===
         key_padding_mask = ~disc_mask.bool()  # True = ignore
+        # Unmask all-masked rows to avoid NaN from softmax (output is zeroed anyway)
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
         for layer in self.disc_interaction:
             branch_emb = layer(branch_emb, key_padding_mask=key_padding_mask)
         branch_emb = branch_emb * disc_mask.unsqueeze(-1)  # re-zero padded
