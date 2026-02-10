@@ -182,33 +182,24 @@ class PDEShockResidualLoss(BaseLoss):
         pos_int = positions[:, :, 1:-1]  # (B, D, nt-2)
         exist_int = existence[:, :, 1:-1]  # (B, D, nt-2)
 
-        # Compute min distance to nearest active predicted shock per cell
+        # Combine disc_mask and existence: if disc doesn't exist, same as shock doesn't exist
+        B, D = disc_mask.shape
+        combined = disc_mask.view(B, D, 1).float() * exist_int  # (B, D, nt-2)
+
+        # Compute distance from each cell to each predicted position
         # pos_int: (B, D, nt-2) -> (B, D, nt-2, 1)
         # x_interior: (B, nt-2, nx-2) -> (B, 1, nt-2, nx-2)
         dist = torch.abs(
             x_interior.unsqueeze(1) - pos_int.unsqueeze(-1)
         )  # (B, D, nt-2, nx-2)
 
-        # Weight by existence and disc_mask; set inactive shocks to large dist
-        B, D = disc_mask.shape
-        active = (
-            (exist_int > 0.5).float()
-            * disc_mask.view(B, D, 1).float()
-        )  # (B, D, nt-2)
-        large = torch.tensor(1e6, device=dist.device)
-        # Where inactive, replace distance with large value so it's ignored by min
-        dist = dist * active.unsqueeze(-1) + large * (1 - active.unsqueeze(-1))
+        # Per cell: min over discontinuities of dist / (combined + eps)
+        # Inactive shocks (combined ≈ 0) produce large scores, ignored by min
+        eps = 1e-6
+        min_score = (dist / (combined.unsqueeze(-1) + eps)).min(dim=1).values  # (B, nt-2, nx-2)
 
-        # Min distance across all discontinuities: (B, nt-2, nx-2)
-        min_dist = dist.min(dim=1).values
-
-        # Where no active discontinuity exists, min_dist still equals the
-        # sentinel (1e6). Zero these out so cells with no active disc
-        # contribute nothing instead of an enormous spurious loss.
-        min_dist = torch.where(min_dist >= large, torch.zeros_like(min_dist), min_dist)
-
-        # Weight = distance (close to shock -> small weight, far -> large weight)
-        loss = (residual**2 * min_dist).mean()
+        # Weight PDE residual by min_score
+        loss = (residual**2 * min_score).mean()
 
         components = {
             "pde_shock_residual": loss.item(),
