@@ -415,8 +415,8 @@ def train_model(
             }
         )
 
-    # Load best model
-    model = load_model(args.save_path, device, vars(args), logger=logger)
+    # Load best model from local checkpoint (no logger to avoid W&B race condition)
+    model = load_model(args.save_path, device, vars(args))
 
     print(f"\nTraining complete. Best val loss: {best_val_loss:.6f}")
     return model
