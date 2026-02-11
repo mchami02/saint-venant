@@ -396,7 +396,7 @@ def train_model(
             best_val_loss = val_loss
             patience_counter = 0
             # Save best model
-            save_model(model, args.save_path, vars(args), epoch + 1)
+            save_model(model, args.save_path, vars(args), epoch + 1, logger=logger)
         else:
             patience_counter += 1
 
