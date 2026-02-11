@@ -83,8 +83,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max_test_steps",
         type=int,
-        default=None,
+        default=10,
         help="Max steps for step-count generalization test (default: same as max_steps)",
+    )
+
+    # Resume training
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Path to a saved model checkpoint to resume training from",
     )
 
     # Output
@@ -468,9 +476,14 @@ def main():
         f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
     )
 
-    # Create model
-    model = get_model(args.model, vars(args))
-    model = model.to(device)
+    # Create or load model
+    if args.model_path:
+        print(f"\nResuming training from: {args.model_path}")
+        model = load_model(args.model_path, device, vars(args))
+        model.train()
+    else:
+        model = get_model(args.model, vars(args))
+        model = model.to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {num_params:,}")
