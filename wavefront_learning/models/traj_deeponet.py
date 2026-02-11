@@ -63,7 +63,7 @@ class PositionDecoder(nn.Module):
 
         self.position_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
@@ -196,7 +196,7 @@ class BoundaryConditionedTrunk(nn.Module):
             out_dim = hidden_dim if i == num_layers - 1 else hidden_dim
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
-                layers.append(nn.GELU())
+                layers.append(nn.ReLU())
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
         self.coord_mlp = nn.Sequential(*layers)
@@ -213,7 +213,7 @@ class BoundaryConditionedTrunk(nn.Module):
 
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
 
@@ -320,7 +320,7 @@ class TrajDeepONet(nn.Module):
         if self.has_classifier:
             self.classifier_head = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim // 2),
-                nn.GELU(),
+                nn.ReLU(),
                 nn.Linear(hidden_dim // 2, 1),
                 nn.Sigmoid(),
             )
