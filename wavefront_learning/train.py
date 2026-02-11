@@ -74,6 +74,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--only_shocks", action="store_true", help="Generate only shock waves (no rarefactions)"
     )
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=3,
+        help="Maximum number of pieces in piecewise constant IC (default: 3)",
+    )
+    parser.add_argument(
+        "--max_test_steps",
+        type=int,
+        default=None,
+        help="Max steps for step-count generalization test (default: same as max_steps)",
+    )
 
     # Output
     parser.add_argument(
@@ -96,7 +108,12 @@ def parse_args() -> argparse.Namespace:
         help="Plot preset (default: auto-detect based on model)",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.max_test_steps is None:
+        args.max_test_steps = args.max_steps
+
+    return args
 
 
 def detach_output(pred):
@@ -422,6 +439,7 @@ def main():
         grid_config=grid_config,
         model_name=args.model,
         only_shocks=args.only_shocks,
+        max_steps=args.max_steps,
     )
 
     train_loader = DataLoader(

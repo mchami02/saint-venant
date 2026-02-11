@@ -39,6 +39,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
     parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument(
+        "--max_steps",
+        type=int,
+        default=3,
+        help="Maximum number of pieces in piecewise constant IC (default: 3)",
+    )
+    parser.add_argument(
+        "--max_test_steps",
+        type=int,
+        default=None,
+        help="Max steps for step-count generalization test (default: same as max_steps)",
+    )
 
     # Output arguments
     parser.add_argument(
@@ -55,7 +67,12 @@ def parse_args() -> argparse.Namespace:
         help="Plot preset (default: auto-detect based on model)",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.max_test_steps is None:
+        args.max_test_steps = args.max_steps
+
+    return args
 
 
 def main():
@@ -69,7 +86,7 @@ def main():
     print(f"Loading model from: {args.model_path}")
 
     # Load model from checkpoint (uses config stored in checkpoint)
-    model = load_model(args.model_path, device)
+    model = load_model(args.model_path, device, {"model": "ClassifierTrajDeepONet"})
 
     # Extract model registry name from checkpoint config
     checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
@@ -87,6 +104,7 @@ def main():
         model_name=model_name,
         train_ratio=0.0,  # All data for testing
         val_ratio=0.0,
+        max_steps=args.max_steps,
         only_shocks=False,
     )
 

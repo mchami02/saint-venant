@@ -198,7 +198,11 @@ class WandbLogger:
         import tempfile
 
         with tempfile.NamedTemporaryFile(suffix=".pth", delete=False) as f:
-            torch.save(model.state_dict(), f.name)
+            checkpoint = {
+                "model_state_dict": model.state_dict(),
+                "config": metadata or {},
+            }
+            torch.save(checkpoint, f.name)
             artifact.add_file(f.name, name=f"{name}.pth")
         self.run.log_artifact(artifact)
 

@@ -215,6 +215,74 @@ def eval_high_res(
     )
 
 
+def eval_steps(
+    model: nn.Module,
+    args,
+    device: torch.device,
+    loss_fn: nn.Module | None = None,
+    grid_config: dict | None = None,
+    num_plots: int = 3,
+) -> dict[int, tuple[dict[str, float], dict[str, np.ndarray]]]:
+    """Evaluate model on increasing step counts to test generalization.
+
+    For each step count from args.max_steps+1 to args.max_test_steps (inclusive),
+    generates a test dataset with that many pieces in the piecewise constant IC
+    and evaluates the model.
+
+    Args:
+        model: Trained model to evaluate.
+        args: Training arguments (needs max_steps, max_test_steps, nx, nt, dx, dt,
+              batch_size, n_samples, model, and optionally only_shocks).
+        device: Computation device.
+        loss_fn: Optional loss function for trajectory models.
+        grid_config: Dict with {nx, nt, dx, dt}. Defaults from args if None.
+        num_plots: Number of samples to collect for plotting.
+
+    Returns:
+        Dict mapping step count to (metrics_dict, samples_dict).
+    """
+    if grid_config is None:
+        grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+
+    n_samples = max(100, args.n_samples // 10)
+    only_shocks = getattr(args, "only_shocks", False)
+
+    all_step_results = {}
+
+    for n_steps in range(args.max_steps + 1, args.max_test_steps + 1):
+        print(f"\nStep-count test: max_steps={n_steps} ({n_samples} samples)")
+
+        _, _, step_dataset = get_wavefront_datasets(
+            n_samples=n_samples,
+            grid_config=grid_config,
+            model_name=args.model,
+            max_steps=n_steps,
+            train_ratio=0.0,
+            val_ratio=0.0,
+            only_shocks=only_shocks,
+        )
+
+        step_loader = DataLoader(
+            step_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            collate_fn=collate_wavefront_batch,
+        )
+
+        metrics, samples = eval_model(
+            model=model,
+            test_loader=step_loader,
+            device=device,
+            loss_fn=loss_fn,
+            grid_config=grid_config,
+            num_plots=num_plots,
+        )
+
+        all_step_results[n_steps] = (metrics, samples)
+
+    return all_step_results
+
+
 def _sync_device(device: torch.device) -> None:
     """Synchronize device to ensure all operations are complete."""
     if device.type == "cuda":
@@ -385,5 +453,43 @@ def test_model(
             mode="test_high_res",
             preset=plot_preset,
         )
+
+    # --- Step-count generalization evaluation ---
+    max_test_steps = getattr(args, "max_test_steps", None)
+    max_steps = getattr(args, "max_steps", 3)
+
+    if max_test_steps is not None and max_test_steps > max_steps:
+        print(
+            f"\nRunning step-count generalization test "
+            f"(max_steps={max_steps + 1}..{max_test_steps})..."
+        )
+        step_results = eval_steps(
+            model=model,
+            args=args,
+            device=device,
+            loss_fn=loss_fn,
+            grid_config=grid_config,
+            num_plots=num_plots,
+        )
+
+        for n_steps, (step_metrics, step_samples) in step_results.items():
+            print(f"\nStep-Count Test (max_steps={n_steps}):")
+            print("-" * 40)
+            for key, value in step_metrics.items():
+                print(f"  {key}: {value:.6f}")
+            print("-" * 40)
+
+            if logger is not None:
+                logger.log_summary(
+                    {f"test_steps/{n_steps}/{k}": v for k, v in step_metrics.items()}
+                )
+                plot(
+                    step_samples,
+                    grid_config,
+                    logger,
+                    epoch=None,
+                    mode=f"test_steps/{n_steps}",
+                    preset=plot_preset,
+                )
 
     return metrics
