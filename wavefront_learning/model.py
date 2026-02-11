@@ -72,17 +72,31 @@ def load_model(
     model_path: str,
     device: torch.device,
     args: Namespace | dict | None = None,
+    logger=None,
 ) -> nn.Module:
     """Load a trained model from a checkpoint.
 
+    When a logger is provided and active, downloads the model artifact from
+    W&B instead of loading from the local path.
+
     Args:
-        model_path: Path to the model checkpoint.
+        model_path: Path to the model checkpoint (used as fallback).
         device: Device to load the model on.
         args: Optional args to override checkpoint config (Namespace or dict).
+        logger: Optional WandbLogger to download the model from W&B.
 
     Returns:
         Loaded model in evaluation mode.
     """
+    # Try downloading from W&B if logger is available
+    if logger is not None and args is not None:
+        args_dict = args if isinstance(args, dict) else vars(args)
+        model_name = args_dict.get("model")
+        if model_name:
+            wandb_path = logger.download_model(model_name)
+            if wandb_path is not None:
+                model_path = wandb_path
+
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
@@ -119,6 +133,7 @@ def save_model(
     args: Namespace | dict,
     epoch: int,
     optimizer_state: dict | None = None,
+    logger=None,
 ) -> None:
     """Save model checkpoint.
 
@@ -128,6 +143,7 @@ def save_model(
         args: Training arguments to store (Namespace or dict).
         epoch: Current epoch number.
         optimizer_state: Optional optimizer state dict.
+        logger: Optional WandbLogger to log model artifact.
     """
     config = args if isinstance(args, dict) else vars(args)
     checkpoint = {
@@ -138,3 +154,7 @@ def save_model(
     if optimizer_state is not None:
         checkpoint["optimizer_state_dict"] = optimizer_state
     torch.save(checkpoint, save_path)
+
+    if logger is not None:
+        model_name = config.get("model", "model")
+        logger.log_model(model, model_name, metadata=config)

@@ -4,8 +4,8 @@ Standard DeepONet with branch (IC encoder) and trunk (coordinate encoder)
 networks connected via dot product. Used as a baseline for comparison
 against wavefront-specific architectures.
 
-Input: tensor of shape (B, 3, nt, nx) from ToGridInputTransform
-       channels are [ic_masked, t_coords, x_coords]
+Input: dict with "grid_input" key containing tensor of shape (B, 3, nt, nx)
+       from ToGridInputTransform. Channels are [ic_masked, t_coords, x_coords].
 Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
 """
 
@@ -60,24 +60,25 @@ class DeepONet(nn.Module):
         # Bias term
         self.bias = nn.Parameter(torch.zeros(1))
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Forward pass.
 
         Args:
-            x: Input tensor of shape (B, 3, nt, nx) where channels are
-               [ic_masked, t_coords, x_coords].
+            x: Input dict with "grid_input" tensor of shape (B, 3, nt, nx)
+               where channels are [ic_masked, t_coords, x_coords].
 
         Returns:
             Dict with "output_grid" of shape (B, 1, nt, nx).
         """
-        B = x.shape[0]
+        grid = x["grid_input"]
+        B = grid.shape[0]
 
         # Extract initial condition from first channel at t=0
-        ic = x[:, 0, 0, :]  # (B, nx)
+        ic = grid[:, 0, 0, :]  # (B, nx)
 
         # Extract coordinate grids
-        t_coords = x[:, 1, :, :]  # (B, nt, nx)
-        x_coords = x[:, 2, :, :]  # (B, nt, nx)
+        t_coords = grid[:, 1, :, :]  # (B, nt, nx)
+        x_coords = grid[:, 2, :, :]  # (B, nt, nx)
 
         # Branch: encode IC
         branch_out = self.branch(ic)  # (B, latent_dim)

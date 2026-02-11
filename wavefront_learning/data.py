@@ -123,7 +123,10 @@ class ToGridInputTransform:
         # Stack: [ic_masked, t_coords, x_coords] -> (3, nt, nx)
         full_input = torch.cat([ic_masked, t_coords, x_coords], dim=0)
 
-        return full_input, target_grid
+        # Return dict: grid tensor + passthrough of original keys
+        result = dict(input_data)
+        result["grid_input"] = full_input
+        return result, target_grid
 
 
 # Registry of available transforms (string name -> class)

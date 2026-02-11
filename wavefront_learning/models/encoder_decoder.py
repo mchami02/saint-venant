@@ -3,8 +3,8 @@
 Transformer encoder processes masked IC conditions, decoder reconstructs
 full space-time solution via axial or cross-attention.
 
-Input: tensor of shape (B, 3, nt, nx) from ToGridInputTransform
-       channels are [ic_masked, t_coords, x_coords]
+Input: dict with "grid_input" key containing tensor of shape (B, 3, nt, nx)
+       from ToGridInputTransform. Channels are [ic_masked, t_coords, x_coords].
 Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
 """
 
@@ -127,31 +127,32 @@ class EncoderDecoder(nn.Module):
                 param.requires_grad = True
             self.frozen_shock_gnn = False
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Forward pass.
 
         Args:
-            x: Input tensor of shape (B, 3, nt, nx) where channels are
-               [ic_masked, t_coords, x_coords].
+            x: Input dict with "grid_input" tensor of shape (B, 3, nt, nx)
+               where channels are [ic_masked, t_coords, x_coords].
 
         Returns:
             Dict with "output_grid" of shape (B, 1, nt, nx).
         """
-        B, C, T, N = x.shape
+        grid = x["grid_input"]
+        B, C, T, N = grid.shape
 
         # Extract conditions where first channel is not -1
-        mask = x[:, 0, :, :] != -1  # (B, T, N)
-        x_permuted = x.permute(0, 2, 3, 1)  # (B, T, N, C)
+        mask = grid[:, 0, :, :] != -1  # (B, T, N)
+        grid_permuted = grid.permute(0, 2, 3, 1)  # (B, T, N, C)
 
         # Count valid elements per batch
         counts = mask.view(B, -1).sum(dim=1)  # (B,)
         max_length = int(counts.max().item())
 
         # Extract and pad conditions
-        conds = torch.full((B, max_length, C), 0.0, device=x.device, dtype=x.dtype)
-        key_padding_mask = torch.ones(B, max_length, device=x.device, dtype=torch.bool)
+        conds = torch.full((B, max_length, C), 0.0, device=grid.device, dtype=grid.dtype)
+        key_padding_mask = torch.ones(B, max_length, device=grid.device, dtype=torch.bool)
         for b in range(B):
-            valid_elements = x_permuted[b][mask[b]]
+            valid_elements = grid_permuted[b][mask[b]]
             conds[b, : counts[b]] = valid_elements
             key_padding_mask[b, : counts[b]] = False
 
@@ -159,7 +160,7 @@ class EncoderDecoder(nn.Module):
         encoder_output = self.encoder(conds, key_padding_mask=key_padding_mask)
 
         # Decode
-        all_coords = x[:, 1:].permute(0, 2, 3, 1)  # (B, T, N, 2)
+        all_coords = grid[:, 1:].permute(0, 2, 3, 1)  # (B, T, N, 2)
         u = self.decoder(all_coords, encoder_output, key_padding_mask=key_padding_mask)
 
         # Shock correction

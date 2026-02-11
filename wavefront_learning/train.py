@@ -416,7 +416,7 @@ def train_model(
         )
 
     # Load best model
-    model = load_model(args.save_path, device, vars(args))
+    model = load_model(args.save_path, device, vars(args), logger=logger)
 
     print(f"\nTraining complete. Best val loss: {best_val_loss:.6f}")
     return model

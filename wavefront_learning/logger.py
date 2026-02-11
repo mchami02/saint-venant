@@ -206,6 +206,22 @@ class WandbLogger:
             artifact.add_file(f.name, name=f"{name}.pth")
         self.run.log_artifact(artifact)
 
+    def download_model(self, name: str) -> str | None:
+        """Download a model artifact and return the local file path.
+
+        Args:
+            name: Artifact name (model name used in log_model).
+
+        Returns:
+            Path to the downloaded .pth file, or None if unavailable.
+        """
+        if not self.enabled or self.run is None:
+            return None
+
+        artifact = self.run.use_artifact(f"{name}:latest")
+        artifact_dir = artifact.download()
+        return str(Path(artifact_dir) / f"{name}.pth")
+
     def log_table(
         self,
         key: str,
