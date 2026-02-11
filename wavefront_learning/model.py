@@ -14,6 +14,10 @@ from models.traj_deeponet import (
     build_no_traj_deeponet,
     build_traj_deeponet,
 )
+from models.traj_transformer import (
+    build_classifier_traj_transformer,
+    build_traj_transformer,
+)
 
 # Registry of available models
 MODELS = {
@@ -26,6 +30,8 @@ MODELS = {
     "DeepONet": build_deeponet,
     "EncoderDecoder": build_encoder_decoder,
     "EncoderDecoderCross": build_encoder_decoder_cross,
+    "TrajTransformer": build_traj_transformer,
+    "ClassifierTrajTransformer": build_classifier_traj_transformer,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -39,6 +45,8 @@ MODEL_TRANSFORM = {
     "DeepONet": "ToGridInput",
     "EncoderDecoder": "ToGridInput",
     "EncoderDecoderCross": "ToGridInput",
+    "TrajTransformer": None,
+    "ClassifierTrajTransformer": None,
 }
 
 
