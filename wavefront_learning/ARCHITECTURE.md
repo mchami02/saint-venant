@@ -4,13 +4,15 @@ This document describes the neural network architectures and loss functions used
 
 ## Table of Contents
 
-1. [Models Overview](#models-overview)
-   - [Directory Structure](#directory-structure)
-   - [Base Components](#base-components)
+1. [Base Components](#base-components)
 2. [Main Models](#main-models)
    - [ShockTrajectoryNet](#shocktrajectorynet)
    - [HybridDeepONet](#hybriddeepopnet)
    - [TrajDeepONet](#trajdeeponet)
+   - [DeepONet](#deeponet-baseline)
+   - [FNO](#fno-baseline)
+   - [EncoderDecoder](#encoderdecoder)
+   - [TrajTransformer](#trajtransformer)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -26,78 +28,28 @@ This document describes the neural network architectures and loss functions used
      - [PDEShockResidualLoss](#pdeshockresidualloss)
      - [RHResidualLoss](#rhresidualloss)
      - [AccelerationLoss](#accelerationloss)
+     - [RegularizeTrajLoss](#regularizetrajloss)
    - [CombinedLoss](#combinedloss)
    - [Loss Presets](#loss-presets)
 
 ---
 
-## Models Overview
+## Base Components
 
-### Directory Structure
-
-The models package is organized with main models at the top level and reusable building blocks in a `base/` subdirectory:
-
-```
-models/
-├── __init__.py              # Exports main models and BaseWavefrontModel
-├── shock_trajectory_net.py  # ShockTrajectoryNet + build_shock_net()
-├── hybrid_deeponet.py       # HybridDeepONet + build_hybrid_deeponet()
-├── traj_deeponet.py         # TrajDeepONet + build_traj_deeponet()
-└── base/                    # Reusable building blocks
-    ├── __init__.py          # Re-exports all base components
-    ├── base_model.py        # BaseWavefrontModel (abstract base class)
-    ├── encoders.py          # FourierFeatures, TimeEncoder, DiscontinuityEncoder, SpaceTimeEncoder
-    ├── decoders.py          # TrajectoryDecoder
-    ├── blocks.py            # ResidualBlock
-    ├── regions.py           # RegionTrunk, RegionTrunkSet
-    └── assemblers.py        # GridAssembler
-```
-
-### Base Components
-
-All base components are located in `models/base/` and can be imported from there:
-
-```python
-from wavefront_learning.models.base import (
-    FourierFeatures,
-    TimeEncoder,
-    DiscontinuityEncoder,
-    SpaceTimeEncoder,
-    TrajectoryDecoder,
-    ResidualBlock,
-    RegionTrunk,
-    RegionTrunkSet,
-    GridAssembler,
-    BaseWavefrontModel,
-)
-```
+All base components are located in `models/base/`.
 
 | File | Components | Description |
 |------|------------|-------------|
 | `base_model.py` | `BaseWavefrontModel` | Abstract base class for wavefront models |
-| `encoders.py` | `FourierFeatures`, `TimeEncoder`, `DiscontinuityEncoder`, `SpaceTimeEncoder` | Input encoding modules |
+| `feature_encoders.py` | `FourierFeatures`, `TimeEncoder`, `DiscontinuityEncoder`, `SpaceTimeEncoder` | Input encoding modules |
 | `decoders.py` | `TrajectoryDecoder` | Decodes trajectories from branch/trunk embeddings |
 | `blocks.py` | `ResidualBlock` | Residual MLP block with LayerNorm |
 | `regions.py` | `RegionTrunk`, `RegionTrunkSet` | Density prediction for inter-shock regions |
 | `assemblers.py` | `GridAssembler` | Assembles grid from region predictions with soft boundaries |
-
-#### Dependency Graph
-
-```
-base/blocks.py        (no deps - leaf)
-base/assemblers.py    (no deps - leaf)
-base/base_model.py    (no deps - leaf)
-base/encoders.py      (self-contained - FourierFeatures used by SpaceTimeEncoder)
-base/decoders.py      → imports blocks.ResidualBlock
-base/regions.py       → imports blocks.ResidualBlock
-base/__init__.py      → imports all above
-     ↓
-shock_trajectory_net.py  → imports from base
-hybrid_deeponet.py       → imports from base
-traj_deeponet.py         → imports from base
-     ↓
-models/__init__.py       → imports main models
-```
+| `transformer_encoder.py` | `Tokenizer`, `EncoderLayer`, `Encoder` | Transformer encoder for token sequences |
+| `axial_decoder.py` | `FourierTokenizer`, `AxialAttention`, `AxialDecoderLayer`, `AxialDecoder` | Factored time/space attention decoder |
+| `cross_decoder.py` | `CrossDecoderLayer`, `CrossDecoder` | Cross-attention decoder with Nadaraya-Watson interpolation |
+| `shock_gnn.py` | `GatedMPNNLayer`, `ShockGNN` | Gated message-passing GNN for shock correction (requires torch_geometric) |
 
 ---
 
@@ -109,41 +61,19 @@ models/__init__.py       → imports main models
 
 A DeepONet-style architecture for predicting shock (discontinuity) trajectories in LWR traffic flow using unsupervised physics-based training.
 
-#### Architecture Overview
+#### Pseudocode
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     ShockTrajectoryNet                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Discontinuities (B, D, 3)      Query Times (B, T)             │
-│         │                              │                        │
-│         ▼                              ▼                        │
-│  ┌──────────────────┐         ┌───────────────────┐            │
-│  │ DiscontinuityEncoder │     │   TimeEncoder     │            │
-│  │    (Branch Net)      │     │   (Trunk Net)     │            │
-│  └──────────────────┘         └───────────────────┘            │
-│         │                              │                        │
-│         │  (B, D, hidden)              │  (B, T, hidden)       │
-│         └──────────────┬───────────────┘                        │
-│                        │                                        │
-│                        ▼                                        │
-│               ┌─────────────────┐                              │
-│               │ TrajectoryDecoder │                            │
-│               └─────────────────┘                              │
-│                        │                                        │
-│           ┌───────────┴───────────┐                            │
-│           ▼                       ▼                            │
-│    Positions (B, D, T)    Existence (B, D, T)                  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+discontinuities: (D, 3)  →  DiscontinuityEncoder  →  branch_emb: (D, H)
+query_times: (T,)         →  TimeEncoder           →  trunk_emb: (T, H)
+(branch_emb, trunk_emb)   →  TrajectoryDecoder     →  positions: (D, T), existence: (D, T)
 ```
 
 #### Sub-Components
 
 ##### FourierFeatures
 
-**Location**: `models/base/encoders.py`
+**Location**: `models/base/feature_encoders.py`
 
 Positional encoding for scalar inputs using sinusoidal features.
 
@@ -156,61 +86,32 @@ where $L$ = `num_frequencies` (default: 32).
 
 ##### DiscontinuityEncoder (Branch Network)
 
-**Location**: `models/base/encoders.py`
+**Location**: `models/base/feature_encoders.py`
 
 Encodes discontinuities using Fourier features + MLP. Each discontinuity is processed independently (no cross-attention).
 
-**Architecture**:
 ```
-Input: (B, D, 3) where each discontinuity = [x_position, rho_L, rho_R]
-       │
-       ├── x_position ──► FourierFeatures ──► (B, D, 2*num_freq + 1)
-       │
-       └── [rho_L, rho_R] ────────────────► (B, D, 2)
-       │
-       └── concatenate ───────────────────► (B, D, 2*num_freq + 3)
-               │
-               ▼
-       MLP: [Linear + GELU + LayerNorm] × num_layers
-               │
-               ▼
-       Apply mask × output
-               │
-               ▼
-       Output: (B, D, output_dim)
+# Per discontinuity: [x_position, rho_L, rho_R]
+x_position: (D,)  →  FourierFeatures  →  (D, 2*num_freq + 1)
+concat with [rho_L, rho_R]            →  (D, 2*num_freq + 3)
+→  MLP([Linear + GELU + LayerNorm] × num_layers)
+→  mask × output                       →  (D, output_dim)
 ```
 
-**Default configuration**:
-- `hidden_dim`: 128
-- `output_dim`: 128
-- `num_frequencies`: 16
-- `num_layers`: 3
+**Default**: hidden_dim=128, output_dim=128, num_frequencies=16, num_layers=3
 
 ##### TimeEncoder (Trunk Network)
 
-**Location**: `models/base/encoders.py`
+**Location**: `models/base/feature_encoders.py`
 
 Encodes query times for trajectory prediction.
 
-**Architecture**:
 ```
-Input: t ∈ (B, T)
-       │
-       ▼
-Fourier Features: γ(t) → (B, T, 2L+1)
-       │
-       ▼
-MLP: [Linear + GELU + LayerNorm] × num_layers
-       │
-       ▼
-Output: (B, T, output_dim)
+t: (T,)  →  FourierFeatures  →  (T, 2L+1)
+→  MLP([Linear + GELU + LayerNorm] × num_layers)  →  (T, output_dim)
 ```
 
-**Default configuration**:
-- `hidden_dim`: 128
-- `output_dim`: 128
-- `num_frequencies`: 32
-- `num_layers`: 3
+**Default**: hidden_dim=128, output_dim=128, num_frequencies=32, num_layers=3
 
 ##### TrajectoryDecoder
 
@@ -218,29 +119,12 @@ Output: (B, T, output_dim)
 
 Predicts shock positions and existence probabilities from branch and trunk embeddings.
 
-**Architecture**:
 ```
-branch_emb: (B, D, branch_dim)
-trunk_emb: (B, T, trunk_dim)
-       │
-       ▼
-Bilinear Fusion: W_bilinear(branch ⊗ trunk) → (B, D, T, hidden_dim)
-       +
-Skip Paths: Linear(branch) + Linear(trunk)
-       │
-       ▼
-LayerNorm
-       │
-       ▼
-Residual Blocks × num_res_blocks
-       │
-       ├──────────────────────┐
-       ▼                      ▼
-Position Head:           Existence Head:
-Linear → GELU → Linear   Linear → GELU → Linear → Sigmoid
-       │                      │
-       ▼                      ▼
-positions: (B, D, T)     existence: (B, D, T) ∈ [0, 1]
+branch_emb: (D, branch_dim), trunk_emb: (T, trunk_dim)
+→  BilinearFusion(branch ⊗ trunk) + Skip(branch) + Skip(trunk)  →  (D, T, H)
+→  LayerNorm → ResidualBlock × num_res_blocks
+→  PositionHead(Linear → GELU → Linear)     →  positions: (D, T)
+→  ExistenceHead(Linear → GELU → Linear → Sigmoid)  →  existence: (D, T) ∈ [0, 1]
 ```
 
 **Bilinear fusion formula**:
@@ -251,13 +135,13 @@ where $b_d$ is the branch embedding for discontinuity $d$ and $e_t$ is the trunk
 #### Input/Output Format
 
 **Input** (dictionary):
-- `discontinuities`: $(B, D, 3)$ - initial shock features $[x_0, \rho_L, \rho_R]$
-- `disc_mask`: $(B, D)$ - validity mask for discontinuities
-- `t_coords`: $(B, 1, n_t, n_x)$ - query times
+- `discontinuities`: $(D, 3)$ - initial shock features $[x_0, \rho_L, \rho_R]$
+- `disc_mask`: $(D,)$ - validity mask for discontinuities
+- `t_coords`: $(1, n_t, n_x)$ - query times
 
 **Output** (dictionary):
-- `positions`: $(B, D, T)$ - predicted x-coordinates of each shock at each time
-- `existence`: $(B, D, T)$ - probability $\in [0, 1]$ that each shock exists
+- `positions`: $(D, T)$ - predicted x-coordinates of each shock at each time
+- `existence`: $(D, T)$ - probability $\in [0, 1]$ that each shock exists
 
 ---
 
@@ -267,90 +151,33 @@ where $b_d$ is the branch embedding for discontinuity $d$ and $e_t$ is the trunk
 
 Combined model that predicts both shock trajectories AND full solution grids by assembling per-region density predictions.
 
-#### Architecture Overview
+#### Pseudocode
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         HybridDeepONet                                  │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  Discontinuities (B, D, 3)     t_coords (B, 1, nt, nx)                 │
-│         │                      x_coords (B, 1, nt, nx)                 │
-│         ▼                              │                               │
-│  ┌──────────────────┐                  │                               │
-│  │DiscontinuityEncoder│                │                               │
-│  │   (Shared Branch)  │                │                               │
-│  └──────────────────┘                  │                               │
-│         │                              │                               │
-│         ├─────────────────┬────────────┤                               │
-│         │                 │            │                               │
-│         ▼                 │            ▼                               │
-│  ┌─────────────┐          │     ┌─────────────────┐                    │
-│  │ TimeEncoder │          │     │SpaceTimeEncoder │                    │
-│  └─────────────┘          │     └─────────────────┘                    │
-│         │                 │            │                               │
-│         ▼                 │            │                               │
-│  ┌─────────────────┐      │            │                               │
-│  │TrajectoryDecoder│      │            │                               │
-│  └─────────────────┘      │            │                               │
-│         │                 │            │                               │
-│    positions,             │            │                               │
-│    existence              │            │                               │
-│         │                 ▼            ▼                               │
-│         │          ┌──────────────────────┐                            │
-│         │          │    RegionTrunkSet    │                            │
-│         │          │  (K region trunks)   │                            │
-│         │          └──────────────────────┘                            │
-│         │                 │                                            │
-│         │                 ▼                                            │
-│         │          region_densities (B, K, nt, nx)                     │
-│         │                 │                                            │
-│         └────────────────►│                                            │
-│                           ▼                                            │
-│                    ┌─────────────┐                                     │
-│                    │GridAssembler│                                     │
-│                    └─────────────┘                                     │
-│                           │                                            │
-│                           ▼                                            │
-│                    output_grid (B, 1, nt, nx)                          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+discontinuities: (D, 3)  →  DiscontinuityEncoder  →  branch_emb: (D, H), pooled: (H,)
+query_times: (T,)         →  TimeEncoder           →  trunk_emb: (T, H)
+(branch_emb, trunk_emb)   →  TrajectoryDecoder     →  positions: (D, T), existence: (D, T)
+(t_coords, x_coords)      →  SpaceTimeEncoder      →  coord_emb: (nt, nx, H)
+(pooled, coord_emb)        →  RegionTrunkSet(K)     →  region_densities: (K, nt, nx)
+(positions, existence, region_densities)  →  GridAssembler  →  output_grid: (1, nt, nx)
 ```
 
 #### Sub-Components
 
 ##### SpaceTimeEncoder
 
-**Location**: `models/base/encoders.py`
+**Location**: `models/base/feature_encoders.py`
 
 Encodes $(t, x)$ coordinate pairs for region density prediction.
 
-**Architecture**:
 ```
-t_coords: (B, nt, nx)
-x_coords: (B, nt, nx)
-       │
-       ▼
-Separate Fourier encoding:
-  γ_t(t) with L_t frequencies
-  γ_x(x) with L_x frequencies
-       │
-       ▼
-Concatenate: [γ_t(t), γ_x(x)] → (B, nt, nx, 2L_t + 2L_x + 2)
-       │
-       ▼
-MLP: [Linear + GELU + LayerNorm] × num_layers
-       │
-       ▼
-Output: (B, nt, nx, output_dim)
+t_coords: (nt, nx), x_coords: (nt, nx)
+→  FourierFeatures_t(t), FourierFeatures_x(x)
+→  concat: (nt, nx, 2L_t + 2L_x + 2)
+→  MLP([Linear + GELU + LayerNorm] × num_layers)  →  (nt, nx, output_dim)
 ```
 
-**Default configuration**:
-- `hidden_dim`: 128
-- `output_dim`: 128
-- `num_frequencies_t`: 16
-- `num_frequencies_x`: 16
-- `num_layers`: 3
+**Default**: hidden_dim=128, output_dim=128, num_frequencies_t=16, num_frequencies_x=16, num_layers=3
 
 ##### RegionTrunk
 
@@ -358,26 +185,11 @@ Output: (B, nt, nx, output_dim)
 
 Predicts density values for a single region between shocks.
 
-**Architecture**:
 ```
-branch_emb: (B, branch_dim)         coord_emb: (B, nt, nx, coord_dim)
-       │                                   │
-       ▼                                   │
-Expand: (B, nt, nx, branch_dim)           │
-       │                                   │
-       └──────────────┬────────────────────┘
-                      │
-                      ▼
-Bilinear Fusion + Skip Paths
-                      │
-                      ▼
-Residual Blocks × num_res_blocks
-                      │
-                      ▼
-Density Head: Linear → GELU → Linear → Sigmoid
-                      │
-                      ▼
-Output: (B, nt, nx) ∈ [0, 1]
+branch_emb: (H,), coord_emb: (nt, nx, coord_dim)
+→  expand branch to (nt, nx, H)
+→  BilinearFusion + SkipPaths → ResidualBlocks
+→  DensityHead(Linear → GELU → Linear → Sigmoid)  →  (nt, nx) ∈ [0, 1]
 ```
 
 ##### RegionTrunkSet
@@ -386,7 +198,7 @@ Output: (B, nt, nx) ∈ [0, 1]
 
 Set of $K = \text{max\_discontinuities} + 1$ region trunks, one for each region.
 
-**Output**: $(B, K, n_t, n_x)$ - stacked per-region density predictions
+**Output**: $(K, n_t, n_x)$ - stacked per-region density predictions
 
 ##### GridAssembler
 
@@ -394,23 +206,12 @@ Set of $K = \text{max\_discontinuities} + 1$ region trunks, one for each region.
 
 Assembles the final solution grid from per-region predictions using soft sigmoid boundaries.
 
-**Region Assignment**:
+**Region Assignment**: For $D$ discontinuities → $K = D + 1$ regions.
 
-For a domain with $D$ discontinuities, there are $K = D + 1$ regions:
-- Region 0: Left of the first shock
-- Region $k$ (for $1 \leq k < D$): Between shock $k-1$ and shock $k$
-- Region $D$: Right of the last shock
-
-**Soft Boundary Computation**:
-
-For each shock $d$ at position $x_d(t)$:
+**Soft Boundary Computation** for shock $d$ at position $x_d(t)$:
 $$\text{left\_of\_shock}_d(t, x) = \sigma\left(\frac{x_d(t) - x}{\sigma_{soft}}\right) \cdot e_d(t) \cdot m_d$$
 
-where:
-- $\sigma(\cdot)$ is the sigmoid function
-- $\sigma_{soft} = 0.02$ is the softness parameter
-- $e_d(t)$ is the existence probability
-- $m_d$ is the discontinuity mask
+where $\sigma_{soft} = 0.02$ is the softness parameter.
 
 **Region Weights**:
 $$w_0(t, x) = \text{left\_of\_shock}_0(t, x)$$
@@ -420,22 +221,20 @@ $$w_{K-1}(t, x) = 1 - \text{left\_of\_shock}_{D-1}(t, x)$$
 **Final Grid Assembly**:
 $$\rho(t, x) = \sum_{k=0}^{K-1} w_k(t, x) \cdot \rho_k(t, x)$$
 
-where $\rho_k$ is the density prediction from region trunk $k$.
-
 #### Input/Output Format
 
 **Input** (dictionary):
-- `discontinuities`: $(B, D, 3)$ - initial shock features
-- `disc_mask`: $(B, D)$ - validity mask
-- `t_coords`: $(B, 1, n_t, n_x)$ - query times
-- `x_coords`: $(B, 1, n_t, n_x)$ - query positions
+- `discontinuities`: $(D, 3)$ - initial shock features
+- `disc_mask`: $(D,)$ - validity mask
+- `t_coords`: $(1, n_t, n_x)$ - query times
+- `x_coords`: $(1, n_t, n_x)$ - query positions
 
 **Output** (dictionary):
-- `positions`: $(B, D, T)$ - shock positions
-- `existence`: $(B, D, T)$ - shock existence probabilities
-- `output_grid`: $(B, 1, n_t, n_x)$ - assembled solution
-- `region_densities`: $(B, K, n_t, n_x)$ - per-region predictions
-- `region_weights`: $(B, K, n_t, n_x)$ - soft region assignments
+- `positions`: $(D, T)$ - shock positions
+- `existence`: $(D, T)$ - shock existence probabilities
+- `output_grid`: $(1, n_t, n_x)$ - assembled solution
+- `region_densities`: $(K, n_t, n_x)$ - per-region predictions
+- `region_weights`: $(K, n_t, n_x)$ - soft region assignments
 
 ---
 
@@ -448,56 +247,14 @@ Trajectory-conditioned DeepONet that predicts shock trajectories and uses them t
 - **Single trunk**: one network conditioned on boundary positions instead of K separate region trunks
 - **No GridAssembler**: the trunk directly outputs density
 
-#### Architecture Overview
+#### Pseudocode
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          TrajDeepONet                                │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  Discontinuities (B, D, 3)     t_coords (B, 1, nt, nx)              │
-│         │                      x_coords (B, 1, nt, nx)              │
-│         ▼                              │                             │
-│  ┌──────────────────┐                  │                             │
-│  │DiscontinuityEncoder│                │                             │
-│  │     (Branch)       │                │                             │
-│  └──────────────────┘                  │                             │
-│         │                              │                             │
-│         ├───── per-disc (B,D,h) ───┐   │                             │
-│         │                          │   │                             │
-│         ▼ pooled (B,h)             │   │                             │
-│         │                          │   │                             │
-│         │    ┌─────────────┐       │   │                             │
-│         │    │ TimeEncoder │       │   │                             │
-│         │    └─────────────┘       │   │                             │
-│         │           │              │   │                             │
-│         │           ▼              │   │                             │
-│         │    ┌───────────────┐     │   │                             │
-│         │    │PositionDecoder│◄────┘   │                             │
-│         │    │ (no existence)│         │                             │
-│         │    └───────────────┘         │                             │
-│         │           │                  │                             │
-│         │    positions (B,D,T)         │                             │
-│         │           │                  │                             │
-│         │           ▼                  │                             │
-│         │    ┌────────────────┐        │                             │
-│         │    │compute_boundaries│◄──────┘                             │
-│         │    └────────────────┘                                      │
-│         │      │            │                                        │
-│         │   x_left       x_right                                     │
-│         │   (B,nt,nx)    (B,nt,nx)                                   │
-│         │      │            │                                        │
-│         ▼      ▼            ▼                                        │
-│  ┌──────────────────────────────────┐                                │
-│  │   BoundaryConditionedTrunk      │                                │
-│  │   Input: branch + (t, x,       │                                │
-│  │          x_left, x_right)       │                                │
-│  └──────────────────────────────────┘                                │
-│                    │                                                 │
-│                    ▼                                                 │
-│             output_grid (B, 1, nt, nx)                               │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+discontinuities: (D, 3)  →  DiscontinuityEncoder  →  per_disc: (D, H), pooled: (H,)
+query_times: (T,)         →  TimeEncoder           →  trunk_emb: (T, H)
+(per_disc, trunk_emb)     →  PositionDecoder       →  positions: (D, T)
+(positions, x_coords, disc_mask)  →  compute_boundaries  →  x_left: (nt, nx), x_right: (nt, nx)
+(pooled, t, x, x_left, x_right)  →  BoundaryConditionedTrunk  →  output_grid: (1, nt, nx)
 ```
 
 #### Sub-Components
@@ -508,24 +265,10 @@ Trajectory-conditioned DeepONet that predicts shock trajectories and uses them t
 
 Simplified trajectory decoder that only predicts positions (no existence head).
 
-**Architecture**:
 ```
-branch_emb: (B, D, branch_dim)
-trunk_emb: (B, T, trunk_dim)
-       │
-       ▼
-Bilinear Fusion: W_bilinear(branch ⊗ trunk) → (B, D, T, hidden_dim)
-       +
-Skip Paths: Linear(branch) + Linear(trunk)
-       │
-       ▼
-LayerNorm → Residual Blocks × num_res_blocks
-       │
-       ▼
-Position Head: Linear → GELU → Linear → clamp[0, 1]
-       │
-       ▼
-positions: (B, D, T)
+branch_emb: (D, branch_dim), trunk_emb: (T, trunk_dim)
+→  BilinearFusion + SkipPaths → LayerNorm → ResidualBlocks
+→  PositionHead(Linear → GELU → Linear → clamp[0,1])  →  positions: (D, T)
 ```
 
 ##### compute_boundaries
@@ -534,15 +277,12 @@ positions: (B, D, T)
 
 Computes left and right boundary discontinuity positions for each grid point.
 
-For each spatial point $x$ at time $t$ with $D$ discontinuities at positions $\{x_d(t)\}$:
-
 $$x_{left}(t, x) = \max_{d : x_d(t) \leq x,\ m_d = 1} x_d(t) \quad \text{(or 0 if none)}$$
 
 $$x_{right}(t, x) = \min_{d : x_d(t) > x,\ m_d = 1} x_d(t) \quad \text{(or 1 if none)}$$
 
-**Input/Output**:
-- Input: `positions` $(B, D, n_t)$, `x_coords` $(B, n_t, n_x)$, `disc_mask` $(B, D)$
-- Output: `left_bound` $(B, n_t, n_x)$, `right_bound` $(B, n_t, n_x)$
+- Input: `positions` $(D, n_t)$, `x_coords` $(n_t, n_x)$, `disc_mask` $(D,)$
+- Output: `left_bound` $(n_t, n_x)$, `right_bound` $(n_t, n_x)$
 
 ##### BoundaryConditionedTrunk
 
@@ -550,46 +290,26 @@ $$x_{right}(t, x) = \min_{d : x_d(t) > x,\ m_d = 1} x_d(t) \quad \text{(or 1 if 
 
 Single trunk that predicts density conditioned on boundary positions.
 
-**Architecture**:
 ```
-Inputs: t (B,nt,nx), x (B,nt,nx), x_left (B,nt,nx), x_right (B,nt,nx)
-       │
-       ▼
-Fourier encode (shared spatial encoder for x, x_left, x_right):
-  γ_t(t) with L_t frequencies
-  γ_x(x), γ_x(x_left), γ_x(x_right) with L_x frequencies
-       │
-       ▼
-Concatenate: [γ_t, γ_x, γ_x_left, γ_x_right]
-       │
-       ▼
-Coord MLP: [Linear + GELU + LayerNorm] × num_layers → coord_emb
-       │
-       └──────────────────┐
-                          ▼
-branch_emb (B, h) ──► Bilinear Fusion + Skip Paths
-                          │
-                          ▼
-                    LayerNorm → Residual Blocks × num_res_blocks
-                          │
-                          ▼
-                    Density Head: Linear → GELU → Linear → Sigmoid
-                          │
-                          ▼
-                    Output: (B, nt, nx) ∈ [0, 1]
+t: (nt, nx), x: (nt, nx), x_left: (nt, nx), x_right: (nt, nx)
+→  FourierEncode: γ_t(t), γ_x(x), γ_x(x_left), γ_x(x_right)
+→  concat → CoordMLP([Linear + GELU + LayerNorm] × L)  →  coord_emb: (nt, nx, H)
+branch_emb: (H,) + coord_emb  →  BilinearFusion + SkipPaths
+→  LayerNorm → ResidualBlocks
+→  DensityHead(Linear → GELU → Linear → Sigmoid)  →  (nt, nx) ∈ [0, 1]
 ```
 
 #### Input/Output Format
 
 **Input** (dictionary):
-- `discontinuities`: $(B, D, 3)$ - initial shock features $[x_0, \rho_L, \rho_R]$
-- `disc_mask`: $(B, D)$ - validity mask
-- `t_coords`: $(B, 1, n_t, n_x)$ - query times
-- `x_coords`: $(B, 1, n_t, n_x)$ - query positions
+- `discontinuities`: $(D, 3)$ - initial shock features $[x_0, \rho_L, \rho_R]$
+- `disc_mask`: $(D,)$ - validity mask
+- `t_coords`: $(1, n_t, n_x)$ - query times
+- `x_coords`: $(1, n_t, n_x)$ - query positions
 
 **Output** (dictionary):
-- `positions`: $(B, D, T)$ - shock positions (all discontinuities persist)
-- `output_grid`: $(B, 1, n_t, n_x)$ - predicted density grid
+- `positions`: $(D, T)$ - shock positions (all discontinuities persist)
+- `output_grid`: $(1, n_t, n_x)$ - predicted density grid
 
 ---
 
@@ -599,63 +319,16 @@ branch_emb (B, h) ──► Bilinear Fusion + Skip Paths
 
 Classic DeepONet architecture used as a baseline. Branch network encodes the initial condition, trunk network encodes query coordinates, and their dot product produces the output.
 
-#### Architecture Overview
+#### Pseudocode
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        DeepONet                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Input: (B, 3, nt, nx)                                          │
-│  channels = [ic_masked, t_coords, x_coords]                     │
-│                                                                  │
-│  IC at t=0: (B, nx)         Coordinates: (B, nt*nx, 2)          │
-│         │                              │                         │
-│         ▼                              ▼                         │
-│  ┌──────────────┐              ┌──────────────┐                  │
-│  │ Branch MLP   │              │  Trunk MLP   │                  │
-│  │ nx → hidden  │              │  2 → hidden  │                  │
-│  │ → latent_dim │              │  → latent_dim│                  │
-│  └──────────────┘              └──────────────┘                  │
-│         │                              │                         │
-│         │  (B, latent_dim)             │  (B, nt*nx, latent_dim) │
-│         └──────────────┬───────────────┘                         │
-│                        │                                         │
-│                        ▼                                         │
-│              Dot Product + Bias                                  │
-│              Σ_p branch_p · trunk_p + b                          │
-│                        │                                         │
-│                        ▼                                         │
-│              Reshape to (B, 1, nt, nx)                           │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+grid_input: (3, nt, nx)  →  extract IC at t=0: (nx,), coords: (nt*nx, 2)
+IC: (nx,)           →  BranchMLP([Linear + GELU] × L → Linear)  →  (p,)
+coords: (nt*nx, 2)  →  TrunkMLP([Linear + GELU] × L → Linear)  →  (nt*nx, p)
+→  dot product + bias: Σ_k branch_k · trunk_k + β  →  reshape to (1, nt, nx)
 ```
 
-#### Branch Network
-
-MLP that encodes the initial condition:
-
-$$\text{Branch}: \mathbb{R}^{n_x} \to \mathbb{R}^{p}$$
-
-```
-IC (B, nx) → [Linear + GELU] × L → Linear → (B, p)
-```
-
-where $L$ = `num_branch_layers` (default: 4), $p$ = `latent_dim` (default: 64).
-
-#### Trunk Network
-
-MLP that encodes query coordinates:
-
-$$\text{Trunk}: \mathbb{R}^{2} \to \mathbb{R}^{p}$$
-
-```
-(t, x) (B, nt*nx, 2) → [Linear + GELU] × L → Linear → (B, nt*nx, p)
-```
-
-where $L$ = `num_trunk_layers` (default: 4).
-
-#### Output
+#### Output formula
 
 $$\rho(t, x) = \sum_{k=1}^{p} b_k \cdot \tau_k(t, x) + \beta$$
 
@@ -663,13 +336,10 @@ where $b_k$ is the $k$-th branch output, $\tau_k$ is the $k$-th trunk output, an
 
 #### Input/Output Format
 
-**Input**: tensor $(B, 3, n_t, n_x)$ from `ToGridInputTransform`
-- Channel 0: IC masked (IC at t=0, -1 elsewhere)
-- Channel 1: $t$ coordinates
-- Channel 2: $x$ coordinates
+**Input**: tensor $(3, n_t, n_x)$ from `ToGridInputTransform` — channels: [ic_masked, t_coords, x_coords]
 
 **Output** (dictionary):
-- `output_grid`: $(B, 1, n_t, n_x)$ - predicted solution
+- `output_grid`: $(1, n_t, n_x)$ - predicted solution
 
 #### Default Configuration
 
@@ -679,6 +349,235 @@ where $b_k$ is the $k$-th branch output, $\tau_k$ is the $k$-th trunk output, an
 | `latent_dim` | 64 | Dot-product dimension |
 | `num_branch_layers` | 4 | Branch MLP depth |
 | `num_trunk_layers` | 4 | Trunk MLP depth |
+
+---
+
+### FNO (Baseline)
+
+**Location**: `models/fno_wrapper.py`
+
+Fourier Neural Operator baseline wrapped for the wavefront learning dict interface. Wraps `neuralop.models.FNO` and adds dict input/output.
+
+#### Pseudocode
+
+```
+grid_input: (3, nt, nx)
+→  Lifting(3 → hidden_channels)
+→  SpectralConv2d(n_modes_t, n_modes_x) × n_layers
+→  Projection(hidden_channels → 1)
+→  output_grid: (1, nt, nx)
+```
+
+#### Input/Output Format
+
+**Input**: tensor $(3, n_t, n_x)$ from `ToGridInputTransform` — channels: [ic_masked, t_coords, x_coords]
+
+**Output** (dictionary):
+- `output_grid`: $(1, n_t, n_x)$ - predicted solution
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_modes_t` | 32 | Fourier modes in time dimension |
+| `n_modes_x` | 16 | Fourier modes in space dimension |
+| `hidden_channels` | 32 | FNO hidden channel width |
+| `n_layers` | 2 | Number of spectral convolution layers |
+
+---
+
+### EncoderDecoder
+
+**Location**: `models/encoder_decoder.py`
+
+Transformer-based encoder-decoder model. The encoder processes masked IC conditions (non-masked grid points) as a variable-length token sequence. The decoder reconstructs the full space-time solution from query coordinates, using cross-attention to the encoder output. Two decoder variants are available, plus an optional GNN shock correction.
+
+#### Pseudocode
+
+```
+grid_input: (3, nt, nx)  →  extract non-masked tokens (ic != -1)  →  conds: (S, 3)
+conds: (S, 3)  →  Tokenizer(3 → H) → EncoderLayer(self-attn + FFN) × L_e  →  encoder_out: (S, H)
+
+# Axial decoder variant:
+coords: (nt, nx, 2)  →  FourierTokenizer → [AxialAttn(time) + AxialAttn(space) + CrossAttn(encoder)] × L_d
+→  Linear → u: (nt, nx, 1)
+
+# Cross decoder variant:
+coords: (nt, nx, 2)  →  NadarayaWatson(learnable_grid) → [CrossAttn(encoder)] × L_d
+→  MLP → u: (nt, nx, 1)
+
+# Optional ShockGNN correction (if layers_gnn > 0):
+u  →  ShockGNN(gated MPNN on 8-connected grid)  →  delta_u: (nt, nx, 1)
+output_grid = (u + delta_u): (1, nt, nx)
+```
+
+#### Sub-Components
+
+##### Encoder (`base/transformer_encoder.py`)
+
+Standard transformer encoder with tokenizer and stacked self-attention layers.
+
+- **Tokenizer**: Linear(input_dim → hidden_dim)
+- **EncoderLayer**: MultiheadAttention + residual + LayerNorm, then FFN(H → 4H → H) + residual + LayerNorm
+
+##### AxialDecoder (`base/axial_decoder.py`)
+
+Memory-efficient decoder using factored attention over time and space dimensions separately.
+
+**FourierTokenizer**: Projects coordinate inputs using sinusoidal Fourier features.
+
+$$\gamma(x) = \left[ x, \sin(2^0 \pi x), \cos(2^0 \pi x), \ldots, \sin(2^{L-1} \pi x), \cos(2^{L-1} \pi x) \right]$$
+
+Then projects via Linear to hidden_dim. Default: $L = 4$ frequencies.
+
+**AxialAttention**: Factored self-attention that attends over T and N dimensions separately. Each axis has its own `MultiheadAttention` and `LayerNorm`.
+
+**AxialDecoderLayer**: Axial self-attention (time + space) → flatten to $(T \cdot N, D)$ → cross-attention to encoder → FFN with residual + LayerNorm.
+
+##### CrossDecoder (`base/cross_decoder.py`)
+
+Decoder using Nadaraya-Watson interpolation over a trainable latent grid, followed by cross-attention.
+
+**Nadaraya-Watson Interpolation**:
+
+For query point $y \in \mathbb{R}^2$, interpolates from learnable grid features $\{x_{ij}\}$ at uniform grid points $\{y_{ij}\} \subset [0, 1]^2$:
+
+$$x'(y) = \sum_{i,j} w_{ij}(y) \cdot x_{ij}, \quad w_{ij}(y) = \frac{\exp(-\beta \|y - y_{ij}\|^2)}{\sum_{i',j'} \exp(-\beta \|y - y_{i'j'}\|^2)}$$
+
+where $\beta$ is the locality hyperparameter (default: 10.0). Larger $\beta$ → more localized weights.
+
+**CrossDecoderLayer** (pre-norm architecture):
+$$x'_k = x_{k-1} + \text{MHA}(\text{LN}(x_{k-1}), \text{LN}(z_L), \text{LN}(z_L))$$
+$$x_k = x'_k + \text{MLP}(\text{LN}(x'_k))$$
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `grid_nx` | 16 | Latent grid points in first dimension |
+| `grid_ny` | 16 | Latent grid points in second dimension |
+| `beta` | 10.0 | Nadaraya-Watson locality parameter |
+
+##### ShockGNN (`base/shock_gnn.py`)
+
+Optional graph neural network correction for shock regions. Uses gated message passing on a 2D grid with 8-connectivity (4 cardinal + 4 diagonal neighbors).
+
+**GatedMPNNLayer**: Message-passing layer with physics-informed gating:
+- Gate inputs: $u_i$, $u_j$, $|u_i - u_j|$, $\partial u/\partial x_i$, $\partial u/\partial x_j$, $\partial u/\partial t_i$, $\partial u/\partial t_j$
+- Gate output: $g \in [0, 1]$ via sigmoid (initialized near 0 with bias $= -3.0$)
+- Message: $m_{ij} = g \cdot \text{MLP}([h_i, h_j, e_{ij}])$
+- Update: $h'_i = h_i + \text{MLP}([h_i, \sum_j m_{ij}])$
+
+Requires `torch_geometric` (optional dependency).
+
+#### Input/Output Format
+
+**Input**: tensor $(3, n_t, n_x)$ from `ToGridInputTransform` — channels: [ic_masked, t_coords, x_coords]
+
+**Output** (dictionary):
+- `output_grid`: $(1, n_t, n_x)$ - predicted solution
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 64 | Hidden dimension for all components |
+| `layers_encoder` | 2 | Encoder transformer layers |
+| `decoder_type` | `"axial"` or `"cross"` | Decoder variant |
+| `layers_decoder` | 2 | Decoder layers |
+| `layers_gnn` | 0 | GNN correction layers (0 = disabled) |
+
+#### Factory Functions
+
+- `build_encoder_decoder(args)`: Builds with axial decoder
+- `build_encoder_decoder_cross(args)`: Builds with cross-attention decoder
+
+---
+
+### TrajTransformer
+
+**Location**: `models/traj_transformer.py`
+
+Cross-attention variant of TrajDeepONet. Replaces bilinear fusion with cross-attention throughout: discontinuity embeddings serve as keys/values, while time or spacetime embeddings serve as queries. This avoids the need for branch pooling and enables richer discontinuity-aware feature aggregation.
+
+#### Pseudocode
+
+```
+discontinuities: (D, 3)  →  DiscontinuityEncoder  →  (D, H)
+→  SelfAttention(EncoderLayer × L)                 →  disc_emb: (D, H)
+→  [optional] ClassifierHead(MLP → Sigmoid)         →  existence: (D,)
+
+query_times: (T,)  →  TimeEncoder  →  time_emb: (T, H)
+(time_emb as Q, disc_emb as K/V)  →  CrossDecoderLayer × L  →  time_enriched: (T, H)
+disc_emb + time_enriched  →  PositionHead  →  positions: (D, T)
+
+(positions, x_coords, disc_mask)  →  compute_boundaries  →  x_left: (nt, nx), x_right: (nt, nx)
+(t, x, x_left, x_right)  →  FourierEncode → CoordMLP  →  coord_emb: (nt*nx, H)
+(coord_emb as Q, disc_emb as K/V)  →  CrossDecoderLayer × L  →  DensityHead  →  (nt, nx)
+→  output_grid: (1, nt, nx)
+```
+
+#### Sub-Components
+
+##### TrajectoryDecoderTransformer
+
+Decodes trajectory positions using cross-attention instead of bilinear fusion.
+
+- Time embeddings (queries) attend to discontinuity embeddings (keys/values) via `CrossDecoderLayer × L`
+- Enriched time features combined with each disc embedding: `disc_emb + time_enriched`
+- Position head: `LayerNorm → Linear(H → H/2) → ReLU → Linear(H/2 → 1) → clamp[0,1]`
+
+##### DensityDecoderTransformer
+
+Predicts density using Fourier-encoded coordinates as queries attending to discontinuity embeddings.
+
+- Fourier encode: $\gamma_t(t)$, $\gamma_x(x)$ [, $\gamma_x(x_{left})$, $\gamma_x(x_{right})$]
+- Coord MLP: concatenated features → hidden_dim
+- Cross-attention: coord queries attend to disc K/V via `CrossDecoderLayer × L`
+- Density head: `Linear(H → H/2) → ReLU → Linear(H/2 → 1) → clamp[0,1]`
+
+##### Classifier Head (optional)
+
+Binary classification per discontinuity: shock (1) vs rarefaction (0).
+
+$$e_d = \sigma(\text{MLP}(h_d)) \cdot m_d$$
+
+Output is constant across time: $(D,) \to (D, T)$ via expand.
+
+When enabled, the classifier filters `compute_boundaries` to only use discontinuities with $e_d > 0.5$.
+
+#### Input/Output Format
+
+**Input** (dictionary):
+- `discontinuities`: $(D, 3)$ - initial shock features $[x_0, \rho_L, \rho_R]$
+- `disc_mask`: $(D,)$ - validity mask
+- `t_coords`: $(1, n_t, n_x)$ - query times
+- `x_coords`: $(1, n_t, n_x)$ - query positions
+
+**Output** (dictionary):
+- `positions`: $(D, T)$ - shock positions
+- `output_grid`: $(1, n_t, n_x)$ - predicted density grid
+- `existence`: $(D, T)$ - shock/rarefaction probability (only when `classifier=True`, constant across $T$)
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 32 | Hidden dimension for all networks |
+| `num_frequencies_t` | 8 | Fourier frequencies for time |
+| `num_frequencies_x` | 8 | Fourier frequencies for space |
+| `num_disc_frequencies` | 8 | Fourier frequencies for discontinuity positions |
+| `num_disc_layers` | 2 | MLP layers in discontinuity encoder |
+| `num_time_layers` | 2 | MLP layers in time encoder |
+| `num_coord_layers` | 2 | MLP layers in coordinate encoder |
+| `num_interaction_layers` | 2 | Self-attention layers for cross-disc interaction |
+| `num_traj_cross_layers` | 2 | Cross-attention layers in trajectory decoder |
+| `num_density_cross_layers` | 2 | Cross-attention layers in density decoder |
+| `num_attention_heads` | 4 | Attention heads |
+| `dropout` | 0.0 | Dropout rate |
+
+#### Factory Functions
+
+- `build_traj_transformer(args)`: Standard version (`with_traj=True`, `classifier=False`)
+- `build_classifier_traj_transformer(args)`: With classifier (`classifier=True`)
 
 ---
 
@@ -720,27 +619,15 @@ Centralized flux functions for LWR traffic flow with Greenshields flux.
 
 $$f(\rho) = \rho (1 - \rho)$$
 
-```python
-def greenshields_flux(rho: torch.Tensor) -> torch.Tensor
-```
-
 #### greenshields_flux_derivative
 
 $$f'(\rho) = 1 - 2\rho$$
-
-```python
-def greenshields_flux_derivative(rho: torch.Tensor) -> torch.Tensor
-```
 
 #### compute_shock_speed
 
 From Rankine-Hugoniot condition:
 
 $$s = \frac{f(\rho_R) - f(\rho_L)}{\rho_R - \rho_L} = 1 - \rho_L - \rho_R$$
-
-```python
-def compute_shock_speed(rho_L: torch.Tensor, rho_R: torch.Tensor) -> torch.Tensor
-```
 
 ---
 
@@ -806,10 +693,6 @@ Penalizes shocks that exist outside the domain $[0, 1]$.
 **Formula**:
 $$\mathcal{L}_{bound} = \frac{1}{N} \sum_{b,d,t} \mathbb{1}_{outside}(x_{pred}^{(b,d,t)}) \cdot \left(e^{(b,d,t)}\right)^2$$
 
-where:
-- $\mathbb{1}_{outside}(x) = 1$ if $x < 0$ or $x > 1$, else $0$
-- $e^{(b,d,t)}$ is the existence probability
-
 **Configuration**:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -857,17 +740,6 @@ $$\mathcal{L}_{anchor} = \frac{1}{N} \sum_{b,d} e^{(b,d)}_0 \cdot \left( x^{(b,d
 
 **Formula** (without existence):
 $$\mathcal{L}_{anchor} = \frac{1}{N} \sum_{b,d} \left( x^{(b,d)}_{pred,0} - x^{(b,d)}_{IC} \right)^2$$
-
-where:
-- $e^{(b,d)}_0$ = existence probability at t=0 for discontinuity d in batch b (if available)
-- $x^{(b,d)}_{pred,0}$ = predicted position at t=0
-- $x^{(b,d)}_{IC}$ = IC discontinuity position from `discontinuities[:, :, 0]`
-- N = number of valid discontinuities (sum of `disc_mask`)
-
-**Interpretation**:
-- Without existence: all valid discontinuities are penalized equally for position errors at t=0
-- With existence at t=0 high (~1): full penalty for position errors
-- With existence at t=0 low (~0): position errors are ignored
 
 **Configuration**: No parameters.
 
@@ -943,9 +815,6 @@ $$\mathcal{L}_{total} = \mathcal{L}_{PDE} + w_{IC} \cdot \mathcal{L}_{IC}$$
 
 PDE residual loss computed on the **ground truth** grid, weighted by distance to the nearest predicted shock. The GT residual is non-zero at actual shocks. Each cell's squared residual is multiplied by its distance to the nearest active predicted discontinuity, providing a smooth gradient signal that rewards the model for moving predictions toward actual shocks.
 
-**Residual computation** (same as PDEResidualLoss):
-$$R_{GT}(t, x) = \frac{\rho_{GT}(t+\Delta t, x) - \rho_{GT}(t-\Delta t, x)}{2\Delta t} + \frac{f(\rho_{GT}(t, x+\Delta x)) - f(\rho_{GT}(t, x-\Delta x))}{2\Delta x}$$
-
 **Distance weighting**:
 $$d_{min}(t, x) = \min_{d \in \mathcal{A}} |x - x_d(t)|$$
 
@@ -953,8 +822,6 @@ where $\mathcal{A} = \{d : e_d(t) > 0.5 \text{ and } m_d = 1\}$ is the set of ac
 
 **Loss formula**:
 $$\mathcal{L}_{PDE\text{-}shock} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \mathcal{I}} R_{GT}(t, x)^2 \cdot d_{min}(t, x)$$
-
-**Interpretation**: The GT has large PDE residuals at actual shocks. If the model predicts a shock nearby, $d_{min}$ is small and the residual contributes little. If the prediction is far away, $d_{min}$ is large and the loss is high. Unlike a binary mask, this provides smooth gradients that guide trajectories toward the correct locations.
 
 **Configuration**:
 | Parameter | Default | Description |
@@ -979,14 +846,8 @@ Rankine-Hugoniot residual loss computed from sampled densities. Verifies that th
 **Shock velocity** (from predicted positions):
 $$\dot{x}_d(t) = \frac{x_d(t + \Delta t) - x_d(t - \Delta t)}{2 \Delta t}$$
 
-**Density sampling at shocks**:
-- $\rho^-_d(t)$: density at $x = x_d(t) - \epsilon$ (left of shock)
-- $\rho^+_d(t)$: density at $x = x_d(t) + \epsilon$ (right of shock)
-
 **Rankine-Hugoniot residual**:
 $$R_{RH}^{(d)}(t) = \dot{x}_d(t) \cdot (\rho^+_d - \rho^-_d) - (f(\rho^+_d) - f(\rho^-_d))$$
-
-This should be zero if the shock velocity satisfies the RH condition.
 
 **Loss formula**:
 $$\mathcal{L}_{RH} = \frac{1}{|\mathcal{V}|} \sum_{(d,t) \in \mathcal{V}} e_d(t) \cdot \left( R_{RH}^{(d)}(t) \right)^2$$
@@ -999,20 +860,12 @@ $$\mathcal{L}_{RH} = \frac{1}{|\mathcal{V}|} \sum_{(d,t) \in \mathcal{V}} e_d(t)
 | `pred` | Sample both from `output_grid` | Testing RH on assembled (blended) prediction. |
 | `gt` | Sample both from `target` grid | Testing if predicted trajectories match GT physics. |
 
-**Why `per_region` for training**: The `output_grid` is assembled using soft sigmoid boundaries that blend region densities near shocks. Sampling from `output_grid` would give blended values, not the true left/right densities. `per_region` mode samples directly from each region's prediction before blending.
-
 **Configuration**:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `dt` | 0.004 | Time step size for velocity computation |
 | `epsilon` | 0.01 | Offset for density sampling near shocks |
 | `mode` | `"per_region"` | Sampling mode: `"per_region"`, `"pred"`, or `"gt"` |
-
-**Required inputs**: `x_coords`, `disc_mask`
-**Required outputs** (depends on mode):
-- `per_region`: `positions`, `existence`, `region_densities`
-- `pred`: `positions`, `existence`, `output_grid`
-- `gt`: `positions`, `existence` (uses `target` argument)
 
 **Components returned**: `{"rh_residual": float}`
 
@@ -1022,60 +875,30 @@ $$\mathcal{L}_{RH} = \frac{1}{|\mathcal{V}|} \sum_{(d,t) \in \mathcal{V}} e_d(t)
 
 **Location**: `losses/acceleration.py`
 
-Penalizes low existence predictions where the ground truth grid shows high temporal acceleration, indicating a shock should be present. This loss helps the model learn to predict high existence at shock locations even without explicit trajectory supervision.
-
-The loss has two components:
-1. **Original term**: Samples acceleration at predicted trajectory positions and penalizes low existence where acceleration is high.
-2. **Missed shock term** (optional): Scans the entire domain for high-acceleration points and penalizes those not covered by any nearby prediction with high existence.
+Penalizes low existence predictions where the ground truth grid shows high temporal acceleration, indicating a shock should be present.
 
 **Acceleration computation** (central finite differences):
 $$a(t, x) = \frac{\rho(t + \Delta t, x) - 2\rho(t, x) + \rho(t - \Delta t, x)}{\Delta t^2}$$
 
-This is computed for interior time points only (indices 1 to $n_t - 2$).
-
 ##### Original Term
-
-**Acceleration sampling near trajectories**:
 
 For each predicted trajectory position $x_d(t)$, sample the maximum absolute acceleration in a spatial window:
 $$a_{near}^{(d)}(t) = \max_{|x - x_d(t)| < \epsilon} |a(t, x)|$$
 
-In practice, samples are taken at $x - \epsilon$, $x$, and $x + \epsilon$.
-
-**Loss formula**:
+**Loss**: penalize low existence where acceleration is high:
 $$\mathcal{L}_{accel} = \frac{1}{N} \sum_{(b,d,t) \in \mathcal{H}} \left(1 - e^{(b,d,t)}\right)^2 \cdot m_{b,d}$$
 
-where:
-- $\mathcal{H} = \{(b,d,t) : |a_{near}^{(d)}(t)| > \tau\}$ is the set of high-acceleration points
-- $e^{(b,d,t)}$ = existence probability
-- $\tau$ = acceleration threshold (configurable)
-- $m_{b,d}$ = discontinuity validity mask
-- $N = |\mathcal{H}|$ = count of high-acceleration points
+where $\mathcal{H} = \{(b,d,t) : |a_{near}^{(d)}(t)| > \tau\}$.
 
 ##### Missed Shock Term
 
-**Problem solved**: The original term only samples acceleration at **predicted** trajectory positions. If the model predicts positions away from actual shocks, those shocks go undetected because the loss never "looks" there.
+Scans the entire domain for high-acceleration points not covered by any nearby prediction with high existence:
 
-**Coverage computation**:
 $$\text{coverage}(b, t, x) = \max_d \left[ e^{(b,d,t)} \cdot m_{b,d} \cdot \mathbf{1}(|x - x_d(t)| < \delta) \right]$$
 
-where $\delta$ is the `missed_shock_buffer` parameter.
-
-**Loss formula**:
 $$\mathcal{L}_{missed} = \frac{1}{M} \sum_{(b,t,x) \in \mathcal{H}_{domain}} \left(1 - \text{coverage}(b, t, x)\right)^2$$
 
-where:
-- $\mathcal{H}_{domain} = \{(b,t,x) : |a(t,x)| > \tau\}$ is the set of high-acceleration points in the entire domain
-- $M = |\mathcal{H}_{domain}|$ = count of high-acceleration points
-
-**Combined loss**:
-$$\mathcal{L}_{total} = \mathcal{L}_{accel} + w_{missed} \cdot \mathcal{L}_{missed}$$
-
-**Interpretation**:
-- High acceleration in the ground truth indicates a shock (rapid density change)
-- The original term: If the model predicts low existence ($e \approx 0$) at predicted locations with high acceleration, the loss is high
-- The missed shock term: If there are high-acceleration points in the domain that are not covered by any predicted trajectory with high existence, the loss is high
-- Regions with low acceleration (smooth solution) do not contribute to either term
+**Combined**: $\mathcal{L}_{total} = \mathcal{L}_{accel} + w_{missed} \cdot \mathcal{L}_{missed}$
 
 **Configuration**:
 | Parameter | Default | Description |
@@ -1090,6 +913,30 @@ $$\mathcal{L}_{total} = \mathcal{L}_{accel} + w_{missed} \cdot \mathcal{L}_{miss
 **Required outputs**: `positions`, `existence`
 
 **Components returned**: `{"acceleration": float, "missed_shock": float (if enabled)}`
+
+---
+
+#### RegularizeTrajLoss
+
+**Location**: `losses/regularize_traj.py`
+
+Penalizes erratic trajectory behavior by limiting large spatial jumps between consecutive timesteps.
+
+**Loss formula**:
+$$\mathcal{L}_{reg} = \frac{1}{N} \sum_{b,d,t} \max(0, |x_d(t+1) - x_d(t)| - \Delta_{max})^2 \cdot e_{min}^{(b,d,t)} \cdot m_{b,d}$$
+
+where $e_{min}^{(b,d,t)} = \min(e^{(b,d,t)}, e^{(b,d,t+1)})$ if existence is available.
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_step` | 0.05 | Maximum allowed position change per timestep |
+
+**Required inputs**: `disc_mask`
+**Required outputs**: `positions`
+**Optional outputs**: `existence` (weights by min existence of consecutive pair)
+
+**Components returned**: `{"regularize_traj": float}`
 
 ---
 
@@ -1142,30 +989,100 @@ Pre-configured loss combinations for common use cases.
 
 For trajectory-only models (ShockNet).
 
-| Loss | Weight |
-|------|--------|
-| `trajectory` | 1.0 |
-| `boundary` | 1.0 |
-| `collision` | 0.5 |
-| `existence_reg` | 0.1 |
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `boundary` | 1.0 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+| `ic_anchoring` | 0.1 | — |
 
-**Total loss**:
-$$\mathcal{L} = \mathcal{L}_{traj} + \mathcal{L}_{bound} + 0.5 \cdot \mathcal{L}_{coll} + 0.1 \cdot \mathcal{L}_{reg}$$
+$$\mathcal{L} = \mathcal{L}_{bound} + \mathcal{L}_{accel} + 0.1 \cdot \mathcal{L}_{anchor}$$
 
 #### hybrid Preset
 
 For HybridDeepONet (trajectory + grid prediction).
 
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `rh_residual` | 1.0 | — |
+| `pde_residual` | 0.1 | — |
+| `ic` | 10.0 | — |
+| `ic_anchoring` | 0.01 | — |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{RH} + 0.1 \cdot \mathcal{L}_{PDE} + 10 \cdot \mathcal{L}_{IC} + 0.01 \cdot \mathcal{L}_{anchor}$$
+
+#### traj_net Preset
+
+For TrajDeepONet and NoTrajDeepONet.
+
 | Loss | Weight |
 |------|--------|
 | `mse` | 1.0 |
-| `rh_residual` | 1.0 |
-| `pde_residual` | 0.1 |
-| `ic` | 10.0 |
-| `existence_reg` | 0.01 |
+| `ic_anchoring` | 0.1 |
+| `boundary` | 1.0 |
+| `regularize_traj` | 0.1 |
 
-**Total loss**:
-$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{RH} + 0.1 \cdot \mathcal{L}_{PDE} + 10 \cdot \mathcal{L}_{IC} + 0.01 \cdot \mathcal{L}_{reg}$$
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
+
+#### classifier_traj_net Preset
+
+For ClassifierTrajDeepONet (TrajDeepONet with existence classifier).
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
+#### traj_transformer Preset
+
+For TrajTransformer.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+| `ic_anchoring` | 0.1 |
+| `boundary` | 1.0 |
+| `regularize_traj` | 0.1 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
+
+#### classifier_traj_transformer Preset
+
+For ClassifierTrajTransformer.
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
+#### pde_shocks Preset
+
+For models supervised with PDE shock residual.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+| `pde_shock_residual` | 1.0 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{PDE\text{-}shock}$$
+
+#### mse Preset
+
+Simple grid MSE only.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
 
 #### Using Presets
 
@@ -1180,9 +1097,6 @@ loss = get_loss("hybrid", loss_kwargs={
     "pde_residual": {"dt": 0.004, "dx": 0.02},
     "rh_residual": {"dt": 0.004},
 })
-
-# Backwards compatibility: "rankine_hugoniot" maps to "shock_net"
-loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 ```
 
 ---
@@ -1191,38 +1105,48 @@ loss = get_loss("rankine_hugoniot")  # Same as get_loss("shock_net")
 
 | **Model** | **Input** | **Output** | **Purpose** |
 |-----------|-----------|-----------|-------------|
-| ShockTrajectoryNet | Discontinuities $(B, D, 3)$ | Positions, Existence $(B, D, T)$ | Pure trajectory prediction |
+| ShockTrajectoryNet | Discontinuities $(D, 3)$ | Positions, Existence $(D, T)$ | Pure trajectory prediction |
 | HybridDeepONet | Discontinuities + coordinates | Trajectories + Full grid | Combined trajectory + solution |
-| TrajDeepONet | Discontinuities + coordinates | Positions + Full grid | Boundary-conditioned single trunk |
-| DeepONet | Grid tensor $(B, 3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
+| TrajDeepONet | Discontinuities + coordinates | Positions + Full grid | Boundary-conditioned single trunk (bilinear) |
+| ClassifierTrajDeepONet | Discontinuities + coordinates | Positions + Existence + Full grid | TrajDeepONet with shock/rarefaction classifier |
+| NoTrajDeepONet | Discontinuities + coordinates | Full grid | TrajDeepONet without trajectory prediction |
+| TrajTransformer | Discontinuities + coordinates | Positions + Full grid | Cross-attention variant of TrajDeepONet |
+| ClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | TrajTransformer with shock/rarefaction classifier |
+| DeepONet | Grid tensor $(3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
+| FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
+| EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
+| EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
 | MSELoss | `losses/mse.py` | Grid supervision | Grid matching |
 | ICLoss | `losses/ic.py` | Initial condition | IC accuracy |
 | TrajectoryConsistencyLoss | `losses/trajectory_consistency.py` | Analytical RH trajectories | Trajectory models |
-| BoundaryLoss | `losses/boundary.py` | Domain constraints | All models |
+| BoundaryLoss | `losses/boundary.py` | Domain constraints | All trajectory models |
 | CollisionLoss | `losses/collision.py` | Shock merging | Multi-shock models |
-| ICAnchoringLoss | `losses/existence_regularization.py` | Anchor trajectories to IC positions | All models |
+| ICAnchoringLoss | `losses/existence_regularization.py` | Anchor trajectories to IC positions | All trajectory models |
 | SupervisedTrajectoryLoss | `losses/supervised_trajectory.py` | Direct supervision | When GT available |
 | PDEResidualLoss | `losses/pde_residual.py` | Conservation in smooth regions | Grid models |
 | PDEShockResidualLoss | `losses/pde_residual.py` | GT residual penalizing unpredicted shocks | Trajectory models |
 | RHResidualLoss | `losses/rh_residual.py` | RH at shocks (from densities) | Hybrid models |
 | AccelerationLoss | `losses/acceleration.py` | High acceleration = shock | Existence supervision |
+| RegularizeTrajLoss | `losses/regularize_traj.py` | Smooth trajectories | Penalize erratic jumps |
 
 ### Key Design Principles
 
 1. **DeepONet Architecture**: Branch-trunk factorization enables learning solution operators with variable-length inputs (variable shock counts)
 
-2. **Soft Region Boundaries**: Differentiable sigmoid boundaries in GridAssembler enable end-to-end gradient flow
+2. **Cross-Attention Alternative**: TrajTransformer replaces bilinear fusion with cross-attention, allowing richer discontinuity-aware feature aggregation without branch pooling
 
-3. **Multi-Scale Physics**:
+3. **Soft Region Boundaries**: Differentiable sigmoid boundaries in GridAssembler enable end-to-end gradient flow
+
+4. **Multi-Scale Physics**:
    - Shock scale: Rankine-Hugoniot residuals
    - Smooth scale: PDE conservation
    - Global scale: Grid MSE supervision
 
-4. **Fourier Features**: Exponentially-spaced sinusoidal encoding enables MLPs to learn high-frequency shock dynamics (used in TimeEncoder, DiscontinuityEncoder, and SpaceTimeEncoder)
+5. **Fourier Features**: Exponentially-spaced sinusoidal encoding enables MLPs to learn high-frequency shock dynamics (used in TimeEncoder, DiscontinuityEncoder, SpaceTimeEncoder, and FourierTokenizer)
 
-5. **Independent Discontinuity Encoding**: Each discontinuity is encoded independently via Fourier + MLP, enabling efficient parallel processing
+6. **Independent Discontinuity Encoding**: Each discontinuity is encoded independently via Fourier + MLP, with optional cross-discontinuity self-attention for interaction
 
-6. **Modular Loss Design**: One file per loss enables easy composition and testing
+7. **Modular Loss Design**: One file per loss enables easy composition and testing

@@ -2,12 +2,18 @@
 
 This file provides guidance for Claude Code when working with the `wavefront_learning/` directory.
 
-**IMPORTANT**: After completing any task that modifies the folder structure (adding/removing files), update `Structure.md` to reflect the changes.
+**IMPORTANT**: Whenever a file is created, deleted, or moved in this directory, you MUST update `Structure.md`:
+- Add/remove the file in the directory tree
+- Include a short description of what the file contains
+- List the public classes and functions available for other files to import
+- This applies to ALL file changes, not just structural reorganizations
 
 **IMPORTANT**: After modifying models or losses (adding new ones, changing architecture, or modifying loss formulas), update `ARCHITECTURE.md` with:
 - Architecture diagrams and component descriptions for models
 - Mathematical formulas and loss component definitions for losses
 - Default weights and configuration parameters
+- **No ASCII art**: Use compact pseudocode (input sizes → component → output sizes) instead of ASCII box drawings
+- **No batch dimension**: Omit the batch dimension `B` from tensor shapes in pseudocode
 
 ## Module Purpose
 
@@ -83,7 +89,17 @@ Use `--no_wandb` flag to disable logging.
 
 | Model | Description | Output |
 |-------|-------------|--------|
-| **ShockNet** | DeepONet-like architecture with transformer branch | `{positions, existence}` trajectories |
+| **ShockNet** | DeepONet-like architecture for trajectory prediction | `{positions, existence}` |
+| **HybridDeepONet** | Trajectory + region trunks + grid assembly | `{positions, existence, output_grid, region_densities, region_weights}` |
+| **TrajDeepONet** | Boundary-conditioned single trunk (bilinear fusion) | `{positions, output_grid}` |
+| **ClassifierTrajDeepONet** | TrajDeepONet + shock/rarefaction classifier | `{positions, existence, output_grid}` |
+| **NoTrajDeepONet** | TrajDeepONet without trajectory prediction | `{output_grid}` |
+| **TrajTransformer** | Cross-attention variant of TrajDeepONet | `{positions, output_grid}` |
+| **ClassifierTrajTransformer** | TrajTransformer + shock/rarefaction classifier | `{positions, existence, output_grid}` |
+| **DeepONet** | Classic branch-trunk dot product baseline | `{output_grid}` |
+| **FNO** | Fourier Neural Operator baseline (neuralop wrapper) | `{output_grid}` |
+| **EncoderDecoder** | Transformer encoder + axial attention decoder | `{output_grid}` |
+| **EncoderDecoderCross** | Transformer encoder + cross-attention decoder | `{output_grid}` |
 
 ## Available Losses
 
@@ -95,17 +111,25 @@ Individual losses (in `losses/`):
 | `trajectory` | Trajectory consistency (analytical RH) |
 | `boundary` | Penalize shocks outside domain |
 | `collision` | Penalize colliding shocks |
-| `existence_reg` | Anchor trajectories to IC positions |
+| `ic_anchoring` | Anchor trajectories to IC positions |
 | `supervised_trajectory` | Supervised trajectory loss |
 | `pde_residual` | PDE conservation in smooth regions |
 | `pde_shock_residual` | PDE residual on GT, penalizing unpredicted shocks |
 | `rh_residual` | RH residual from region densities |
+| `acceleration` | Shock detection via high acceleration + missed shock term |
+| `regularize_traj` | Penalize erratic trajectory jumps between timesteps |
 
 Presets (in `loss.py`):
-| Preset | Description |
-|--------|-------------|
-| `shock_net` | Trajectory model losses (trajectory + boundary + collision + existence_reg) |
-| `hybrid` | HybridDeepONet losses (mse + rh_residual + pde_residual + ic + existence_reg) |
+| Preset | Models | Description |
+|--------|--------|-------------|
+| `shock_net` | ShockNet | boundary + acceleration + ic_anchoring |
+| `hybrid` | HybridDeepONet | mse + rh_residual + pde_residual + ic + ic_anchoring |
+| `traj_net` | TrajDeepONet, NoTrajDeepONet | mse + ic_anchoring + boundary + regularize_traj |
+| `classifier_traj_net` | ClassifierTrajDeepONet | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `traj_transformer` | TrajTransformer | mse + ic_anchoring + boundary + regularize_traj |
+| `classifier_traj_transformer` | ClassifierTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `pde_shocks` | Any grid model | mse + pde_shock_residual |
+| `mse` | Any grid model | mse only |
 
 ## Adding a New Loss
 
