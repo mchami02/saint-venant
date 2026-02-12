@@ -54,6 +54,7 @@ class TrajectoryDecoderTransformer(nn.Module):
             ]
         )
 
+        self.final_norm = nn.LayerNorm(hidden_dim)
         self.combine_norm = nn.LayerNorm(hidden_dim)
 
         self.position_head = nn.Sequential(
@@ -86,7 +87,7 @@ class TrajectoryDecoderTransformer(nn.Module):
         x = time_emb  # (B, T, H)
         for layer in self.cross_layers:
             x = layer(x, disc_emb, key_padding_mask=key_padding_mask)
-        time_enriched = x  # (B, T, H)
+        time_enriched = self.final_norm(x)  # (B, T, H)
 
         # Combine each disc embedding with enriched time embeddings
         disc_exp = disc_emb.unsqueeze(2).expand(-1, -1, T, -1)  # (B, D, T, H)
@@ -158,6 +159,8 @@ class DensityDecoderTransformer(nn.Module):
             ]
         )
 
+        self.final_norm = nn.LayerNorm(hidden_dim)
+
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -210,6 +213,7 @@ class DensityDecoderTransformer(nn.Module):
         x = coord_emb
         for layer in self.cross_layers:
             x = layer(x, disc_emb, key_padding_mask=key_padding_mask)
+        x = self.final_norm(x)
 
         # Density head
         density = self.density_head(x).squeeze(-1)  # (B, Q)
@@ -239,6 +243,10 @@ class TrajTransformer(nn.Module):
         dropout: Dropout rate.
         with_traj: If True, predict trajectories and condition density on boundaries.
         classifier: If True, add classifier head for shock vs rarefaction.
+        all_boundaries: If True, density decoder cross-attends to all non-rarefaction
+            boundary embeddings (after self-attention) instead of using left/right
+            boundary positions as Fourier features. Forces classifier=True and
+            with_traj=True.
     """
 
     def __init__(
@@ -257,9 +265,17 @@ class TrajTransformer(nn.Module):
         dropout: float = 0.1,
         with_traj: bool = True,
         classifier: bool = False,
+        all_boundaries: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
+        self.all_boundaries = all_boundaries
+
+        # all_boundaries requires classifier and trajectory prediction
+        if all_boundaries:
+            classifier = True
+            with_traj = True
+
         self.with_traj = with_traj
         self.has_classifier = classifier
 
@@ -306,7 +322,18 @@ class TrajTransformer(nn.Module):
                 dropout=dropout,
             )
 
+        # Boundary self-attention (only when all_boundaries)
+        if self.all_boundaries:
+            self.boundary_self_attention = nn.ModuleList(
+                [
+                    EncoderLayer(hidden_dim, num_heads=num_attention_heads)
+                    for _ in range(num_interaction_layers)
+                ]
+            )
+
         # Density decoder
+        # When all_boundaries, boundary info comes from cross-attention KV,
+        # not from Fourier-encoded left/right positions.
         self.density_decoder = DensityDecoderTransformer(
             hidden_dim=hidden_dim,
             num_frequencies_t=num_frequencies_t,
@@ -315,7 +342,7 @@ class TrajTransformer(nn.Module):
             num_cross_layers=num_density_cross_layers,
             num_attention_heads=num_attention_heads,
             dropout=dropout,
-            with_boundaries=with_traj,
+            with_boundaries=with_traj and not all_boundaries,
         )
 
     def forward(
@@ -369,6 +396,37 @@ class TrajTransformer(nn.Module):
             positions = self.traj_decoder(
                 branch_emb, time_emb, disc_mask
             )  # (B, D, T)
+
+            if self.all_boundaries:
+                # === ALL BOUNDARIES PATH ===
+                # Filter to non-rarefaction boundaries
+                effective_mask = disc_mask * (existence > 0.5).float()
+                boundary_emb = branch_emb * effective_mask.unsqueeze(-1)
+
+                # Self-attention among non-rarefaction boundaries
+                boundary_key_mask = ~effective_mask.bool()
+                all_masked = boundary_key_mask.all(dim=1)
+                if all_masked.any():
+                    boundary_key_mask = boundary_key_mask.clone()
+                    boundary_key_mask[all_masked] = False
+                for layer in self.boundary_self_attention:
+                    boundary_emb = layer(
+                        boundary_emb, key_padding_mask=boundary_key_mask
+                    )
+                boundary_emb = boundary_emb * effective_mask.unsqueeze(-1)
+
+                # Density: coord queries cross-attend to boundary embeddings
+                density = self.density_decoder(
+                    boundary_emb, t_coords, x_coords,
+                    None, None, effective_mask,
+                )
+                output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
+
+                return {
+                    "positions": positions,
+                    "output_grid": output_grid,
+                    "existence": existence.unsqueeze(-1).expand_as(positions),
+                }
 
             # === BOUNDARIES ===
             if self.has_classifier:
@@ -470,4 +528,67 @@ def build_classifier_traj_transformer(args: dict) -> TrajTransformer:
         dropout=args.get("dropout", 0.0),
         with_traj=True,
         classifier=True,
+    )
+
+
+def build_no_traj_transformer(args: dict) -> TrajTransformer:
+    """Build TrajTransformer without trajectory prediction.
+
+    Density decoder uses only Fourier-encoded (t, x) coordinates with
+    cross-attention to discontinuity embeddings. No trajectory or boundary
+    conditioning.
+
+    Args:
+        args: Configuration dictionary (same keys as build_traj_transformer).
+
+    Returns:
+        Configured TrajTransformer with with_traj=False.
+    """
+    return TrajTransformer(
+        hidden_dim=args.get("hidden_dim", 32),
+        num_frequencies_t=args.get("num_frequencies_t", 8),
+        num_frequencies_x=args.get("num_frequencies_x", 8),
+        num_disc_frequencies=args.get("num_disc_frequencies", 8),
+        num_disc_layers=args.get("num_disc_layers", 2),
+        num_time_layers=args.get("num_time_layers", 2),
+        num_coord_layers=args.get("num_coord_layers", 2),
+        num_interaction_layers=args.get("num_interaction_layers", 2),
+        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
+        num_density_cross_layers=args.get("num_density_cross_layers", 2),
+        num_attention_heads=args.get("num_attention_heads", 4),
+        dropout=args.get("dropout", 0.0),
+        with_traj=False,
+        classifier=False,
+    )
+
+
+def build_classifier_all_traj_transformer(args: dict) -> TrajTransformer:
+    """Build TrajTransformer with classifier and all-boundaries density decoding.
+
+    In this variant, the density decoder cross-attends to all non-rarefaction
+    boundary embeddings (after self-attention) instead of using left/right
+    boundary positions as Fourier features.
+
+    Args:
+        args: Configuration dictionary (same keys as build_traj_transformer).
+
+    Returns:
+        Configured TrajTransformer with classifier=True and all_boundaries=True.
+    """
+    return TrajTransformer(
+        hidden_dim=args.get("hidden_dim", 32),
+        num_frequencies_t=args.get("num_frequencies_t", 8),
+        num_frequencies_x=args.get("num_frequencies_x", 8),
+        num_disc_frequencies=args.get("num_disc_frequencies", 8),
+        num_disc_layers=args.get("num_disc_layers", 2),
+        num_time_layers=args.get("num_time_layers", 2),
+        num_coord_layers=args.get("num_coord_layers", 2),
+        num_interaction_layers=args.get("num_interaction_layers", 2),
+        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
+        num_density_cross_layers=args.get("num_density_cross_layers", 2),
+        num_attention_heads=args.get("num_attention_heads", 4),
+        dropout=args.get("dropout", 0.0),
+        with_traj=True,
+        classifier=True,
+        all_boundaries=True,
     )

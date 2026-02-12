@@ -578,6 +578,17 @@ When enabled, the classifier filters `compute_boundaries` to only use discontinu
 
 - `build_traj_transformer(args)`: Standard version (`with_traj=True`, `classifier=False`)
 - `build_classifier_traj_transformer(args)`: With classifier (`classifier=True`)
+- `build_no_traj_transformer(args)`: Without trajectory prediction (`with_traj=False`)
+- `build_classifier_all_traj_transformer(args)`: Classifier + all-boundaries density decoding (`classifier=True`, `all_boundaries=True`)
+
+#### All-Boundaries Mode (`all_boundaries=True`)
+
+When `all_boundaries=True`, the density decoder replaces left/right boundary Fourier features with cross-attention to all non-rarefaction boundary embeddings:
+
+1. **Filter**: Use classifier existence to mask rarefaction embeddings (`effective_mask = disc_mask * (existence > 0.5)`)
+2. **Self-attention**: Non-rarefaction boundary embeddings attend to each other via dedicated `boundary_self_attention` layers
+3. **Cross-attention**: Coordinate queries (Fourier(t) + Fourier(x)) cross-attend to processed boundary embeddings instead of all disc embeddings
+4. Density decoder uses `with_boundaries=False` (no Fourier-encoded left/right positions)
 
 ---
 
@@ -1065,6 +1076,20 @@ For ClassifierTrajTransformer.
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
 
+#### classifier_all_traj_transformer Preset
+
+For ClassifierAllTrajTransformer. Same losses as `classifier_traj_transformer`.
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
 #### pde_shocks Preset
 
 For models supervised with PDE shock residual.
@@ -1112,6 +1137,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | NoTrajDeepONet | Discontinuities + coordinates | Full grid | TrajDeepONet without trajectory prediction |
 | TrajTransformer | Discontinuities + coordinates | Positions + Full grid | Cross-attention variant of TrajDeepONet |
 | ClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | TrajTransformer with shock/rarefaction classifier |
+| ClassifierAllTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with all-boundary cross-attention density decoding |
 | DeepONet | Grid tensor $(3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
 | FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |

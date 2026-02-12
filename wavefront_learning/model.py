@@ -15,7 +15,9 @@ from models.traj_deeponet import (
     build_traj_deeponet,
 )
 from models.traj_transformer import (
+    build_classifier_all_traj_transformer,
     build_classifier_traj_transformer,
+    build_no_traj_transformer,
     build_traj_transformer,
 )
 
@@ -32,6 +34,8 @@ MODELS = {
     "EncoderDecoderCross": build_encoder_decoder_cross,
     "TrajTransformer": build_traj_transformer,
     "ClassifierTrajTransformer": build_classifier_traj_transformer,
+    "ClassifierAllTrajTransformer": build_classifier_all_traj_transformer,
+    "NoTrajTransformer": build_no_traj_transformer,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -47,6 +51,8 @@ MODEL_TRANSFORM = {
     "EncoderDecoderCross": "ToGridInput",
     "TrajTransformer": None,
     "ClassifierTrajTransformer": None,
+    "ClassifierAllTrajTransformer": None,
+    "NoTrajTransformer": None,
 }
 
 

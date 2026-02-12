@@ -96,6 +96,19 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "existence",
     ],
+    "no_traj_transformer": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
+    "classifier_all_traj_transformer": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
 }
 
 

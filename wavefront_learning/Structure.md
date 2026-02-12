@@ -24,7 +24,7 @@ wavefront_learning/
 │   ├── shock_trajectory_net.py   # ShockTrajectoryNet (DeepONet-like trajectory model)
 │   ├── hybrid_deeponet.py        # HybridDeepONet (trajectory + grid prediction)
 │   ├── traj_deeponet.py          # TrajDeepONet, ClassifierTrajDeepONet, NoTrajDeepONet
-│   ├── traj_transformer.py       # TrajTransformer, ClassifierTrajTransformer
+│   ├── traj_transformer.py       # TrajTransformer, ClassifierTrajTransformer, ClassifierAllTrajTransformer
 │   ├── deeponet.py               # Classic DeepONet baseline
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
@@ -129,8 +129,8 @@ wavefront_learning/
   - `build_traj_deeponet()`, `build_classifier_traj_deeponet()`, `build_no_traj_deeponet()`
   - `compute_boundaries()`
 - **traj_transformer.py** — Cross-attention trajectory decoder variants.
-  - `TrajTransformer`, `ClassifierTrajTransformer`, `TrajectoryDecoderTransformer`
-  - `build_traj_transformer()`, `build_classifier_traj_transformer()`
+  - `TrajTransformer`, `ClassifierTrajTransformer`, `ClassifierAllTrajTransformer`, `NoTrajTransformer`, `TrajectoryDecoderTransformer`
+  - `build_traj_transformer()`, `build_classifier_traj_transformer()`, `build_classifier_all_traj_transformer()`, `build_no_traj_transformer()`
 - **deeponet.py** — Classic DeepONet baseline.
   - `DeepONet`, `build_deeponet()`
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.

@@ -97,6 +97,8 @@ Use `--no_wandb` flag to disable logging.
 | **NoTrajDeepONet** | TrajDeepONet without trajectory prediction | `{output_grid}` |
 | **TrajTransformer** | Cross-attention variant of TrajDeepONet | `{positions, output_grid}` |
 | **ClassifierTrajTransformer** | TrajTransformer + shock/rarefaction classifier | `{positions, existence, output_grid}` |
+| **ClassifierAllTrajTransformer** | ClassifierTrajTransformer with all-boundary cross-attention density decoding | `{positions, existence, output_grid}` |
+| **NoTrajTransformer** | TrajTransformer without trajectory prediction | `{output_grid}` |
 | **DeepONet** | Classic branch-trunk dot product baseline | `{output_grid}` |
 | **FNO** | Fourier Neural Operator baseline (neuralop wrapper) | `{output_grid}` |
 | **EncoderDecoder** | Transformer encoder + axial attention decoder | `{output_grid}` |
@@ -129,6 +131,8 @@ Presets (in `loss.py`):
 | `classifier_traj_net` | ClassifierTrajDeepONet | mse + ic_anchoring + boundary + regularize_traj + acceleration |
 | `traj_transformer` | TrajTransformer | mse + ic_anchoring + boundary + regularize_traj |
 | `classifier_traj_transformer` | ClassifierTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `classifier_all_traj_transformer` | ClassifierAllTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `no_traj_transformer` | NoTrajTransformer | mse |
 | `pde_shocks` | Any grid model | mse + pde_shock_residual |
 | `mse` | Any grid model | mse only |
 
