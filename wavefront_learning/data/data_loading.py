@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from huggingface_hub import HfApi, hf_hub_download
 
 # Load HF_TOKEN from root-level .env
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 api = HfApi(token=os.environ.get("HF_TOKEN"))
 

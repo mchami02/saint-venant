@@ -144,19 +144,21 @@ def eval_model(
     return avg_metrics, samples
 
 
-def eval_high_res(
+def eval_res(
     model: nn.Module,
     args,
     device: torch.device,
+    new_res: int,
     loss_fn: nn.Module | None = None,
     num_plots: int = 3,
 ) -> tuple[dict[str, float], dict[str, np.ndarray]]:
-    """Evaluate model on 2x higher resolution grids.
+    """Evaluate model on higher resolution grids.
 
-    Generates data at double resolution (2*nx, 2*nt, dx/2, dt/2) covering
-    the same physical domain but with a finer grid. Since wavefront models
-    use coordinate-based inputs (discontinuity positions + coordinate grids),
-    they should generalize to arbitrary resolutions.
+    Generates data at new_res× resolution (new_res*nx, new_res*nt,
+    dx/new_res, dt/new_res) covering the same physical domain but with
+    a finer grid. Since wavefront models use coordinate-based inputs
+    (discontinuity positions + coordinate grids), they should generalize
+    to arbitrary resolutions.
 
     Does not log or plot results.
 
@@ -164,16 +166,17 @@ def eval_high_res(
         model: Trained model to evaluate.
         args: Training arguments (needs nx, nt, dx, dt, batch_size, n_samples, model).
         device: Computation device.
+        new_res: Resolution multiplier (e.g. 2 for 2× resolution).
         loss_fn: Optional loss function for trajectory models.
         num_plots: Number of samples to collect for plotting.
 
     Returns:
         Tuple of (metrics_dict, samples_dict).
     """
-    high_res_nx = args.nx * 2
-    high_res_nt = args.nt * 2
-    high_res_dx = args.dx / 2
-    high_res_dt = args.dt / 2
+    high_res_nx = args.nx * new_res
+    high_res_nt = args.nt * new_res
+    high_res_dx = args.dx / new_res
+    high_res_dt = args.dt / new_res
     n_samples = max(100, args.n_samples // 10)
 
     grid_config = {
@@ -184,7 +187,7 @@ def eval_high_res(
     }
 
     print(
-        f"\nHigh-res test: nx={high_res_nx}, nt={high_res_nt}, "
+        f"\n{new_res}x res test: nx={high_res_nx}, nt={high_res_nt}, "
         f"dx={high_res_dx}, dt={high_res_dt} ({n_samples} samples)"
     )
 
@@ -200,7 +203,7 @@ def eval_high_res(
 
     high_res_loader = DataLoader(
         high_res_dataset,
-        batch_size=max(1, args.batch_size // 2),
+        batch_size=max(1, args.batch_size // new_res),
         shuffle=False,
         collate_fn=collate_wavefront_batch,
     )
@@ -213,6 +216,46 @@ def eval_high_res(
         grid_config=grid_config,
         num_plots=num_plots,
     )
+
+
+def eval_high_res(
+    model: nn.Module,
+    args,
+    device: torch.device,
+    loss_fn: nn.Module | None = None,
+    num_plots: int = 3,
+) -> dict[int, tuple[dict[str, float], dict[str, np.ndarray]]]:
+    """Evaluate model on increasing resolution multipliers.
+
+    For each resolution multiplier from 2 to args.max_high_res (inclusive),
+    generates a test dataset at that resolution and evaluates the model.
+
+    Args:
+        model: Trained model to evaluate.
+        args: Training arguments (needs nx, nt, dx, dt, batch_size, n_samples,
+              model, and max_high_res).
+        device: Computation device.
+        loss_fn: Optional loss function for trajectory models.
+        num_plots: Number of samples to collect for plotting.
+
+    Returns:
+        Dict mapping resolution multiplier to (metrics_dict, samples_dict).
+    """
+    max_high_res = getattr(args, "max_high_res", 5)
+    all_res_results = {}
+
+    for res in range(2, max_high_res + 1):
+        metrics, samples = eval_res(
+            model=model,
+            args=args,
+            device=device,
+            new_res=res,
+            loss_fn=loss_fn,
+            num_plots=num_plots,
+        )
+        all_res_results[res] = (metrics, samples)
+
+    return all_res_results
 
 
 def eval_steps(
@@ -418,8 +461,9 @@ def test_model(
         logger.log_summary({f"test/inference_time/{k}": v for k, v in timing.items()})
 
     # --- High-resolution evaluation ---
-    print("\nRunning high-resolution evaluation (2x)...")
-    hr_metrics, hr_samples = eval_high_res(
+    max_high_res = getattr(args, "max_high_res", 5)
+    print(f"\nRunning high-resolution evaluation (2x..{max_high_res}x)...")
+    hr_results = eval_high_res(
         model=model,
         args=args,
         device=device,
@@ -427,32 +471,31 @@ def test_model(
         num_plots=num_plots,
     )
 
-    # Print high-res results
-    print("\nHigh-Res Test Results:")
-    print("-" * 40)
-    for key, value in hr_metrics.items():
-        print(f"  {key}: {value:.6f}")
-    print("-" * 40)
+    for res, (hr_metrics, hr_samples) in hr_results.items():
+        print(f"\nHigh-Res Test ({res}x):")
+        print("-" * 40)
+        for key, value in hr_metrics.items():
+            print(f"  {key}: {value:.6f}")
+        print("-" * 40)
 
-    # Log high-res to W&B and plot
-    if logger is not None:
-        logger.log_summary(
-            {f"test_high_res/metrics/{k}": v for k, v in hr_metrics.items()}
-        )
-        hr_grid_config = {
-            "nx": args.nx * 2,
-            "nt": args.nt * 2,
-            "dx": args.dx / 2,
-            "dt": args.dt / 2,
-        }
-        plot(
-            hr_samples,
-            hr_grid_config,
-            logger,
-            epoch=None,
-            mode="test_high_res",
-            preset=plot_preset,
-        )
+        if logger is not None:
+            logger.log_summary(
+                {f"test_high_res/{res}/{k}": v for k, v in hr_metrics.items()}
+            )
+            hr_grid_config = {
+                "nx": args.nx * res,
+                "nt": args.nt * res,
+                "dx": args.dx / res,
+                "dt": args.dt / res,
+            }
+            plot(
+                hr_samples,
+                hr_grid_config,
+                logger,
+                epoch=None,
+                mode=f"test_high_res/{res}",
+                preset=plot_preset,
+            )
 
     # --- Step-count generalization evaluation ---
     max_test_steps = getattr(args, "max_test_steps", None)

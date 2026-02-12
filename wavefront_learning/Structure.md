@@ -9,9 +9,11 @@ wavefront_learning/
 ├── train.py                      # Main training script
 ├── test.py                       # Testing/evaluation CLI entry point
 ├── eval.sh                       # Shell script for batch evaluation
-├── data.py                       # Dataset classes, transforms, collate function
-├── data_loading.py               # HuggingFace upload/download for grid caching
-├── data_processing.py            # Grid generation, discontinuity extraction, preprocessing
+├── data/
+│   ├── __init__.py               # WavefrontDataset, collate_wavefront_batch, get_wavefront_datasets
+│   ├── data_loading.py           # HuggingFace upload/download for grid caching
+│   ├── data_processing.py        # Grid generation, discontinuity extraction, preprocessing
+│   └── transforms.py             # Input transforms and TRANSFORMS registry
 ├── model.py                      # Model factory and registry
 ├── loss.py                       # Loss factory, CombinedLoss, presets
 ├── logger.py                     # Weights & Biases logging utilities
@@ -82,17 +84,19 @@ wavefront_learning/
   - `parse_args()`, `main()`
 - **eval.sh** — Shell script for batch evaluation runs.
 
-### Data Pipeline
+### Data Pipeline (`data/`)
 
-- **data.py** — PyTorch Dataset and transforms for wavefront data.
-  - `WavefrontDataset`, `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`
-  - `collate_wavefront_batch()`, `get_wavefront_datasets()`
-  - `TRANSFORMS` registry
+- **\_\_init\_\_.py** — WavefrontDataset and public API for data loading.
+  - `WavefrontDataset`, `collate_wavefront_batch()`, `get_wavefront_datasets()`
+  - Re-exports `TRANSFORMS`, all transform classes, `get_wavefront_data`
 - **data_loading.py** — Upload/download grids to HuggingFace for caching.
   - `upload_grids()`, `download_grids()`
 - **data_processing.py** — Grid generation and IC preprocessing.
   - `PiecewiseRandom` (IC class)
   - `get_nfv_dataset()`, `clean_piecewise_constant_ic()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
+- **transforms.py** — Input representation transforms.
+  - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`
+  - `TRANSFORMS` registry
 
 ### Factories & Registries
 

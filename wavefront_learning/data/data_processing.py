@@ -8,7 +8,7 @@ This module handles:
 
 import numpy as np
 import torch
-from data_loading import download_grids, upload_grids
+from data.data_loading import download_grids, upload_grids
 from nfv.flows import Greenshield
 from nfv.initial_conditions import PiecewiseConstant
 from nfv.problem import Problem

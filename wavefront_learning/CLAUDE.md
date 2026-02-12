@@ -70,11 +70,12 @@ Use `--no_wandb` flag to disable logging.
 
 - `FlattenDiscontinuitiesTransform`: Converts dict input to flat tensor for simple MLPs
 - `ToGridInputTransform`: Reconstructs discretized IC from discontinuities (for grid-based models like FNO)
+- `DiscretizeICTransform`: Evaluates IC at evenly-spaced points, stores as "discontinuities" for model compatibility
 
 ## Implementation Status
 
 **Fully Implemented:**
-- `data.py` - Full data pipeline with discontinuity extraction
+- `data/` - Data pipeline package (dataset, transforms, loading, processing)
 - `logger.py` - W&B logging utilities
 - `plotter.py` - Backwards-compat shim (imports from `plotting/`)
 - `plotting/` - Visualization subpackage (grid comparisons + trajectory plots)
@@ -167,6 +168,15 @@ LOSS_PRESETS = { ..., "my_model": [("mse", 1.0), ("ic", 10.0)] }
 # plotter.py
 PLOT_PRESETS = { ..., "my_model": ["ground_truth", "mse_error"] }
 ```
+
+## Testing / Verification
+
+When verifying that code changes work, always use `train.py` with a lightweight model like `DeepONet` and minimal settings instead of requiring a saved model checkpoint. Since `train.py` calls `test_model()` at the end, this exercises the full evaluation pipeline:
+```bash
+cd wavefront_learning
+uv run python train.py --model DeepONet --epochs 0 --no_wandb --n_samples 20
+```
+Do **not** rely on a `--model_path` for quick verification.
 
 ## Code Style Guidelines
 

@@ -1,19 +1,21 @@
-"""Dataset classes and transforms for wavefront learning.
+"""Data pipeline for wavefront learning.
 
-This module provides the train.py-facing interfaces:
+This package provides:
 - WavefrontDataset: PyTorch Dataset class
 - Transforms for different input representations
 - Collate function for batching
 - get_wavefront_datasets: Main entry point for getting train/val/test datasets
 
-Data generation and HuggingFace integration are handled by:
-- data_processing.py: Grid generation and preprocessing
-- data_loading.py: HuggingFace upload/download
+Submodules:
+- data_loading: HuggingFace upload/download for grid caching
+- data_processing: Grid generation, discontinuity extraction, preprocessing
+- transforms: Input representation transforms and TRANSFORMS registry
 """
 
 import numpy as np
 import torch
-from data_processing import get_wavefront_data
+from data.data_processing import get_wavefront_data
+from data.transforms import TRANSFORMS
 from torch.utils.data import Dataset
 
 
@@ -56,84 +58,6 @@ class WavefrontDataset(Dataset):
             input_data, target_grid = self.transform(input_data, target_grid)
 
         return input_data, target_grid
-
-
-class FlattenDiscontinuitiesTransform:
-    """Transform that flattens discontinuity data into a single tensor.
-
-    This is useful for models that expect a simple tensor input rather than
-    a dictionary. The output tensor has shape (n_features,) where n_features
-    includes all discontinuity information.
-    """
-
-    def __call__(self, input_data: dict, target_grid: torch.Tensor):
-        # Flatten: [xs (max_pieces+1), ks (max_pieces), pieces_mask (max_pieces)]
-        xs = input_data["xs"]
-        ks = input_data["ks"]
-        mask = input_data["pieces_mask"]
-
-        flat_input = torch.cat([xs, ks, mask], dim=0)
-
-        return flat_input, target_grid
-
-
-class ToGridInputTransform:
-    """Transform that converts discontinuity data to a grid-like input.
-
-    This reconstructs the initial condition on the grid from discontinuities,
-    similar to how operator_learning represents inputs, but also includes
-    the raw discontinuity information as additional channels.
-    """
-
-    def __init__(self, nx: int, nt: int, **kwargs):
-        self.nx = nx
-        self.nt = nt
-
-    def __call__(self, input_data: dict, target_grid: torch.Tensor):
-        xs = input_data["xs"]
-        ks = input_data["ks"]
-        mask = input_data["pieces_mask"]
-        t_coords = input_data["t_coords"]
-        x_coords = input_data["x_coords"]
-
-        # Reconstruct IC on grid from piecewise constant representation
-        ic_grid = torch.zeros(self.nx, dtype=torch.float32)
-        x_positions = torch.linspace(0, 1, self.nx)
-
-        n_pieces = int(mask.sum().item())
-        for i in range(n_pieces):
-            x_left = xs[i]
-            x_right = xs[i + 1]
-            val = ks[i]
-            ic_grid[(x_positions >= x_left) & (x_positions < x_right)] = val
-
-        # Handle the rightmost piece (include the boundary)
-        if n_pieces > 0:
-            ic_grid[x_positions >= xs[n_pieces - 1]] = ks[n_pieces - 1]
-
-        # Expand IC to full grid (repeat across time)
-        ic_expanded = (
-            ic_grid[None, :].expand(self.nt, self.nx).unsqueeze(0)
-        )  # (1, nt, nx)
-
-        # Mask everything except initial condition (like GridMaskAllButInitial)
-        ic_masked = ic_expanded.clone()
-        ic_masked[:, 1:, :] = -1
-
-        # Stack: [ic_masked, t_coords, x_coords] -> (3, nt, nx)
-        full_input = torch.cat([ic_masked, t_coords, x_coords], dim=0)
-
-        # Return dict: grid tensor + passthrough of original keys
-        result = dict(input_data)
-        result["grid_input"] = full_input
-        return result, target_grid
-
-
-# Registry of available transforms (string name -> class)
-TRANSFORMS = {
-    "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
-    "ToGridInput": ToGridInputTransform,
-}
 
 
 def collate_wavefront_batch(batch):

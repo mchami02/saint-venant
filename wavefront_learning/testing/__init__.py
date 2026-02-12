@@ -10,6 +10,7 @@ from testing.test_results import (
     eval_high_res,
     eval_inference_time,
     eval_model,
+    eval_res,
     eval_steps,
     test_model,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "eval_high_res",
     "eval_inference_time",
     "eval_model",
+    "eval_res",
     "eval_steps",
     "run_inference",
     "run_profiler",

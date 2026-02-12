@@ -86,6 +86,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Max steps for step-count generalization test (default: same as max_steps)",
     )
+    parser.add_argument(
+        "--max_high_res",
+        type=int,
+        default=5,
+        help="Max resolution multiplier for high-res generalization test (default: 5)",
+    )
 
     # Resume training
     parser.add_argument(

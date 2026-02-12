@@ -127,7 +127,6 @@ def compute_boundaries(
         Tuple of (left_bound, right_bound), each (B, nt, nx).
     """
     B, D, nt = positions.shape
-    nx = x_coords.shape[2]
 
     # (B, D, nt, 1) vs (B, 1, nt, nx)
     pos = positions.unsqueeze(-1)  # (B, D, nt, 1)
