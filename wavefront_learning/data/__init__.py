@@ -114,6 +114,7 @@ def get_wavefront_datasets(
         grid_config: Dict with keys nx, nt, dx, dt.
         model_name: Model name (key into MODEL_TRANSFORM for per-model transforms).
         max_steps: Maximum number of pieces in piecewise constant IC.
+            Samples are distributed uniformly across step counts {2, ..., max_steps}.
         max_discontinuities: Maximum number of discontinuities to support.
         train_ratio: Fraction of data for training.
         val_ratio: Fraction of data for validation.

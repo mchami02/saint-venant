@@ -8,11 +8,12 @@ This module handles:
 
 import numpy as np
 import torch
-from data.data_loading import download_grids, upload_grids
 from nfv.flows import Greenshield
 from nfv.initial_conditions import PiecewiseConstant
 from nfv.problem import Problem
 from nfv.solvers import LaxHopf
+
+from data.data_loading import download_grids, upload_grids
 
 
 class PiecewiseRandom(PiecewiseConstant):
@@ -309,18 +310,19 @@ def get_wavefront_data(
 ) -> list[tuple[dict, torch.Tensor]]:
     """Get wavefront data, downloading from HuggingFace or generating locally.
 
-    This is the main entry point for data loading. It:
-    1. Tries to download from HuggingFace first
-    2. If not found, generates locally and optionally uploads
-    3. Preprocesses and returns
+    This is the main entry point for data loading. It distributes samples
+    uniformly across step counts {2, ..., max_steps}, downloading or
+    generating grids for each step count independently. Each step count
+    is cached separately on HuggingFace.
 
     Args:
-        n_samples: Number of samples needed.
+        n_samples: Total number of samples needed (distributed across step counts).
         nx: Number of spatial grid points.
         nt: Number of time steps.
         dx: Spatial step size.
         dt: Time step size.
         max_steps: Maximum number of pieces in piecewise constant IC.
+            Each sample's piece count is drawn uniformly from {2, ..., max_steps}.
         only_shocks: If True, generate only shock waves (no rarefactions).
         random_seed: Random seed for reproducibility.
         max_discontinuities: Maximum number of discontinuities to support.
@@ -331,23 +333,37 @@ def get_wavefront_data(
     """
     np.random.seed(random_seed)
 
-    # Try to download from HuggingFace (shared mchami/grids repo)
-    grids = download_grids(nx, nt, dx, dt, max_steps, only_shocks)
+    # Distribute samples uniformly across step counts {2, ..., max_steps}
+    step_counts = list(range(2, max_steps + 1))
+    n_per_step = n_samples // len(step_counts)
+    remainder = n_samples % len(step_counts)
 
-    if grids is not None and len(grids) >= n_samples:
-        print(f"Using cached data from mchami/grids ({len(grids)} samples available)")
-        grids = grids[:n_samples]
-    else:
-        # Generate locally
-        print(f"Generating {n_samples} samples locally...")
-        grids = get_nfv_dataset(n_samples, nx, nt, dx, dt, max_steps, only_shocks)
+    all_grids = []
+    for i, n_steps in enumerate(step_counts):
+        n = n_per_step + (1 if i < remainder else 0)
+        if n == 0:
+            continue
 
-        # Upload to HuggingFace for caching
-        if upload_to_hf:
-            try:
-                upload_grids(grids, nx, nt, dx, dt, max_steps, only_shocks)
-            except Exception as e:
-                print(f"Failed to upload to HuggingFace: {e}")
+        # Try to download from HuggingFace (each step count cached independently)
+        grids = download_grids(nx, nt, dx, dt, n_steps, only_shocks)
+
+        if grids is not None and len(grids) >= n:
+            print(f"  steps={n_steps}: using {n} cached samples")
+            grids = grids[:n]
+        else:
+            print(f"  steps={n_steps}: generating {n} samples locally...")
+            grids = get_nfv_dataset(n, nx, nt, dx, dt, n_steps, only_shocks)
+
+            if upload_to_hf:
+                try:
+                    upload_grids(grids, nx, nt, dx, dt, n_steps, only_shocks)
+                except Exception as e:
+                    print(f"  Failed to upload steps={n_steps}: {e}")
+
+        all_grids.append(grids)
+
+    grids = np.concatenate(all_grids, axis=0)
+    np.random.shuffle(grids)
 
     # Preprocess
     processed = preprocess_wavefront_data(grids, nx, nt, dx, dt, max_discontinuities)

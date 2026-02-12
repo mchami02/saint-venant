@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
         "--max_steps",
         type=int,
         default=3,
-        help="Maximum number of pieces in piecewise constant IC (default: 3)",
+        help="Max pieces in piecewise constant IC; samples drawn uniformly from {2,...,max_steps} (default: 3)",
     )
     parser.add_argument(
         "--max_test_steps",
