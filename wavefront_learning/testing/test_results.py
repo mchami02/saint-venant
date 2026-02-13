@@ -203,7 +203,7 @@ def eval_res(
 
     high_res_loader = DataLoader(
         high_res_dataset,
-        batch_size=max(1, args.batch_size // new_res),
+        batch_size=max(2, args.batch_size // new_res),
         shuffle=False,
         collate_fn=collate_wavefront_batch,
     )

@@ -127,15 +127,18 @@ def compute_boundaries(
         Tuple of (left_bound, right_bound), each (B, nt, nx).
     """
     B, D, nt = positions.shape
+    nx = x_coords.shape[-1]
 
-    # (B, D, nt, 1) vs (B, 1, nt, nx)
-    pos = positions.unsqueeze(-1)  # (B, D, nt, 1)
-    x = x_coords.unsqueeze(1)  # (B, 1, nt, nx)
+    # Expand + contiguous to avoid MPS broadcasting bug with size-1 dims.
+    # MPS cannot handle stride-0 views from expand(), so contiguous() is needed.
+    pos = positions.unsqueeze(-1).expand(B, D, nt, nx).contiguous()  # (B, D, nt, nx)
+    x = x_coords.unsqueeze(1).expand(B, D, nt, nx).contiguous()  # (B, D, nt, nx)
     mask = disc_mask[:, :, None, None].bool()  # (B, D, 1, 1)
 
     # Left boundary: largest position <= x among valid discs
     is_left = (pos <= x) & mask
-    left_vals = torch.where(is_left, pos, torch.full_like(pos, -float("inf")))
+    neg_inf = torch.tensor(-float("inf"), device=pos.device, dtype=pos.dtype)
+    left_vals = torch.where(is_left, pos, neg_inf)
     left_bound = left_vals.max(dim=1).values  # (B, nt, nx)
     left_bound = torch.where(
         left_bound.isinf(), torch.zeros_like(left_bound), left_bound
@@ -143,7 +146,8 @@ def compute_boundaries(
 
     # Right boundary: smallest position > x among valid discs
     is_right = (pos > x) & mask
-    right_vals = torch.where(is_right, pos, torch.full_like(pos, float("inf")))
+    pos_inf = torch.tensor(float("inf"), device=pos.device, dtype=pos.dtype)
+    right_vals = torch.where(is_right, pos, pos_inf)
     right_bound = right_vals.min(dim=1).values  # (B, nt, nx)
     right_bound = torch.where(
         right_bound.isinf(), torch.ones_like(right_bound), right_bound

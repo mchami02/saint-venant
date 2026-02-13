@@ -7,7 +7,7 @@ class Tokenizer(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.projection = nn.Linear(input_dim, hidden_dim)
-        
+
     def forward(self, x):
         return self.projection(x)
 

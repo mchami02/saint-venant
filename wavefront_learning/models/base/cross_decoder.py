@@ -6,7 +6,7 @@ import torch.nn.functional as F
 class CrossDecoderLayer(nn.Module):
     """
     Single layer of the cross-attention decoder with pre-norm architecture.
-    
+
     Implements equations (8) and (9):
         x'_k = x_{k-1} + MHA(LN(x_{k-1}), LN(z_L), LN(z_L))
         x_k = x'_k + MLP(LN(x'_k))
@@ -16,21 +16,21 @@ class CrossDecoderLayer(nn.Module):
         self.norm_q = nn.LayerNorm(hidden_dim)
         self.norm_kv = nn.LayerNorm(hidden_dim)
         self.cross_attention = nn.MultiheadAttention(hidden_dim, num_heads=num_heads, batch_first=True)
-        
+
         self.norm_ff = nn.LayerNorm(hidden_dim)
         self.feedforward = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
             nn.Linear(hidden_dim * 4, hidden_dim)
         )
-    
+
     def forward(self, x, z, key_padding_mask=None):
         """
         Args:
             x: (B, Q, D) - query features (interpolated grid features)
             z: (B, S, D) - encoder output (keys/values)
             key_padding_mask: (B, S) - mask for encoder output (True = ignore)
-        
+
         Returns:
             x: (B, Q, D) - updated features
         """
@@ -39,11 +39,11 @@ class CrossDecoderLayer(nn.Module):
         z_norm = self.norm_kv(z)
         att = self.cross_attention(x_norm, z_norm, z_norm, key_padding_mask=key_padding_mask)[0]
         x = x + att
-        
+
         # Feedforward with pre-norm (Eq. 9)
         ff = self.feedforward(self.norm_ff(x))
         x = x + ff
-        
+
         return x
 
 
