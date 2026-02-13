@@ -4,6 +4,7 @@ from argparse import Namespace
 
 import torch
 import torch.nn as nn
+from models.charno import build_charno
 from models.deeponet import build_deeponet
 from models.encoder_decoder import build_encoder_decoder, build_encoder_decoder_cross
 from models.fno_wrapper import build_fno
@@ -36,6 +37,7 @@ MODELS = {
     "ClassifierTrajTransformer": build_classifier_traj_transformer,
     "ClassifierAllTrajTransformer": build_classifier_all_traj_transformer,
     "NoTrajTransformer": build_no_traj_transformer,
+    "CharNO": build_charno,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -53,6 +55,7 @@ MODEL_TRANSFORM = {
     "ClassifierTrajTransformer": None,
     "ClassifierAllTrajTransformer": None,
     "NoTrajTransformer": None,
+    "CharNO": None,
 }
 
 

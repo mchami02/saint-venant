@@ -4,6 +4,7 @@
 wavefront_learning/
 ├── .env                          # Environment variables (WANDB_API_KEY, HF_TOKEN)
 ├── ARCHITECTURE.md               # Model and loss architecture documentation
+├── CHARNO_DESIGN.md              # CharNO design document with mathematical justifications
 ├── CLAUDE.md                     # Claude Code guidance for this module
 ├── Structure.md                  # This file
 ├── train.py                      # Main training script
@@ -28,6 +29,7 @@ wavefront_learning/
 │   ├── deeponet.py               # Classic DeepONet baseline
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
+│   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -39,7 +41,9 @@ wavefront_learning/
 │       ├── transformer_encoder.py # Tokenizer, EncoderLayer, Encoder
 │       ├── axial_decoder.py      # FourierTokenizer, AxialAttention, AxialDecoder
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
-│       └── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
+│       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
+│       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
+│       └── characteristic_features.py  # SegmentPhysicsEncoder, CharacteristicFeatureComputer
 ├── losses/
 │   ├── __init__.py               # Re-exports all loss classes and flux utilities
 │   ├── base.py                   # BaseLoss abstract class
@@ -55,6 +59,8 @@ wavefront_learning/
 │   ├── rh_residual.py            # RHResidualLoss
 │   ├── acceleration.py           # AccelerationLoss
 │   ├── regularize_traj.py        # RegularizeTrajLoss
+│   ├── wasserstein.py            # WassersteinLoss (W1 / Earth Mover's Distance)
+│   ├── conservation.py           # ConservationLoss (mass conservation regularizer)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -137,6 +143,8 @@ wavefront_learning/
   - `FNOWrapper`, `build_fno()`
 - **encoder_decoder.py** — Transformer encoder-decoder.
   - `EncoderDecoder`, `build_encoder_decoder()`, `build_encoder_decoder_cross()`
+- **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
+  - `CharNO`, `build_charno()`
 
 ### Model Base Components (`models/base/`)
 
@@ -150,6 +158,8 @@ wavefront_learning/
 - **axial_decoder.py** — `FourierTokenizer`, `AxialAttention`, `AxialDecoderLayer`, `AxialDecoder`
 - **cross_decoder.py** — `CrossDecoderLayer`, `CrossDecoder`
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
+- **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
+- **characteristic_features.py** — `SegmentPhysicsEncoder`, `CharacteristicFeatureComputer`
 
 ### Losses (`losses/`)
 
@@ -168,6 +178,8 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **rh_residual.py** — `RHResidualLoss` (Rankine-Hugoniot from sampled densities); also `compute_shock_velocity()`, `sample_density_from_grid()`
 - **acceleration.py** — `AccelerationLoss` (shock detection via acceleration); also `compute_acceleration()`
 - **regularize_traj.py** — `RegularizeTrajLoss` (penalize erratic trajectory jumps)
+- **wasserstein.py** — `WassersteinLoss` (W1 / Earth Mover's Distance for sharp shocks)
+- **conservation.py** — `ConservationLoss` (mass conservation regularizer)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)

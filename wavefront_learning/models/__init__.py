@@ -8,6 +8,7 @@ Building blocks are available in the `base` submodule.
 """
 
 from .base import BaseWavefrontModel
+from .charno import CharNO, build_charno
 from .deeponet import DeepONet, build_deeponet
 from .encoder_decoder import (
     EncoderDecoder,
@@ -31,4 +32,7 @@ __all__ = [
     "build_deeponet",
     "build_encoder_decoder",
     "build_encoder_decoder_cross",
+    # CharNO
+    "CharNO",
+    "build_charno",
 ]

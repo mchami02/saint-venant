@@ -594,6 +594,129 @@ This design is fully differentiable (no `compute_boundaries` or hard thresholds)
 
 ---
 
+### CharNO
+
+**Location**: `models/charno.py`
+
+Characteristic Neural Operator that mirrors the **Lax-Hopf variational formula**. Instead of predicting trajectories then assembling a grid, CharNO directly answers: for each query $(t, x)$, which initial segment controls the solution (Lax-Hopf selection), and what value does it contribute?
+
+#### Pseudocode
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (B, K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (B, K, H)
+
+(t_coords, x_coords, xs, ks) → CharacteristicFeatureComputer → char_feat: (B, Q, K, H_char)
+
+cat(seg_emb_expanded, char_feat) → ScoreMLP → scores: (B, Q, K)
+softmax(-scores / τ) → weights: (B, Q, K)
+
+cat(seg_emb_expanded, char_feat) → ValueMLP → sigmoid → local_rho: (B, Q, K)
+
+Σ_k weights_k · local_rho_k → output_grid: (B, 1, nt, nx)
+```
+
+#### Sub-Components
+
+##### SegmentPhysicsEncoder
+
+**Location**: `models/base/characteristic_features.py`
+
+Encodes IC segments with physics-augmented features. For each constant piece $k$ with value $\rho_k$ on $[x_k, x_{k+1})$:
+
+| Feature | Formula | Physical meaning |
+|---------|---------|-----------------|
+| $x_{center}$ | $(x_k + x_{k+1})/2$ | Segment center |
+| $w$ | $x_{k+1} - x_k$ | Segment width |
+| $\rho_k$ | $\text{ks}[k]$ | Density value |
+| $\lambda_k$ | $f'(\rho_k)$ | Characteristic speed |
+| $f_k$ | $f(\rho_k)$ | Flux value |
+
+Spatial features are Fourier-encoded. All features concatenated and projected via MLP → $(B, K, H)$.
+
+##### CharacteristicFeatureComputer
+
+**Location**: `models/base/characteristic_features.py`
+
+Computes characteristic-relative coordinates for each (query, segment) pair:
+
+| Feature | Formula | Physical meaning |
+|---------|---------|-----------------|
+| $\xi_k$ | $(x - x_{c,k}) / \max(t, \varepsilon)$ | Self-similarity variable |
+| $\Delta_k$ | $x - x_{c,k} - f'(\rho_k) \cdot t$ | Characteristic offset |
+| $d_{L,k}$ | $x - (x_k + f'(\rho_k) \cdot t)$ | Distance to left characteristic boundary |
+| $d_{R,k}$ | $x - (x_{k+1} + f'(\rho_k) \cdot t)$ | Distance to right characteristic boundary |
+| $t$ | $t$ | Time coordinate |
+
+Each feature is Fourier-encoded and projected via MLP → $(B, Q, K, H_{char})$.
+
+##### Flux Interface
+
+**Location**: `models/base/flux.py`
+
+Pluggable flux function for computing physics features:
+
+```python
+class Flux(nn.Module):
+    forward(rho) → f(ρ)           # flux value
+    derivative(rho) → f'(ρ)        # characteristic speed
+    shock_speed(ρ_L, ρ_R) → s      # Rankine-Hugoniot speed
+```
+
+Implementations: `GreenshieldsFlux` ($f = \rho(1-\rho)$), `TriangularFlux` ($f = \min(v_f \rho, w(1-\rho))$).
+
+##### Score Network (Lax-Hopf Selection)
+
+MLP mapping $[\text{seg\_emb}; \text{char\_feat}]$ → scalar score per (query, segment) pair.
+
+**Selection weights** (softmin = softmax of negated scores):
+$$w_k(t,x) = \frac{\exp(-s_k / \tau)}{\sum_j \exp(-s_j / \tau)}$$
+
+Learnable temperature $\tau$ stored as $\log \tau$. As $\tau \to 0$, weights approach the exact Lax-Hopf argmin.
+
+##### Value Network (Local Solution)
+
+MLP mapping $[\text{seg\_emb}; \text{char\_feat}]$ → density per (query, segment) pair, passed through sigmoid → $[0, 1]$.
+
+##### Output Assembly
+
+$$\rho(t, x) = \sum_k w_k(t,x) \cdot v_k(t,x)$$
+
+#### Input/Output Format
+
+**Input** (dictionary):
+- `xs`: $(B, K+1)$ — breakpoint positions
+- `ks`: $(B, K)$ — piece values
+- `pieces_mask`: $(B, K)$ — validity mask
+- `t_coords`: $(B, 1, n_t, n_x)$ — time coordinates
+- `x_coords`: $(B, 1, n_t, n_x)$ — space coordinates
+
+**Output** (dictionary):
+- `output_grid`: $(B, 1, n_t, n_x)$ — predicted density grid
+- `selection_weights`: $(B, n_t, n_x, K)$ — segment selection weights (interpretable)
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 64 | Segment embedding dimension |
+| `char_hidden_dim` | 32 | Characteristic feature dimension |
+| `num_frequencies` | 8 | Fourier bands for segment encoder |
+| `num_char_frequencies` | 8 | Fourier bands for characteristic features |
+| `num_seg_mlp_layers` | 2 | MLP depth in segment encoder |
+| `num_self_attn_layers` | 2 | Self-attention layers |
+| `num_char_mlp_layers` | 2 | MLP depth in char feature computer |
+| `num_score_layers` | 2 | MLP depth in score network |
+| `num_local_layers` | 2 | MLP depth in value network |
+| `num_heads` | 4 | Self-attention heads |
+| `initial_temperature` | 1.0 | Softmin temperature |
+
+#### Factory Functions
+
+- `build_charno(args)`: Creates CharNO with configuration from args dict
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -929,6 +1052,50 @@ $$\mathcal{L}_{missed} = \frac{1}{M} \sum_{(b,t,x) \in \mathcal{H}_{domain}} \le
 
 ---
 
+#### WassersteinLoss
+
+**Location**: `losses/wasserstein.py`
+
+Wasserstein-1 (Earth Mover's Distance) loss for discontinuous solutions. The mathematically correct metric for conservation law solutions — penalizes mislocated shocks linearly in displacement.
+
+**Formula** (per time slice):
+$$W_1(t) = \sum_x \left| \sum_{x'=0}^{x} (\rho_{pred}(t, x') - \rho_{target}(t, x')) \cdot \Delta x \right| \cdot \Delta x$$
+
+$$\mathcal{L}_{W1} = \frac{1}{n_t} \sum_t W_1(t)$$
+
+This is the $L^1$ norm of the antiderivative of the error — equivalent to the Sobolev $W^{-1,1}$ norm.
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dx` | None | Spatial grid spacing (None → 1.0) |
+
+**Required outputs**: `output_grid`
+
+**Components returned**: `{"wasserstein": float}`
+
+---
+
+#### ConservationLoss
+
+**Location**: `losses/conservation.py`
+
+Enforces mass conservation — the total mass $\int \rho \, dx$ should be approximately constant over time.
+
+**Formula**:
+$$\mathcal{L}_{cons} = \text{Var}_t\left(\sum_x \rho_{pred}(t, x) \cdot \Delta x\right)$$
+
+**Configuration**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dx` | None | Spatial grid spacing (None → 1.0) |
+
+**Required outputs**: `output_grid`
+
+**Components returned**: `{"conservation": float}`
+
+---
+
 #### RegularizeTrajLoss
 
 **Location**: `losses/regularize_traj.py`
@@ -1103,6 +1270,18 @@ For models supervised with PDE shock residual.
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{PDE\text{-}shock}$$
 
+#### charno Preset
+
+For CharNO (characteristic neural operator).
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+| `wasserstein` | 0.5 |
+| `conservation` | 0.1 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons}$$
+
 #### mse Preset
 
 Simple grid MSE only.
@@ -1144,6 +1323,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
+| CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
@@ -1159,6 +1339,8 @@ loss = get_loss("hybrid", loss_kwargs={
 | RHResidualLoss | `losses/rh_residual.py` | RH at shocks (from densities) | Hybrid models |
 | AccelerationLoss | `losses/acceleration.py` | High acceleration = shock | Existence supervision |
 | RegularizeTrajLoss | `losses/regularize_traj.py` | Smooth trajectories | Penalize erratic jumps |
+| WassersteinLoss | `losses/wasserstein.py` | $W_1$ distance (sharp shocks) | CharNO, discontinuous solutions |
+| ConservationLoss | `losses/conservation.py` | Mass conservation | CharNO, physics regularization |
 
 ### Key Design Principles
 

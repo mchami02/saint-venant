@@ -29,6 +29,7 @@ Utilities:
 
 from .acceleration import AccelerationLoss, compute_acceleration
 from .base import BaseLoss
+from .conservation import ConservationLoss
 from .boundary import BoundaryLoss
 from .collision import CollisionLoss
 from .existence_regularization import ICAnchoringLoss
@@ -45,6 +46,7 @@ from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
+from .wasserstein import WassersteinLoss
 
 __all__ = [
     # Base
@@ -71,4 +73,7 @@ __all__ = [
     "compute_pde_residual",
     "create_shock_mask",
     "compute_acceleration",
+    # CharNO losses
+    "WassersteinLoss",
+    "ConservationLoss",
 ]

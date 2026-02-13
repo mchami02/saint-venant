@@ -109,6 +109,12 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "existence",
     ],
+    "charno": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
 }
 
 

@@ -13,6 +13,8 @@ This module contains reusable components used by main models:
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
+from .characteristic_features import CharacteristicFeatureComputer, SegmentPhysicsEncoder
+from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
 from .blocks import ResidualBlock
 from .cross_decoder import CrossDecoder
 from .decoders import TrajectoryDecoder
@@ -46,4 +48,11 @@ __all__ = [
     "Encoder",
     "AxialDecoder",
     "CrossDecoder",
+    # Characteristic features & flux
+    "Flux",
+    "GreenshieldsFlux",
+    "TriangularFlux",
+    "DEFAULT_FLUX",
+    "SegmentPhysicsEncoder",
+    "CharacteristicFeatureComputer",
 ]

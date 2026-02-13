@@ -13,6 +13,7 @@ from losses.acceleration import AccelerationLoss
 from losses.base import BaseLoss
 from losses.boundary import BoundaryLoss
 from losses.collision import CollisionLoss
+from losses.conservation import ConservationLoss
 from losses.existence_regularization import ICAnchoringLoss
 from losses.ic import ICLoss
 from losses.mse import MSELoss
@@ -21,6 +22,7 @@ from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
+from losses.wasserstein import WassersteinLoss
 
 # Registry of available loss functions
 LOSSES: dict[str, type[BaseLoss]] = {
@@ -36,6 +38,8 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "ic": ICLoss,
     "acceleration": AccelerationLoss,
     "regularize_traj": RegularizeTrajLoss,
+    "wasserstein": WassersteinLoss,
+    "conservation": ConservationLoss,
 }
 
 # Presets for common configurations
@@ -96,6 +100,11 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("boundary", 1.0),
         ("regularize_traj", 0.1),
         ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
+    ],
+    "charno": [
+        ("mse", 1.0),
+        ("wasserstein", 0.5),
+        ("conservation", 0.1),
     ],
 }
 
@@ -334,6 +343,12 @@ def create_loss_from_args(args) -> nn.Module:
         }
         loss_kwargs["pde_shock_residual"] = {
             "dt": args.dt,
+            "dx": args.dx,
+        }
+        loss_kwargs["wasserstein"] = {
+            "dx": args.dx,
+        }
+        loss_kwargs["conservation"] = {
             "dx": args.dx,
         }
 
