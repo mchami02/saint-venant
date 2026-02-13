@@ -3,8 +3,9 @@
 Thin wrapper around neuralop's FNO that returns a dict output
 compatible with the wavefront learning loss/metrics interface.
 
-Input: dict with "grid_input" key containing tensor of shape (B, 3, nt, nx)
-       from ToGridInputTransform. Channels are [ic_masked, t_coords, x_coords].
+Input: dict with "grid_input" key containing tensor of shape (B, 1, nt, nx)
+       from ToGridNoCoords (ToGridInputTransform with include_coords=False).
+       Single channel is the masked initial condition.
 Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
 """
 
@@ -43,7 +44,7 @@ def build_fno(args: dict) -> FNOWrapper:
     return FNOWrapper(
         n_modes=(n_modes_t, n_modes_x),
         hidden_channels=hidden_channels,
-        in_channels=3,
+        in_channels=1,
         out_channels=1,
         n_layers=n_layers,
     )

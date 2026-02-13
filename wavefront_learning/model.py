@@ -45,7 +45,7 @@ MODEL_TRANSFORM = {
     "TrajDeepONet": None,
     "ClassifierTrajDeepONet": None,
     "NoTrajDeepONet": None,
-    "FNO": "ToGridInput",
+    "FNO": "ToGridNoCoords",
     "DeepONet": "ToGridInput",
     "EncoderDecoder": "ToGridInput",
     "EncoderDecoderCross": "ToGridInput",

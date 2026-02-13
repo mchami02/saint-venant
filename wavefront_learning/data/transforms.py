@@ -4,6 +4,8 @@ Each transform takes (input_data, target_grid) and returns a
 (possibly modified) (input_data, target_grid) pair.
 """
 
+from functools import partial
+
 import torch
 
 
@@ -34,9 +36,10 @@ class ToGridInputTransform:
     the raw discontinuity information as additional channels.
     """
 
-    def __init__(self, nx: int, nt: int, **kwargs):
+    def __init__(self, nx: int, nt: int, include_coords: bool = True, **kwargs):
         self.nx = nx
         self.nt = nt
+        self.include_coords = include_coords
 
     def __call__(self, input_data: dict, target_grid: torch.Tensor):
         xs = input_data["xs"]
@@ -69,8 +72,13 @@ class ToGridInputTransform:
         ic_masked = ic_expanded.clone()
         ic_masked[:, 1:, :] = -1
 
-        # Stack: [ic_masked, t_coords, x_coords] -> (3, nt, nx)
-        full_input = torch.cat([ic_masked, t_coords, x_coords], dim=0)
+        # Stack channels
+        if self.include_coords:
+            # [ic_masked, t_coords, x_coords] -> (3, nt, nx)
+            full_input = torch.cat([ic_masked, t_coords, x_coords], dim=0)
+        else:
+            # ic_masked only -> (1, nt, nx)
+            full_input = ic_masked
 
         # Return dict: grid tensor + passthrough of original keys
         result = dict(input_data)
@@ -135,9 +143,12 @@ class DiscretizeICTransform:
         return result, target_grid
 
 
+ToGridNoCoords = partial(ToGridInputTransform, include_coords=False)
+
 # Registry of available transforms (string name -> class)
 TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
     "ToGridInput": ToGridInputTransform,
+    "ToGridNoCoords": ToGridNoCoords,
     "DiscretizeIC": DiscretizeICTransform,
 }
