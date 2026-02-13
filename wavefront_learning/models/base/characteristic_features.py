@@ -8,6 +8,7 @@ Contains:
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .feature_encoders import FourierFeatures
 from .flux import DEFAULT_FLUX, Flux
@@ -121,6 +122,9 @@ class CharacteristicFeatureComputer(nn.Module):
       - dist_left_k = x - (xs[k] + lambda_k * t)  distance to left char boundary
       - dist_right_k = x - (xs[k+1] + lambda_k * t) distance to right char boundary
       - t_val = t                                  time
+      - s_left_k = shock_speed(ks[k-1], ks[k])    left boundary RH speed
+      - s_right_k = shock_speed(ks[k], ks[k+1])   right boundary RH speed
+      - t_coll_k = min neighbor collision time     estimated wave interaction time
 
     Features are Fourier-encoded and projected via MLP.
 
@@ -148,8 +152,10 @@ class CharacteristicFeatureComputer(nn.Module):
             num_frequencies=num_frequencies, include_input=True
         )
 
-        # 5 features, each Fourier-encoded
-        input_dim = 5 * self.fourier.output_dim
+        # 8 features, each Fourier-encoded
+        # Original 5: xi, char_shift, dist_left, dist_right, t
+        # New 3: s_left, s_right (boundary shock speeds), t_coll (collision time)
+        input_dim = 8 * self.fourier.output_dim
 
         layers = []
         in_dim = input_dim
@@ -198,6 +204,37 @@ class CharacteristicFeatureComputer(nn.Module):
         x_right = xs[:, 1:]  # (B, K)
         lambda_k = self.flux.derivative(ks)  # (B, K)
 
+        # === Inter-segment boundary features ===
+        # Shock speeds at left/right boundaries of each segment.
+        # For edge segments, pad with self-values so shock_speed(ρ,ρ) = f'(ρ).
+        ks_left_pad = F.pad(ks[:, :-1], (1, 0), value=0.0)  # (B, K)
+        ks_left_pad[:, 0] = ks[:, 0]  # leftmost: self-pad
+        ks_right_pad = F.pad(ks[:, 1:], (0, 1), value=0.0)  # (B, K)
+        ks_right_pad[:, -1] = ks[:, -1]  # rightmost: self-pad
+
+        s_left = self.flux.shock_speed(ks_left_pad, ks)  # (B, K)
+        s_right = self.flux.shock_speed(ks, ks_right_pad)  # (B, K)
+
+        # Collision time proxy: time for neighboring characteristics to meet
+        xc_left_pad = F.pad(x_center[:, :-1], (1, 0), value=0.0)
+        xc_left_pad[:, 0] = x_center[:, 0]
+        xc_right_pad = F.pad(x_center[:, 1:], (0, 1), value=1.0)
+        xc_right_pad[:, -1] = x_center[:, -1]
+        lam_left_pad = F.pad(lambda_k[:, :-1], (1, 0), value=0.0)
+        lam_left_pad[:, 0] = lambda_k[:, 0]
+        lam_right_pad = F.pad(lambda_k[:, 1:], (0, 1), value=0.0)
+        lam_right_pad[:, -1] = lambda_k[:, -1]
+
+        eps_coll = 1e-3
+        dist_left_nb = (x_center - xc_left_pad).abs()
+        dist_right_nb = (xc_right_pad - x_center).abs()
+        speed_diff_left = (lam_left_pad - lambda_k).abs().clamp(min=eps_coll)
+        speed_diff_right = (lambda_k - lam_right_pad).abs().clamp(min=eps_coll)
+        t_coll = torch.minimum(
+            dist_left_nb / speed_diff_left,
+            dist_right_nb / speed_diff_right,
+        )  # (B, K)
+
         # Expand for broadcasting: (B, Q, 1) and (B, 1, K)
         t_exp = t_flat.unsqueeze(2)  # (B, Q, 1)
         x_exp = x_flat.unsqueeze(2)  # (B, Q, 1)
@@ -206,7 +243,7 @@ class CharacteristicFeatureComputer(nn.Module):
         xr_exp = x_right.unsqueeze(1)  # (B, 1, K)
         lam_exp = lambda_k.unsqueeze(1)  # (B, 1, K)
 
-        # Compute 5 characteristic features
+        # Compute 5 original characteristic features
         t_safe = torch.clamp(t_exp, min=self.eps)
         xi = (x_exp - xc_exp) / t_safe  # similarity variable
         char_shift = x_exp - xc_exp - lam_exp * t_exp  # char offset
@@ -214,20 +251,27 @@ class CharacteristicFeatureComputer(nn.Module):
         dist_right = x_exp - (xr_exp + lam_exp * t_exp)  # right boundary
         t_feat = t_exp.expand_as(xi)  # time
 
-        # Stack and Fourier-encode each feature separately
-        # Shape of each: (B, Q, K)
+        # Expand inter-segment features to (B, Q, K)
+        s_left_feat = s_left.unsqueeze(1).expand_as(xi)
+        s_right_feat = s_right.unsqueeze(1).expand_as(xi)
+        t_coll_feat = t_coll.unsqueeze(1).expand_as(xi)
+
         # Clamp features to prevent extreme values that cause NaN through
         # Fourier encoding (xi can reach ~1000 at t≈0, producing gradients
         # of magnitude π·128·1000 ≈ 400,000 with num_frequencies=8).
-        # Physically meaningful range for xi is [-1, 1] (characteristic speeds);
-        # wider clamp preserves information for out-of-range queries.
         feat_clamp = 10.0
         xi = torch.clamp(xi, -feat_clamp, feat_clamp)
         char_shift = torch.clamp(char_shift, -feat_clamp, feat_clamp)
         dist_left = torch.clamp(dist_left, -feat_clamp, feat_clamp)
         dist_right = torch.clamp(dist_right, -feat_clamp, feat_clamp)
+        s_left_feat = torch.clamp(s_left_feat, -feat_clamp, feat_clamp)
+        s_right_feat = torch.clamp(s_right_feat, -feat_clamp, feat_clamp)
+        t_coll_feat = torch.clamp(t_coll_feat, 0.0, feat_clamp)
 
-        features = [xi, char_shift, dist_left, dist_right, t_feat]
+        features = [
+            xi, char_shift, dist_left, dist_right, t_feat,
+            s_left_feat, s_right_feat, t_coll_feat,
+        ]
 
         # Fourier encode each feature and concatenate
         encoded_parts = []
@@ -237,7 +281,7 @@ class CharacteristicFeatureComputer(nn.Module):
             enc = enc.reshape(B, Q, K, -1)  # (B, Q, K, F)
             encoded_parts.append(enc)
 
-        combined = torch.cat(encoded_parts, dim=-1)  # (B, Q, K, 5*F)
+        combined = torch.cat(encoded_parts, dim=-1)  # (B, Q, K, 8*F)
 
         # MLP projection
         output = self.mlp(combined)  # (B, Q, K, H_char)
@@ -246,3 +290,77 @@ class CharacteristicFeatureComputer(nn.Module):
         output = output * pieces_mask.unsqueeze(1).unsqueeze(-1)
 
         return output
+
+
+class TimeConditioner(nn.Module):
+    """FiLM-based time conditioning for segment embeddings.
+
+    Modulates static segment embeddings with time-dependent scale and shift:
+        seg_emb(t) = gamma(t, seg_emb) * seg_emb + beta(t, seg_emb)
+
+    Initialized near identity (gamma=1, beta=0) so the model starts
+    equivalent to the static version and learns time dependence gradually.
+
+    Args:
+        hidden_dim: Segment embedding dimension.
+        num_time_frequencies: Fourier frequencies for time encoding.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 64,
+        num_time_frequencies: int = 8,
+    ):
+        super().__init__()
+        self.fourier_t = FourierFeatures(
+            num_frequencies=num_time_frequencies, include_input=True
+        )
+        # Input: fourier(t) + seg_emb -> scale (gamma) and shift (beta)
+        input_dim = self.fourier_t.output_dim + hidden_dim
+        self.film_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 2 * hidden_dim),
+        )
+        # Initialize near identity: gamma ~ 1, beta ~ 0
+        nn.init.zeros_(self.film_net[-1].weight)
+        nn.init.zeros_(self.film_net[-1].bias)
+        with torch.no_grad():
+            self.film_net[-1].bias[:hidden_dim] = 1.0  # gamma = 1
+
+    def forward(
+        self,
+        seg_emb: torch.Tensor,
+        t_unique: torch.Tensor,
+    ) -> torch.Tensor:
+        """Modulate segment embeddings by time.
+
+        Computes FiLM parameters per unique time step. The caller is
+        responsible for expanding to spatial dimensions if needed.
+
+        Args:
+            seg_emb: Static segment embeddings (B, K, H).
+            t_unique: Unique time values (B, nt), one per time step.
+
+        Returns:
+            Time-conditioned segment embeddings (B, nt, K, H).
+        """
+        B, K, H = seg_emb.shape
+        nt = t_unique.shape[1]
+
+        # Fourier-encode unique times: (B, nt) -> (B, nt, F_t)
+        t_enc = self.fourier_t(t_unique.reshape(-1)).reshape(B, nt, -1)
+
+        # Expand for (time, segment) pairs — much smaller than (query, segment)
+        t_enc_exp = t_enc.unsqueeze(2).expand(-1, -1, K, -1)  # (B, nt, K, F_t)
+        seg_emb_t = seg_emb.unsqueeze(1).expand(-1, nt, -1, -1)  # (B, nt, K, H)
+
+        # Concatenate and produce FiLM parameters
+        film_input = torch.cat(
+            [t_enc_exp, seg_emb_t], dim=-1
+        )  # (B, nt, K, F_t + H)
+        film_params = self.film_net(film_input)  # (B, nt, K, 2*H)
+        gamma, beta = film_params.chunk(2, dim=-1)  # each (B, nt, K, H)
+
+        # Apply FiLM modulation at per-timestep level
+        return gamma * seg_emb_t + beta  # (B, nt, K, H)

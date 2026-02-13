@@ -13,19 +13,23 @@ This module contains reusable components used by main models:
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
-from .characteristic_features import CharacteristicFeatureComputer, SegmentPhysicsEncoder
-from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
 from .blocks import ResidualBlock
+from .characteristic_features import (
+    CharacteristicFeatureComputer,
+    SegmentPhysicsEncoder,
+    TimeConditioner,
+)
 from .cross_decoder import CrossDecoder
 from .decoders import TrajectoryDecoder
-from .transformer_encoder import Encoder
 from .feature_encoders import (
     DiscontinuityEncoder,
     FourierFeatures,
     SpaceTimeEncoder,
     TimeEncoder,
 )
+from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
 from .regions import RegionTrunk, RegionTrunkSet
+from .transformer_encoder import Encoder
 
 __all__ = [
     # Base class
@@ -55,4 +59,5 @@ __all__ = [
     "DEFAULT_FLUX",
     "SegmentPhysicsEncoder",
     "CharacteristicFeatureComputer",
+    "TimeConditioner",
 ]

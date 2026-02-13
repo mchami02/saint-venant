@@ -186,6 +186,7 @@ Do **not** rely on a `--model_path` for quick verification.
 
 - **File size limit**: Keep files under 600 lines. If a file grows beyond this, split it into logical modules.
 - **Model file placement**: Only standalone models (with their own `build_*` factory, registered in `MODELS`) belong directly in `models/`. All sub-modules, building blocks, and shared components must go in `models/base/`.
+- **No for loops over space/time in forward passes**: Never iterate over spatial or temporal dimensions in `forward()`. All operations must be fully vectorized. If peak memory is too large, this is a model design problem — fix the architecture, not the implementation. (Iterating over layers in a `ModuleList` is fine.)
 
 ## Dependencies
 

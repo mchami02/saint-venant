@@ -20,9 +20,31 @@ import torch.nn as nn
 from .base.characteristic_features import (
     CharacteristicFeatureComputer,
     SegmentPhysicsEncoder,
+    TimeConditioner,
 )
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
+
+
+class CrossSegmentAttention(nn.Module):
+    """Lightweight self-attention over the K segment dimension.
+
+    Unlike EncoderLayer, this has NO feedforward network — just attention
+    + residual + LayerNorm. This saves ~60% memory since the FFN's 4x
+    expansion on (B*Q, K, D) tensors is the main OOM culprit.
+    The downstream score/value MLPs provide sufficient nonlinear capacity.
+    """
+
+    def __init__(self, dim: int, num_heads: int = 4):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(
+            dim, num_heads=num_heads, batch_first=True
+        )
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x, key_padding_mask=None):
+        att = self.attention(x, x, x, key_padding_mask=key_padding_mask)[0]
+        return self.norm(x + att)
 
 
 class CharNO(nn.Module):
@@ -39,6 +61,8 @@ class CharNO(nn.Module):
         num_score_layers: MLP depth in score network.
         num_local_layers: MLP depth in value network.
         num_heads: Self-attention heads.
+        num_cross_segment_layers: Cross-segment attention layers (0 = disabled).
+        time_condition: Enable FiLM time conditioning on segment embeddings.
         initial_temperature: Softmin temperature initialization.
         flux: Flux function instance.
     """
@@ -55,12 +79,15 @@ class CharNO(nn.Module):
         num_score_layers: int = 2,
         num_local_layers: int = 2,
         num_heads: int = 4,
+        num_cross_segment_layers: int = 1,
+        time_condition: bool = True,
         initial_temperature: float = 1.0,
         flux: Flux | None = None,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.char_hidden_dim = char_hidden_dim
+        self.time_condition = time_condition
         flux = flux or DEFAULT_FLUX()
 
         # Stage 1: Segment encoder
@@ -87,8 +114,28 @@ class CharNO(nn.Module):
             flux=flux,
         )
 
+        # Stage 2.5: Time-conditioned segment embeddings (FiLM)
+        if time_condition:
+            self.time_conditioner = TimeConditioner(
+                hidden_dim=hidden_dim,
+                num_time_frequencies=num_char_frequencies,
+            )
+
+        # Stage 2.75: Cross-segment attention over K per time step
+        # Operates on (B*nt, K, H) BEFORE spatial expansion — fully vectorized
+        if num_cross_segment_layers > 0:
+            self.cross_segment_layers = nn.ModuleList(
+                [
+                    CrossSegmentAttention(hidden_dim, num_heads=num_heads)
+                    for _ in range(num_cross_segment_layers)
+                ]
+            )
+        else:
+            self.cross_segment_layers = nn.ModuleList()
+
         # Stage 3: Score network
-        score_input_dim = hidden_dim + char_hidden_dim
+        combined_dim = hidden_dim + char_hidden_dim
+        score_input_dim = combined_dim
         score_layers = []
         in_dim = score_input_dim
         for i in range(num_score_layers):
@@ -105,7 +152,7 @@ class CharNO(nn.Module):
         )
 
         # Stage 4: Value network
-        value_input_dim = hidden_dim + char_hidden_dim
+        value_input_dim = combined_dim
         value_layers = []
         in_dim = value_input_dim
         for i in range(num_local_layers):
@@ -164,15 +211,42 @@ class CharNO(nn.Module):
             t_coords, x_coords, xs, ks, pieces_mask
         )  # (B, Q, K, H_char)
 
-        # === Stage 3: Score network ===
-        # Expand segment embeddings: (B, K, H) -> (B, 1, K, H) -> (B, Q, K, H)
-        seg_emb_exp = seg_emb.unsqueeze(1).expand(B, Q, K, self.hidden_dim)
+        # === Stage 2.5: Time-conditioned segment embeddings ===
+        t_unique = t_coords[:, :, 0]  # (B, nt) — same t for all x
+        if self.time_condition:
+            seg_emb_t = self.time_conditioner(seg_emb, t_unique)  # (B, nt, K, H)
+        else:
+            seg_emb_t = seg_emb.unsqueeze(1).expand(B, nt, K, self.hidden_dim)
 
-        # Concatenate segment embeddings with characteristic features
+        # === Stage 2.75: Cross-segment attention per time step ===
+        # Operates on (B*nt, K, H) — 50x cheaper than (B*Q, K, H+H_char)
+        if len(self.cross_segment_layers) > 0:
+            seg_flat = seg_emb_t.reshape(B * nt, K, -1)  # (B*nt, K, H)
+            cs_mask = (~pieces_mask.bool()).unsqueeze(1).expand(
+                B, nt, K
+            ).reshape(B * nt, K)
+            all_masked_cs = cs_mask.all(dim=1)
+            if all_masked_cs.any():
+                cs_mask = cs_mask.clone()
+                cs_mask[all_masked_cs] = False
+            for layer in self.cross_segment_layers:
+                seg_flat = layer(seg_flat, key_padding_mask=cs_mask)
+            seg_emb_t = seg_flat.reshape(B, nt, K, self.hidden_dim)
+            seg_emb_t = seg_emb_t * pieces_mask.unsqueeze(1).unsqueeze(-1)
+
+        # Expand to full query grid: (B, nt, K, H) → (B, Q, K, H)
+        seg_emb_exp = (
+            seg_emb_t.unsqueeze(2)
+            .expand(-1, -1, nx, -1, -1)
+            .reshape(B, Q, K, self.hidden_dim)
+        )
+
+        # Concatenate with characteristic features
         combined = torch.cat(
             [seg_emb_exp, char_feat], dim=-1
         )  # (B, Q, K, H + H_char)
 
+        # === Stage 3: Score network ===
         # Compute scores
         scores = self.score_mlp(combined).squeeze(-1)  # (B, Q, K)
 
@@ -229,5 +303,7 @@ def build_charno(args: dict) -> CharNO:
         num_score_layers=args.get("num_score_layers", 2),
         num_local_layers=args.get("num_local_layers", 2),
         num_heads=args.get("num_heads", 4),
+        num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
+        time_condition=args.get("time_condition", True),
         initial_temperature=args.get("initial_temperature", 1.0),
     )
