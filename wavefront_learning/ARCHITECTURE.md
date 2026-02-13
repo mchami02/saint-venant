@@ -581,14 +581,16 @@ When enabled, the classifier filters `compute_boundaries` to only use discontinu
 - `build_no_traj_transformer(args)`: Without trajectory prediction (`with_traj=False`)
 - `build_classifier_all_traj_transformer(args)`: Classifier + all-boundaries density decoding (`classifier=True`, `all_boundaries=True`)
 
-#### All-Boundaries Mode (`all_boundaries=True`)
+#### All-Boundaries Mode (`all_boundaries=True`) — DynamicDensityDecoder
 
-When `all_boundaries=True`, the density decoder replaces left/right boundary Fourier features with cross-attention to all non-rarefaction boundary embeddings:
+When `all_boundaries=True`, the density decoder uses `DynamicDensityDecoder` with **time-varying boundary tokens** instead of static disc embeddings or Fourier-encoded left/right positions:
 
-1. **Filter**: Use classifier existence to mask rarefaction embeddings (`effective_mask = disc_mask * (existence > 0.5)`)
-2. **Self-attention**: Non-rarefaction boundary embeddings attend to each other via dedicated `boundary_self_attention` layers
-3. **Cross-attention**: Coordinate queries (Fourier(t) + Fourier(x)) cross-attend to processed boundary embeddings instead of all disc embeddings
-4. Density decoder uses `with_boundaries=False` (no Fourier-encoded left/right positions)
+1. **Dynamic boundary tokens**: For each time step $t$, boundary token $d$ combines wave properties with predicted position: $\mathbf{b}_d(t) = \mathbf{e}_d + \text{proj}(\text{Fourier}(x_d(t)))$, where $\mathbf{e}_d$ is the discontinuity embedding and $x_d(t)$ is the predicted trajectory position
+2. **Soft existence weighting**: Tokens are weighted by $\hat{p}_d \cdot m_d$ (classifier probability times validity mask) — fully differentiable, no hard threshold
+3. **Per-time-step cross-attention**: Spatial queries $\text{MLP}(\text{Fourier}(t) \| \text{Fourier}(x))$ at each time step cross-attend to the $D$ dynamic boundary tokens at that time step. Batched as $(B \cdot T, n_x, H)$ queries and $(B \cdot T, D, H)$ keys/values for efficiency
+4. **Density head**: Output projection maps enriched queries to density values
+
+This design is fully differentiable (no `compute_boundaries` or hard thresholds), enabling end-to-end gradient flow from density loss through existence predictions to the classifier. The attention mechanism naturally learns spatial locality — queries attend primarily to nearby boundary tokens.
 
 ---
 
@@ -1137,7 +1139,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | NoTrajDeepONet | Discontinuities + coordinates | Full grid | TrajDeepONet without trajectory prediction |
 | TrajTransformer | Discontinuities + coordinates | Positions + Full grid | Cross-attention variant of TrajDeepONet |
 | ClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | TrajTransformer with shock/rarefaction classifier |
-| ClassifierAllTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with all-boundary cross-attention density decoding |
+| ClassifierAllTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with dynamic boundary tokens (time-varying cross-attention) |
 | DeepONet | Grid tensor $(3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
 | FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |

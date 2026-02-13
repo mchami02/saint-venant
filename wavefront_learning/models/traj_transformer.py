@@ -229,6 +229,146 @@ class DensityDecoderTransformer(nn.Module):
         return density.reshape(B, nt, nx)
 
 
+class DynamicDensityDecoder(nn.Module):
+    """Density decoder with time-varying boundary cross-attention.
+
+    For each time step, spatial query points attend to dynamic boundary tokens
+    that encode both wave properties (from disc embeddings) and predicted
+    positions at that time step. Uses soft existence weighting for fully
+    differentiable gradient flow.
+
+    Args:
+        hidden_dim: Hidden dimension.
+        num_frequencies_t: Fourier frequencies for time.
+        num_frequencies_x: Fourier frequencies for spatial coords and positions.
+        num_coord_layers: MLP layers for coordinate encoding.
+        num_cross_layers: Number of cross-attention layers.
+        num_attention_heads: Number of attention heads.
+        dropout: Dropout rate.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 64,
+        num_frequencies_t: int = 8,
+        num_frequencies_x: int = 8,
+        num_coord_layers: int = 2,
+        num_cross_layers: int = 2,
+        num_attention_heads: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        self.fourier_t = FourierFeatures(num_frequencies=num_frequencies_t)
+        self.fourier_x = FourierFeatures(num_frequencies=num_frequencies_x)
+
+        # Coordinate encoding: fourier(t) + fourier(x) -> hidden_dim
+        input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        layers = []
+        in_dim = input_dim
+        for i in range(num_coord_layers):
+            out_dim = hidden_dim
+            layers.append(nn.Linear(in_dim, out_dim))
+            if i < num_coord_layers - 1:
+                layers.append(nn.ReLU())
+                layers.append(nn.LayerNorm(out_dim))
+            in_dim = out_dim
+        self.coord_mlp = nn.Sequential(*layers)
+
+        # Position projection: fourier(position) -> hidden_dim
+        self.position_fourier = FourierFeatures(num_frequencies=num_frequencies_x)
+        self.position_proj = nn.Linear(self.position_fourier.output_dim, hidden_dim)
+
+        self.cross_layers = nn.ModuleList(
+            [
+                CrossDecoderLayer(hidden_dim, num_heads=num_attention_heads)
+                for _ in range(num_cross_layers)
+            ]
+        )
+
+        self.final_norm = nn.LayerNorm(hidden_dim)
+
+        self.density_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(
+        self,
+        disc_emb: torch.Tensor,
+        positions: torch.Tensor,
+        existence: torch.Tensor,
+        t_coords: torch.Tensor,
+        x_coords: torch.Tensor,
+        disc_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict density via cross-attention with dynamic boundary tokens.
+
+        Args:
+            disc_emb: Discontinuity embeddings (B, D, H).
+            positions: Predicted trajectory positions (B, D, T).
+            existence: Soft existence probabilities (B, D), no threshold.
+            t_coords: Time coordinates (B, nt, nx).
+            x_coords: Space coordinates (B, nt, nx).
+            disc_mask: Validity mask (B, D).
+
+        Returns:
+            Predicted density (B, nt, nx) in [0, 1].
+        """
+        B, D, H = disc_emb.shape
+        _, nt, nx = t_coords.shape
+        T = positions.shape[2]
+
+        # === Coordinate queries ===
+        t_flat = t_coords.reshape(-1)
+        x_flat = x_coords.reshape(-1)
+        t_enc = self.fourier_t(t_flat)
+        x_enc = self.fourier_x(x_flat)
+        coord_features = torch.cat([t_enc, x_enc], dim=-1)
+        coord_emb = self.coord_mlp(coord_features)  # (B*nt*nx, H)
+        coord_emb = coord_emb.reshape(B, nt, nx, H)
+
+        # === Dynamic boundary tokens ===
+        # Fourier-encode trajectory positions and project to hidden_dim
+        pos_enc = self.position_fourier(positions.reshape(-1))  # (B*D*T, F)
+        pos_enc = self.position_proj(pos_enc).reshape(B, D, T, H)  # (B, D, T, H)
+
+        # Combine disc properties with position encoding
+        disc_exp = disc_emb.unsqueeze(2).expand(-1, -1, T, -1)  # (B, D, T, H)
+        dynamic_emb = disc_exp + pos_enc  # (B, D, T, H)
+
+        # Soft existence weighting (differentiable, no hard threshold)
+        effective_weight = (existence * disc_mask).unsqueeze(-1).unsqueeze(2)
+        # (B, D, 1, 1) -> broadcast to (B, D, T, H)
+        dynamic_emb = dynamic_emb * effective_weight
+
+        # === Per-time-step batched cross-attention ===
+        # Queries: (B, nt, nx, H) -> (B*T, nx, H)
+        q = coord_emb.reshape(B * nt, nx, H)
+        # Keys/Values: (B, D, T, H) -> (B, T, D, H) -> (B*T, D, H)
+        kv = dynamic_emb.permute(0, 2, 1, 3).reshape(B * T, D, H)
+
+        # Key padding mask: (B, D) -> (B*T, D)
+        key_padding_mask = ~disc_mask.bool()
+        key_padding_mask = (
+            key_padding_mask.unsqueeze(1).expand(B, T, D).reshape(B * T, D)
+        )
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
+
+        for layer in self.cross_layers:
+            q = layer(q, kv, key_padding_mask=key_padding_mask)
+        q = self.final_norm(q)
+
+        # Density head
+        density = self.density_head(q).squeeze(-1)  # (B*T, nx)
+        density = torch.clamp(density, 0.0, 1.0)
+        return density.reshape(B, nt, nx)
+
+
 class TrajTransformer(nn.Module):
     """Transformer-based model for wavefront learning.
 
@@ -251,10 +391,9 @@ class TrajTransformer(nn.Module):
         dropout: Dropout rate.
         with_traj: If True, predict trajectories and condition density on boundaries.
         classifier: If True, add classifier head for shock vs rarefaction.
-        all_boundaries: If True, density decoder cross-attends to all non-rarefaction
-            boundary embeddings (after self-attention) instead of using left/right
-            boundary positions as Fourier features. Forces classifier=True and
-            with_traj=True.
+        all_boundaries: If True, use DynamicDensityDecoder that cross-attends to
+            time-varying boundary tokens (disc embeddings + trajectory positions)
+            with soft existence weighting. Forces classifier=True and with_traj=True.
     """
 
     def __init__(
@@ -330,28 +469,31 @@ class TrajTransformer(nn.Module):
                 dropout=dropout,
             )
 
-        # Boundary self-attention (only when all_boundaries)
-        if self.all_boundaries:
-            self.boundary_self_attention = nn.ModuleList(
-                [
-                    EncoderLayer(hidden_dim, num_heads=num_attention_heads)
-                    for _ in range(num_interaction_layers)
-                ]
-            )
-
         # Density decoder
-        # When all_boundaries, boundary info comes from cross-attention KV,
-        # not from Fourier-encoded left/right positions.
-        self.density_decoder = DensityDecoderTransformer(
-            hidden_dim=hidden_dim,
-            num_frequencies_t=num_frequencies_t,
-            num_frequencies_x=num_frequencies_x,
-            num_coord_layers=num_coord_layers,
-            num_cross_layers=num_density_cross_layers,
-            num_attention_heads=num_attention_heads,
-            dropout=dropout,
-            with_boundaries=with_traj and not all_boundaries,
-        )
+        if self.all_boundaries:
+            # Dynamic boundary decoder: cross-attends to time-varying boundary
+            # tokens that carry both wave properties and predicted positions.
+            self.density_decoder = DynamicDensityDecoder(
+                hidden_dim=hidden_dim,
+                num_frequencies_t=num_frequencies_t,
+                num_frequencies_x=num_frequencies_x,
+                num_coord_layers=num_coord_layers,
+                num_cross_layers=num_density_cross_layers,
+                num_attention_heads=num_attention_heads,
+                dropout=dropout,
+            )
+        else:
+            # Standard decoder with optional Fourier-encoded boundary positions.
+            self.density_decoder = DensityDecoderTransformer(
+                hidden_dim=hidden_dim,
+                num_frequencies_t=num_frequencies_t,
+                num_frequencies_x=num_frequencies_x,
+                num_coord_layers=num_coord_layers,
+                num_cross_layers=num_density_cross_layers,
+                num_attention_heads=num_attention_heads,
+                dropout=dropout,
+                with_boundaries=with_traj,
+            )
 
     def forward(
         self,
@@ -401,32 +543,19 @@ class TrajTransformer(nn.Module):
             # === TRAJECTORY ===
             query_times = t_coords[:, :, 0]  # (B, nt)
             time_emb = self.time_encoder(query_times)  # (B, T, H)
-            positions = self.traj_decoder(
-                branch_emb, time_emb, disc_mask
-            )  # (B, D, T)
+            positions = self.traj_decoder(branch_emb, time_emb, disc_mask)  # (B, D, T)
 
             if self.all_boundaries:
                 # === ALL BOUNDARIES PATH ===
-                # Filter to non-rarefaction boundaries
-                effective_mask = disc_mask * (existence > 0.5).float()
-                boundary_emb = branch_emb * effective_mask.unsqueeze(-1)
-
-                # Self-attention among non-rarefaction boundaries
-                boundary_key_mask = ~effective_mask.bool()
-                all_masked = boundary_key_mask.all(dim=1)
-                if all_masked.any():
-                    boundary_key_mask = boundary_key_mask.clone()
-                    boundary_key_mask[all_masked] = False
-                for layer in self.boundary_self_attention:
-                    boundary_emb = layer(
-                        boundary_emb, key_padding_mask=boundary_key_mask
-                    )
-                boundary_emb = boundary_emb * effective_mask.unsqueeze(-1)
-
-                # Density: coord queries cross-attend to boundary embeddings
+                # Dynamic density decoder with soft existence weighting
+                # (no hard threshold — fully differentiable)
                 density = self.density_decoder(
-                    boundary_emb, t_coords, x_coords,
-                    None, None, effective_mask,
+                    branch_emb,
+                    positions,
+                    existence,
+                    t_coords,
+                    x_coords,
+                    disc_mask,
                 )
                 output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
 
@@ -447,8 +576,12 @@ class TrajTransformer(nn.Module):
 
             # === DENSITY ===
             density = self.density_decoder(
-                branch_emb, t_coords, x_coords,
-                left_bound, right_bound, disc_mask,
+                branch_emb,
+                t_coords,
+                x_coords,
+                left_bound,
+                right_bound,
+                disc_mask,
             )  # (B, nt, nx)
 
             output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
@@ -571,11 +704,12 @@ def build_no_traj_transformer(args: dict) -> TrajTransformer:
 
 
 def build_classifier_all_traj_transformer(args: dict) -> TrajTransformer:
-    """Build TrajTransformer with classifier and all-boundaries density decoding.
+    """Build TrajTransformer with classifier and dynamic boundary density decoding.
 
-    In this variant, the density decoder cross-attends to all non-rarefaction
-    boundary embeddings (after self-attention) instead of using left/right
-    boundary positions as Fourier features.
+    Uses DynamicDensityDecoder: for each time step, spatial queries cross-attend
+    to boundary tokens enriched with predicted trajectory positions and soft
+    existence weighting. Fully differentiable — no hard threshold or
+    compute_boundaries.
 
     Args:
         args: Configuration dictionary (same keys as build_traj_transformer).
