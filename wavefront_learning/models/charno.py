@@ -179,8 +179,9 @@ class CharNO(nn.Module):
         # Softmin: softmax of negated scores / temperature
         temperature = self.log_temperature.exp()
         # Mask padded segments with large score so they get ~0 weight
+        # Use large finite value instead of inf to avoid NaN on MPS/softmax
         scores = scores.masked_fill(
-            ~pieces_mask.unsqueeze(1).bool(), float("inf")
+            ~pieces_mask.unsqueeze(1).bool(), 1e9
         )
         weights = torch.softmax(-scores / temperature, dim=-1)  # (B, Q, K)
 

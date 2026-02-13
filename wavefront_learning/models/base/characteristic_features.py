@@ -216,6 +216,17 @@ class CharacteristicFeatureComputer(nn.Module):
 
         # Stack and Fourier-encode each feature separately
         # Shape of each: (B, Q, K)
+        # Clamp features to prevent extreme values that cause NaN through
+        # Fourier encoding (xi can reach ~1000 at t≈0, producing gradients
+        # of magnitude π·128·1000 ≈ 400,000 with num_frequencies=8).
+        # Physically meaningful range for xi is [-1, 1] (characteristic speeds);
+        # wider clamp preserves information for out-of-range queries.
+        feat_clamp = 10.0
+        xi = torch.clamp(xi, -feat_clamp, feat_clamp)
+        char_shift = torch.clamp(char_shift, -feat_clamp, feat_clamp)
+        dist_left = torch.clamp(dist_left, -feat_clamp, feat_clamp)
+        dist_right = torch.clamp(dist_right, -feat_clamp, feat_clamp)
+
         features = [xi, char_shift, dist_left, dist_right, t_feat]
 
         # Fourier encode each feature and concatenate
