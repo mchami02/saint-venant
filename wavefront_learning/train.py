@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger, init_logger, log_values
-from loss import LOSS_PRESETS, LOSSES, get_loss
+from loss import LOSS_PRESETS, LOSSES, create_loss_from_args
 from metrics import compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
 from plotter import PLOT_PRESETS, plot
@@ -339,11 +339,7 @@ def train_model(
     if grid_config is None:
         grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
     # Configure loss function with additional parameters
-    loss_kwargs = {
-        "pde_residual": {"dt": args.dt, "dx": args.dx},
-        "rh_residual": {"dt": args.dt},
-    }
-    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
+    loss_fn = create_loss_from_args(args)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
@@ -512,11 +508,7 @@ def main():
 
     # Final test (standard + high-res)
     print("\nRunning final evaluation on test set...")
-    loss_kwargs = {
-        "pde_residual": {"dt": args.dt, "dx": args.dx},
-        "rh_residual": {"dt": args.dt},
-    }
-    loss_fn = get_loss(args.loss, loss_kwargs=loss_kwargs)
+    loss_fn = create_loss_from_args(args)
     test_model(
         model=model,
         test_loader=test_loader,

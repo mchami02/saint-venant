@@ -84,6 +84,10 @@ class TrajectoryDecoderTransformer(nn.Module):
 
         # Cross-attention: time queries attend to disc keys/values
         key_padding_mask = ~disc_mask.bool()  # (B, D), True = ignore
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
         x = time_emb  # (B, T, H)
         for layer in self.cross_layers:
             x = layer(x, disc_emb, key_padding_mask=key_padding_mask)
@@ -210,6 +214,10 @@ class DensityDecoderTransformer(nn.Module):
 
         # Cross-attention: coord queries attend to disc keys/values
         key_padding_mask = ~disc_mask.bool()  # (B, D)
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
         x = coord_emb
         for layer in self.cross_layers:
             x = layer(x, disc_emb, key_padding_mask=key_padding_mask)
