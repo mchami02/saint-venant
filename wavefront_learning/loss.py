@@ -22,6 +22,7 @@ from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
+from losses.selection_supervision import SelectionSupervisionLoss
 from losses.wasserstein import WassersteinLoss
 
 # Registry of available loss functions
@@ -40,6 +41,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "regularize_traj": RegularizeTrajLoss,
     "wasserstein": WassersteinLoss,
     "conservation": ConservationLoss,
+    "selection_supervision": SelectionSupervisionLoss,
 }
 
 # Presets for common configurations
@@ -105,6 +107,7 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("mse", 1.0),
         ("wasserstein", 0.5),
         ("conservation", 0.1),
+        ("selection_supervision", 0.3, {"sigma": 0.05}),
     ],
 }
 

@@ -89,6 +89,10 @@ class CharNO(nn.Module):
         self.char_hidden_dim = char_hidden_dim
         self.time_condition = time_condition
         flux = flux or DEFAULT_FLUX()
+        self.flux = flux
+
+        # Learnable scale for analytical score bias (backward char distance)
+        self.analytical_bias_scale = nn.Parameter(torch.tensor(10.0))
 
         # Stage 1: Segment encoder
         self.segment_encoder = SegmentPhysicsEncoder(
@@ -162,6 +166,33 @@ class CharNO(nn.Module):
                 value_layers.append(nn.GELU())
             in_dim = out_dim
         self.value_mlp = nn.Sequential(*value_layers)
+
+        # Initialize value MLP last layer to zeros so initial output ≈ rho_k
+        nn.init.zeros_(self.value_mlp[-1].weight)
+        nn.init.zeros_(self.value_mlp[-1].bias)
+
+    def _compute_analytical_bias(self, t_coords, x_coords, xs, ks, pieces_mask):
+        """Score bias from backward characteristic geometry. Uses Flux interface only.
+
+        Computes the backward characteristic foot y_star = x - f'(rho_k) * t
+        and checks distance outside segment k's interval. Segments where y_star
+        falls inside get zero bias; others get penalty proportional to d_outside^2.
+        """
+        B, nt, nx = t_coords.shape
+        K = ks.shape[1]
+        Q = nt * nx
+
+        t_flat = t_coords.reshape(B, Q).unsqueeze(2)  # (B, Q, 1)
+        x_flat = x_coords.reshape(B, Q).unsqueeze(2)  # (B, Q, 1)
+        lambda_k = self.flux.derivative(ks).unsqueeze(1)  # (B, 1, K)
+        x_left = xs[:, :-1].unsqueeze(1)  # (B, 1, K)
+        x_right = xs[:, 1:].unsqueeze(1)  # (B, 1, K)
+
+        y_star = x_flat - lambda_k * t_flat  # (B, Q, K)
+        d_outside = torch.relu(x_left - y_star) + torch.relu(y_star - x_right)
+
+        bias = self.analytical_bias_scale.abs() * d_outside.pow(2)
+        return bias * pieces_mask.unsqueeze(1)  # (B, Q, K)
 
     def forward(
         self,
@@ -250,6 +281,12 @@ class CharNO(nn.Module):
         # Compute scores
         scores = self.score_mlp(combined).squeeze(-1)  # (B, Q, K)
 
+        # Add analytical bias from backward characteristic geometry
+        analytical_bias = self._compute_analytical_bias(
+            t_coords, x_coords, xs, ks, pieces_mask
+        )  # (B, Q, K)
+        scores = scores + analytical_bias
+
         # Softmin: softmax of negated scores / temperature
         temperature = self.log_temperature.exp()
         # Mask padded segments with large score so they get ~0 weight
@@ -257,14 +294,14 @@ class CharNO(nn.Module):
         scores = scores.masked_fill(
             ~pieces_mask.unsqueeze(1).bool(), 1e9
         )
-        # Scalable softmax: scale by log(K_eff) so selection sharpness
-        # adapts to the actual number of segments (fixes attention fading)
-        K_eff = pieces_mask.sum(dim=-1, keepdim=True).float().clamp(min=2)  # (B, 1)
-        log_K = torch.log(K_eff).unsqueeze(1)  # (B, 1, 1)
-        weights = torch.softmax(-scores * log_K / temperature, dim=-1)  # (B, Q, K)
+        weights = torch.softmax(-scores / temperature, dim=-1)  # (B, Q, K)
 
         # === Stage 4: Value network ===
-        local_rho = self.value_mlp(combined).squeeze(-1).clamp(0.0, 1.0)  # (B, Q, K)
+        # Skip connection: rho_k as base value + learned correction delta
+        # At init, delta ≈ 0 (last layer zeros), so output ≈ rho_k
+        delta = self.value_mlp(combined).squeeze(-1)  # (B, Q, K)
+        rho_k_base = ks.unsqueeze(1).expand(B, Q, K)  # (B, Q, K)
+        local_rho = (rho_k_base + delta).clamp(0.0, 1.0)  # (B, Q, K)
 
         # === Stage 5: Output assembly ===
         # Weighted sum over segments
@@ -284,6 +321,7 @@ class CharNO(nn.Module):
             "selection_weights": selection_weights,
             "local_rho": local_rho_grid,
             "temperature": temperature,
+            "analytical_bias": analytical_bias.reshape(B, nt, nx, K),
         }
 
 

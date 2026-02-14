@@ -48,8 +48,8 @@ class SegmentPhysicsEncoder(nn.Module):
             num_frequencies=num_frequencies, include_input=True
         )
 
-        # Input: fourier(x_center) + fourier(width) + [rho, lambda, flux_val]
-        input_dim = 2 * self.fourier_x.output_dim + 3
+        # Input: fourier(x_center) + fourier(width) + [rho, lambda, flux_val, N_k_normalized]
+        input_dim = 2 * self.fourier_x.output_dim + 4
 
         layers = []
         in_dim = input_dim
@@ -88,6 +88,12 @@ class SegmentPhysicsEncoder(nn.Module):
         lambda_k = self.flux.derivative(ks)  # (B, K)
         flux_k = self.flux(ks)  # (B, K)
 
+        # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
+        rho_width = ks * width  # (B, K)
+        N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
+        total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+        N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
+
         # Fourier encode spatial features
         x_center_enc = self.fourier_x(
             x_center.reshape(-1)
@@ -98,8 +104,8 @@ class SegmentPhysicsEncoder(nn.Module):
 
         # Concatenate all features
         scalar_features = torch.stack(
-            [ks, lambda_k, flux_k], dim=-1
-        )  # (B, K, 3)
+            [ks, lambda_k, flux_k, N_k_normalized], dim=-1
+        )  # (B, K, 4)
         features = torch.cat(
             [x_center_enc, width_enc, scalar_features], dim=-1
         )  # (B, K, 2F+3)
@@ -150,6 +156,12 @@ class CharacteristicFeatureComputer(nn.Module):
 
         self.fourier = FourierFeatures(
             num_frequencies=num_frequencies, include_input=True
+        )
+
+        # Learnable per-feature normalization scales (tanh(feat / scale))
+        # Order: xi, char_shift, dist_left, dist_right, t, s_left, s_right, t_coll
+        self.norm_scales = nn.Parameter(
+            torch.tensor([5.0, 5.0, 5.0, 5.0, 1.0, 2.0, 2.0, 5.0])
         )
 
         # 8 features, each Fourier-encoded
@@ -256,22 +268,17 @@ class CharacteristicFeatureComputer(nn.Module):
         s_right_feat = s_right.unsqueeze(1).expand_as(xi)
         t_coll_feat = t_coll.unsqueeze(1).expand_as(xi)
 
-        # Clamp features to prevent extreme values that cause NaN through
-        # Fourier encoding (xi can reach ~1000 at t≈0, producing gradients
-        # of magnitude π·128·1000 ≈ 400,000 with num_frequencies=8).
-        feat_clamp = 10.0
-        xi = torch.clamp(xi, -feat_clamp, feat_clamp)
-        char_shift = torch.clamp(char_shift, -feat_clamp, feat_clamp)
-        dist_left = torch.clamp(dist_left, -feat_clamp, feat_clamp)
-        dist_right = torch.clamp(dist_right, -feat_clamp, feat_clamp)
-        s_left_feat = torch.clamp(s_left_feat, -feat_clamp, feat_clamp)
-        s_right_feat = torch.clamp(s_right_feat, -feat_clamp, feat_clamp)
-        t_coll_feat = torch.clamp(t_coll_feat, 0.0, feat_clamp)
-
-        features = [
+        # Soft normalization: tanh(feat / scale) preserves ordering, maintains
+        # gradients everywhere, and maps to [-1, 1]. Replaces hard clamp which
+        # destroyed information for distant segments (zero gradient outside range).
+        features_raw = [
             xi, char_shift, dist_left, dist_right, t_feat,
             s_left_feat, s_right_feat, t_coll_feat,
         ]
+        features = []
+        for i, feat in enumerate(features_raw):
+            scale = self.norm_scales[i].abs().clamp(min=0.1)
+            features.append(torch.tanh(feat / scale))
 
         # Fourier encode each feature and concatenate
         encoded_parts = []

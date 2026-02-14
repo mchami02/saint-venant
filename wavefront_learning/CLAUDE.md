@@ -187,6 +187,7 @@ Do **not** rely on a `--model_path` for quick verification.
 - **File size limit**: Keep files under 600 lines. If a file grows beyond this, split it into logical modules.
 - **Model file placement**: Only standalone models (with their own `build_*` factory, registered in `MODELS`) belong directly in `models/`. All sub-modules, building blocks, and shared components must go in `models/base/`.
 - **No for loops over space/time in forward passes**: Never iterate over spatial or temporal dimensions in `forward()`. All operations must be fully vectorized. If peak memory is too large, this is a model design problem — fix the architecture, not the implementation. (Iterating over layers in a `ModuleList` is fine.)
+- **Minimal analytical contribution after the initial conditions**: Models should use the pluggable `Flux` interface (characteristic speeds, shock speeds) for IC-level physics features, but must NOT hard-code flux-specific analytical solutions (e.g., Legendre transforms, explicit rarefaction profiles). All post-IC solution structure must be learned, not computed analytically. This ensures easy extensibility to other equations (systems of conservation laws, non-convex flux, etc.).
 
 ## Dependencies
 

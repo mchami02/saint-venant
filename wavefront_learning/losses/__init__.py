@@ -46,6 +46,7 @@ from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
+from .selection_supervision import SelectionSupervisionLoss
 from .wasserstein import WassersteinLoss
 
 __all__ = [
@@ -76,4 +77,5 @@ __all__ = [
     # CharNO losses
     "WassersteinLoss",
     "ConservationLoss",
+    "SelectionSupervisionLoss",
 ]
