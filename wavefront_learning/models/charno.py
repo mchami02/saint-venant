@@ -10,7 +10,7 @@ Architecture:
     1. SegmentPhysicsEncoder + self-attention → contextualized segment embeddings
     2. CharacteristicFeatureComputer → per-(query, segment) features
     3. Score MLP + softmin → selection weights (which segment controls each point)
-    4. Value MLP + sigmoid → local density (what value if that segment controls)
+    4. Value MLP + clamp → local density (what value if that segment controls)
     5. Weighted sum → output density ρ(t, x)
 """
 
@@ -257,12 +257,14 @@ class CharNO(nn.Module):
         scores = scores.masked_fill(
             ~pieces_mask.unsqueeze(1).bool(), 1e9
         )
-        weights = torch.softmax(-scores / temperature, dim=-1)  # (B, Q, K)
+        # Scalable softmax: scale by log(K_eff) so selection sharpness
+        # adapts to the actual number of segments (fixes attention fading)
+        K_eff = pieces_mask.sum(dim=-1, keepdim=True).float().clamp(min=2)  # (B, 1)
+        log_K = torch.log(K_eff).unsqueeze(1)  # (B, 1, 1)
+        weights = torch.softmax(-scores * log_K / temperature, dim=-1)  # (B, Q, K)
 
         # === Stage 4: Value network ===
-        local_rho = torch.sigmoid(
-            self.value_mlp(combined).squeeze(-1)
-        )  # (B, Q, K)
+        local_rho = self.value_mlp(combined).squeeze(-1).clamp(0.0, 1.0)  # (B, Q, K)
 
         # === Stage 5: Output assembly ===
         # Weighted sum over segments
