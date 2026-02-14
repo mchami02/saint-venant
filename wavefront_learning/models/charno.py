@@ -276,9 +276,14 @@ class CharNO(nn.Module):
         # Selection weights for interpretability
         selection_weights = weights.reshape(B, nt, nx, K)
 
+        # Local densities per segment for diagnostics
+        local_rho_grid = local_rho.reshape(B, nt, nx, K)
+
         return {
             "output_grid": output_grid,
             "selection_weights": selection_weights,
+            "local_rho": local_rho_grid,
+            "temperature": temperature,
         }
 
 

@@ -41,6 +41,10 @@ def collect_samples(
     if isinstance(pred, dict):
         for k, v in pred.items():
             if isinstance(v, torch.Tensor):
+                # Handle scalar (0-D) tensors (e.g. temperature)
+                if v.ndim == 0:
+                    samples[k] = v.detach().cpu().item()
+                    continue
                 arr = v[:num_samples].detach().cpu().numpy()
                 # Squeeze channel dim for grid outputs: (B, 1, H, W) -> (B, H, W)
                 if arr.ndim == 4 and arr.shape[1] == 1:
@@ -61,6 +65,11 @@ def collect_samples(
             samples["times"] = (
                 batch_input["t_coords"][0, 0, :, 0].detach().cpu().numpy()
             )
+        for key in ("xs", "ks", "pieces_mask"):
+            if key in batch_input:
+                samples[key] = (
+                    batch_input[key][:num_samples].detach().cpu().numpy()
+                )
 
     # Add target (ground truth grid)
     grids = batch_target[:num_samples].detach().cpu().numpy()

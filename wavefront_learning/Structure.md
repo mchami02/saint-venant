@@ -68,7 +68,8 @@ wavefront_learning/
 │   ├── grid_plots.py             # Grid comparison plots (plot_ground_truth, plot_pred, etc.)
 │   ├── trajectory_plots.py       # Core trajectory visualization functions
 │   ├── wandb_trajectory_plots.py # Trajectory plots for PLOTS registry (W&B-compatible)
-│   └── hybrid_plots.py           # HybridDeepONet-specific visualization
+│   ├── hybrid_plots.py           # HybridDeepONet-specific visualization
+│   └── charno_plots.py           # CharNO diagnostic visualization (selection weights, entropy, etc.)
 ├── testing/
 │   ├── __init__.py               # Re-exports all test functions
 │   ├── test_running.py           # Sanity checks, profiling, inference testing
@@ -189,6 +190,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **trajectory_plots.py** — `plot_shock_trajectories()`, `plot_existence_heatmap()`, `plot_trajectory_on_grid()`, `plot_wavefront_trajectory()`, `plot_loss_curves()`, `plot_sample_predictions()`
 - **wandb_trajectory_plots.py** — `plot_grid_with_trajectory_existence()`, `plot_grid_with_acceleration()`, `plot_trajectory_vs_analytical()`, `plot_existence()`, `plot_gt_traj()`
 - **hybrid_plots.py** — `plot_prediction_with_trajectory_existence()`, `plot_mse_error()`, `plot_region_weights()`, `plot_pred_traj()`, `plot_hybrid_predictions()`
+- **charno_plots.py** — `plot_selection_weights()`, `plot_winning_segment()`, `plot_selection_entropy()`, `plot_local_densities()`, `plot_charno_decomposition()`
 
 ### Testing (`testing/`)
 

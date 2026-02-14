@@ -15,18 +15,23 @@ centrally by plot().
 import matplotlib.pyplot as plt
 from plotting import (
     _log_figure,
+    plot_charno_decomposition,
     plot_existence,
     plot_grid_with_acceleration,
     plot_grid_with_trajectory_existence,
     plot_ground_truth,
     plot_gt_traj,
+    plot_local_densities,
     plot_mse_error,
     plot_pde_residual,
     plot_pred,
     plot_pred_traj,
     plot_prediction_with_trajectory_existence,
     plot_region_weights,
+    plot_selection_entropy,
+    plot_selection_weights,
     plot_trajectory_vs_analytical,
+    plot_winning_segment,
 )
 
 # Registry of individual plot functions
@@ -44,6 +49,11 @@ PLOTS: dict[str, callable] = {
     "region_weights": plot_region_weights,
     "gt_traj": plot_gt_traj,
     "pred_traj": plot_pred_traj,
+    "charno_decomposition": plot_charno_decomposition,
+    "selection_weights": plot_selection_weights,
+    "winning_segment": plot_winning_segment,
+    "selection_entropy": plot_selection_entropy,
+    "local_densities": plot_local_densities,
 }
 
 # Presets for common configurations
@@ -114,6 +124,11 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",
         "mse_error",
         "pde_residual",
+        "charno_decomposition",
+        "selection_weights",
+        "winning_segment",
+        "selection_entropy",
+        "local_densities",
     ],
 }
 

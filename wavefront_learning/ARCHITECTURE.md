@@ -694,6 +694,8 @@ $$\rho(t, x) = \sum_k w_k(t,x) \cdot v_k(t,x)$$
 **Output** (dictionary):
 - `output_grid`: $(B, 1, n_t, n_x)$ — predicted density grid
 - `selection_weights`: $(B, n_t, n_x, K)$ — segment selection weights (interpretable)
+- `local_rho`: $(B, n_t, n_x, K)$ — per-segment density predictions before weighting
+- `temperature`: scalar — current softmin temperature $\tau = \exp(\log\tau)$
 
 #### Default Configuration
 

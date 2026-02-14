@@ -56,6 +56,13 @@ from .wandb_trajectory_plots import (
     plot_gt_traj,
     plot_trajectory_vs_analytical,
 )
+from .charno_plots import (
+    plot_charno_decomposition,
+    plot_local_densities,
+    plot_selection_entropy,
+    plot_selection_weights,
+    plot_winning_segment,
+)
 
 __all__ = [
     # Base utilities
@@ -94,4 +101,10 @@ __all__ = [
     "plot_region_weights",
     # Trajectory-only plots (no existence)
     "plot_gt_traj",
+    # CharNO diagnostic plots
+    "plot_selection_weights",
+    "plot_winning_segment",
+    "plot_selection_entropy",
+    "plot_local_densities",
+    "plot_charno_decomposition",
 ]
