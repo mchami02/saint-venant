@@ -13,6 +13,7 @@ This document describes the neural network architectures and loss functions used
    - [FNO](#fno-baseline)
    - [EncoderDecoder](#encoderdecoder)
    - [TrajTransformer](#trajtransformer)
+   - [WaveNO](#waveno)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -719,6 +720,102 @@ $$\rho(t, x) = \sum_k w_k(t,x) \cdot v_k(t,x)$$
 
 ---
 
+### WaveNO
+
+**Location**: `models/waveno.py`
+
+Wavefront Neural Operator that replaces CharNO's softmin selection with **physics-biased cross-attention**. Instead of scoring and selecting a winning segment, spatial queries discover relevant segment information via cross-attention with a characteristic-distance attention bias (analogous to ALiBi in NLP, but using wave propagation geometry).
+
+#### Pseudocode
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
+
+seg_emb, t_unique → TimeConditioner (FiLM) → seg_emb_t: (nt, K, H)
+seg_emb_t → CrossSegmentAttention × L_cs → seg_emb_t: (nt, K, H)
+
+t_coords, x_coords → Fourier(t) || Fourier(x) → MLP → query_emb: (nt, nx, H)
+
+(t, x, xs, ks, flux) → backward char foot → bias: (nt, nx, K)
+
+# Per-time-step cross-attention (batched as B*nt):
+query (B*nt, nx, H), keys/values (B*nt, K, H), bias (B*nt*heads, nx, K)
+→ BiasedCrossAttn × N_cross → query: (B*nt, nx, H)
+
+query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
+```
+
+#### Sub-Components
+
+##### BiasedCrossDecoderLayer
+
+**Location**: `models/base/biased_cross_attention.py`
+
+Identical to `CrossDecoderLayer` but passes `attn_mask` to `nn.MultiheadAttention`, enabling additive physics-informed bias on attention logits.
+
+$$\text{attn}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}} + \text{bias}\right) V$$
+
+##### Characteristic Attention Bias
+
+**Location**: `models/base/biased_cross_attention.py`
+
+For each query $(t, x)$ and segment $k$, computes the backward characteristic foot and measures distance outside segment $k$'s interval:
+
+$$y^* = x - f'(\rho_k) \cdot t$$
+$$d_{outside} = \text{ReLU}(x_k - y^*) + \text{ReLU}(y^* - x_{k+1})$$
+$$\text{bias}(t, x, k) = -|\alpha| \cdot d_{outside}^2$$
+
+where $\alpha$ is a learnable scale parameter (initialized at 10.0).
+
+- **bias = 0** when $y^*$ falls inside segment $k$ (query is in $k$'s characteristic cone → full attention)
+- **bias << 0** when $y^*$ is far outside (query far from $k$'s influence → suppressed attention)
+- The model can **override** the bias via learned $Q \cdot K^T$ scores when physics alone is insufficient
+
+Uses only `flux.derivative()` — works for any flux function.
+
+##### Reused from CharNO
+
+- **SegmentPhysicsEncoder**: Physics-augmented segment encoding (x_center, width, $\rho$, $\lambda$, $f$, $N_k$)
+- **TimeConditioner**: FiLM-based time modulation of segment embeddings
+- **CrossSegmentAttention**: Lightweight self-attention over K segments per timestep
+- **EncoderLayer**: Standard transformer self-attention for initial segment interaction
+
+#### Input/Output Format
+
+**Input** (dictionary):
+- `xs`: $(B, K+1)$ — breakpoint positions
+- `ks`: $(B, K)$ — piece values
+- `pieces_mask`: $(B, K)$ — validity mask
+- `t_coords`: $(B, 1, n_t, n_x)$ — time coordinates
+- `x_coords`: $(B, 1, n_t, n_x)$ — space coordinates
+
+**Output** (dictionary):
+- `output_grid`: $(B, 1, n_t, n_x)$ — predicted density grid
+- `characteristic_bias`: $(B, n_t, n_x, K)$ — physics-informed bias (diagnostic)
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 64 | All embedding dimensions |
+| `num_freq_t` | 8 | Fourier bands for time in query encoder |
+| `num_freq_x` | 8 | Fourier bands for space in query encoder |
+| `num_seg_frequencies` | 8 | Fourier bands for segment encoder |
+| `num_seg_mlp_layers` | 2 | MLP depth in segment encoder |
+| `num_self_attn_layers` | 2 | Self-attention over segments |
+| `num_cross_layers` | 2 | Biased cross-attention layers (queries → segments) |
+| `num_heads` | 4 | Attention heads (both self and cross) |
+| `num_cross_segment_layers` | 1 | Cross-segment attention per timestep |
+| `time_condition` | True | FiLM time conditioning |
+| `initial_bias_scale` | 10.0 | Initial characteristic bias scale |
+
+#### Factory Functions
+
+- `build_waveno(args)`: Creates WaveNO with configuration from args dict
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -1284,6 +1381,18 @@ For CharNO (characteristic neural operator).
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons}$$
 
+#### waveno Preset
+
+For WaveNO (wavefront neural operator). Same as charno but without selection supervision.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+| `wasserstein` | 0.5 |
+| `conservation` | 0.1 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons}$$
+
 #### mse Preset
 
 Simple grid MSE only.
@@ -1326,6 +1435,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
+| WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias | Wavefront neural operator (characteristic-biased cross-attention) |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|

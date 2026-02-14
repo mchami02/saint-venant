@@ -130,6 +130,12 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "selection_entropy",
         "local_densities",
     ],
+    "waveno": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
 }
 
 

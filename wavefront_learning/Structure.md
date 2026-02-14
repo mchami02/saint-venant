@@ -30,6 +30,7 @@ wavefront_learning/
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
+│   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -43,7 +44,8 @@ wavefront_learning/
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
-│       └── characteristic_features.py  # SegmentPhysicsEncoder, CharacteristicFeatureComputer
+│       ├── characteristic_features.py  # SegmentPhysicsEncoder, CharacteristicFeatureComputer
+│       └── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias
 ├── losses/
 │   ├── __init__.py               # Re-exports all loss classes and flux utilities
 │   ├── base.py                   # BaseLoss abstract class
@@ -146,6 +148,8 @@ wavefront_learning/
   - `EncoderDecoder`, `build_encoder_decoder()`, `build_encoder_decoder_cross()`
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
   - `CharNO`, `build_charno()`
+- **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
+  - `WaveNO`, `build_waveno()`
 
 ### Model Base Components (`models/base/`)
 
@@ -161,6 +165,7 @@ wavefront_learning/
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
 - **characteristic_features.py** — `SegmentPhysicsEncoder`, `CharacteristicFeatureComputer`
+- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`
 
 ### Losses (`losses/`)
 

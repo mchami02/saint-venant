@@ -13,6 +13,7 @@ This module contains reusable components used by main models:
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
+from .biased_cross_attention import BiasedCrossDecoderLayer, compute_characteristic_bias
 from .blocks import ResidualBlock
 from .characteristic_features import (
     CharacteristicFeatureComputer,
@@ -34,6 +35,9 @@ from .transformer_encoder import Encoder
 __all__ = [
     # Base class
     "BaseWavefrontModel",
+    # Biased cross-attention
+    "BiasedCrossDecoderLayer",
+    "compute_characteristic_bias",
     # Encoders
     "FourierFeatures",
     "TimeEncoder",

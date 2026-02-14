@@ -21,6 +21,7 @@ from models.traj_transformer import (
     build_no_traj_transformer,
     build_traj_transformer,
 )
+from models.waveno import build_waveno
 
 # Registry of available models
 MODELS = {
@@ -38,6 +39,7 @@ MODELS = {
     "ClassifierAllTrajTransformer": build_classifier_all_traj_transformer,
     "NoTrajTransformer": build_no_traj_transformer,
     "CharNO": build_charno,
+    "WaveNO": build_waveno,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -56,6 +58,7 @@ MODEL_TRANSFORM = {
     "ClassifierAllTrajTransformer": None,
     "NoTrajTransformer": None,
     "CharNO": None,
+    "WaveNO": None,
 }
 
 

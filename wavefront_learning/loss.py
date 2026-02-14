@@ -109,6 +109,11 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("conservation", 0.1),
         ("selection_supervision", 0.3, {"sigma": 0.05}),
     ],
+    "waveno": [
+        ("mse", 1.0),
+        ("wasserstein", 0.5),
+        ("conservation", 0.1),
+    ],
 }
 
 
