@@ -93,6 +93,14 @@ def parse_args() -> argparse.Namespace:
         help="Max resolution multiplier for high-res generalization test (default: 5)",
     )
 
+    # Model-specific parameters
+    parser.add_argument(
+        "--initial_damping_sharpness",
+        type=float,
+        default=5.0,
+        help="Initial sharpness for collision-time bias damping in WaveNO (default: 5.0)",
+    )
+
     # Resume training
     parser.add_argument(
         "--model_path",

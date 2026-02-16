@@ -764,7 +764,7 @@ For each query $(t, x)$ and segment $k$, computes the backward characteristic fo
 
 $$y^* = x - f'(\rho_k) \cdot t$$
 $$d_{outside} = \text{ReLU}(x_k - y^*) + \text{ReLU}(y^* - x_{k+1})$$
-$$\text{bias}(t, x, k) = -|\alpha| \cdot d_{outside}^2$$
+$$\text{bias}_{raw}(t, x, k) = -|\alpha| \cdot d_{outside}^2$$
 
 where $\alpha$ is a learnable scale parameter (initialized at 10.0).
 
@@ -773,6 +773,26 @@ where $\alpha$ is a learnable scale parameter (initialized at 10.0).
 - The model can **override** the bias via learned $Q \cdot K^T$ scores when physics alone is insufficient
 
 Uses only `flux.derivative()` — works for any flux function.
+
+##### Collision-Time Damping
+
+The raw characteristic bias assumes independent wave propagation, which is correct before waves interact but misleading after collisions. With more IC segments, collisions happen earlier and the bias is wrong for a larger fraction of the domain. Collision-time damping fades the bias per-segment after its estimated collision time.
+
+**Collision time estimation** for segment $k$:
+
+$$t_{coll,k} = \min\left(\frac{w_{k-1}}{|\lambda_{k-1} - \lambda_k|}, \frac{w_k}{|\lambda_k - \lambda_{k+1}|}\right)$$
+
+where $w_k = x_{k+1} - x_k$ is the segment width and $\lambda_k = f'(\rho_k)$ is the characteristic speed. Edge segments self-pad (use their own width/speed), giving large $t_{coll}$ so their bias stays strong.
+
+**Damping factor**:
+
+$$\gamma(t, k) = \sigma\left(|\beta| \cdot (t_{coll,k} - t)\right)$$
+
+where $\beta$ is a learnable sharpness parameter (initialized at 5.0). This gives $\gamma \approx 1$ before collision (full bias) and $\gamma \approx 0$ after collision (learned attention takes over).
+
+**Final bias**:
+
+$$\text{bias}(t, x, k) = \text{bias}_{raw}(t, x, k) \cdot \gamma(t, k)$$
 
 ##### Reused from CharNO
 
@@ -809,6 +829,7 @@ Uses only `flux.derivative()` — works for any flux function.
 | `num_cross_segment_layers` | 1 | Cross-segment attention per timestep |
 | `time_condition` | True | FiLM time conditioning |
 | `initial_bias_scale` | 10.0 | Initial characteristic bias scale |
+| `initial_damping_sharpness` | 5.0 | Collision-time damping sharpness (learnable) |
 
 #### Factory Functions
 

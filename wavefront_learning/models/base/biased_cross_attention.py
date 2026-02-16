@@ -7,6 +7,7 @@ Contains:
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .flux import Flux
 
@@ -80,6 +81,7 @@ def compute_characteristic_bias(
     pieces_mask: torch.Tensor,
     flux: Flux,
     scale: nn.Parameter,
+    damping_sharpness: nn.Parameter | None = None,
 ) -> torch.Tensor:
     """Compute backward-characteristic attention bias.
 
@@ -88,6 +90,11 @@ def compute_characteristic_bias(
     segment k's interval [x_k, x_{k+1}]. Queries in k's characteristic
     cone get bias=0 (full attention); distant queries get large negative
     bias (suppressed attention).
+
+    When damping_sharpness is provided, the bias is dampened after each
+    segment's estimated collision time. Before collision the bias is full
+    (preserves high-res performance); after collision the bias fades so
+    learned attention takes over (fixes multi-step generalization).
 
     Uses only flux.derivative() -- works for any flux function.
 
@@ -99,6 +106,8 @@ def compute_characteristic_bias(
         pieces_mask: (B, K) validity mask.
         flux: Flux instance.
         scale: Learnable scale parameter (initialized ~10).
+        damping_sharpness: Learnable sharpness for collision-time damping.
+            None = no damping (backward compat).
 
     Returns:
         Attention bias (B, nt, nx, K), negative values suppress attention.
@@ -106,8 +115,9 @@ def compute_characteristic_bias(
     B, nt, nx = t_coords.shape
     K = ks.shape[1]
 
-    # Characteristic speed per segment: (B, 1, 1, K)
-    lambda_k = flux.derivative(ks).unsqueeze(1).unsqueeze(1)
+    # Characteristic speed per segment: (B, K) and (B, 1, 1, K)
+    lambda_k_flat = flux.derivative(ks)  # (B, K)
+    lambda_k = lambda_k_flat.unsqueeze(1).unsqueeze(1)
 
     # Query coordinates: (B, nt, nx, 1)
     t_exp = t_coords.unsqueeze(-1)
@@ -125,6 +135,37 @@ def compute_characteristic_bias(
 
     # Negative bias: 0 inside cone, large negative outside
     bias = -scale.abs() * d_outside.pow(2)
+
+    # Collision-time damping: fade bias after estimated wave collision
+    if damping_sharpness is not None:
+        widths = xs[:, 1:] - xs[:, :-1]  # (B, K)
+
+        # Left-neighbor collision time
+        lam_left = F.pad(lambda_k_flat[:, :-1], (1, 0))
+        lam_left[:, 0] = lambda_k_flat[:, 0]
+        dx_left = F.pad(widths[:, :-1], (1, 0))
+        dx_left[:, 0] = widths[:, 0]
+        speed_diff_left = (lam_left - lambda_k_flat).abs().clamp(min=1e-3)
+
+        # Right-neighbor collision time
+        lam_right = F.pad(lambda_k_flat[:, 1:], (0, 1))
+        lam_right[:, -1] = lambda_k_flat[:, -1]
+        dx_right = F.pad(widths[:, 1:], (0, 1))
+        dx_right[:, -1] = widths[:, -1]
+        speed_diff_right = (lambda_k_flat - lam_right).abs().clamp(min=1e-3)
+
+        t_coll = torch.minimum(
+            dx_left / speed_diff_left,
+            dx_right / speed_diff_right,
+        )  # (B, K)
+
+        t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+        t_exp_broad = t_coords.unsqueeze(-1)  # (B, nt, nx, 1)
+        damping = torch.sigmoid(
+            damping_sharpness.abs() * (t_coll_exp - t_exp_broad)
+        )  # (B, nt, nx, K) — ~1 before collision, ~0 after
+
+        bias = bias * damping
 
     # Mask padded segments with large negative value
     mask = pieces_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)

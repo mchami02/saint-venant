@@ -68,6 +68,10 @@ class WaveNO(nn.Module):
         num_cross_segment_layers: Cross-segment attention per timestep.
         time_condition: Enable FiLM time conditioning.
         initial_bias_scale: Initial characteristic bias scale.
+        initial_damping_sharpness: Initial sharpness for collision-time
+            damping of characteristic bias. Controls how quickly the bias
+            fades after estimated wave collision time. Higher = sharper
+            transition. Default 5.0.
         flux: Flux function instance.
     """
 
@@ -84,6 +88,7 @@ class WaveNO(nn.Module):
         num_cross_segment_layers: int = 1,
         time_condition: bool = True,
         initial_bias_scale: float = 10.0,
+        initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
     ):
         super().__init__()
@@ -141,8 +146,11 @@ class WaveNO(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        # === Stage 4: Characteristic bias scale ===
+        # === Stage 4: Characteristic bias scale + collision-time damping ===
         self.bias_scale = nn.Parameter(torch.tensor(initial_bias_scale))
+        self.damping_sharpness = nn.Parameter(
+            torch.tensor(initial_damping_sharpness)
+        )
 
         # === Stage 5: Biased cross-attention layers ===
         self.cross_attn_layers = nn.ModuleList(
@@ -239,7 +247,14 @@ class WaveNO(nn.Module):
 
         # === Stage 4: Characteristic attention bias ===
         char_bias = compute_characteristic_bias(
-            t_coords, x_coords, xs, ks, pieces_mask, self.flux, self.bias_scale
+            t_coords,
+            x_coords,
+            xs,
+            ks,
+            pieces_mask,
+            self.flux,
+            self.bias_scale,
+            damping_sharpness=self.damping_sharpness,
         )  # (B, nt, nx, K)
 
         # === Stage 5: Per-time-step biased cross-attention ===
@@ -307,4 +322,5 @@ def build_waveno(args: dict) -> WaveNO:
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
         initial_bias_scale=args.get("initial_bias_scale", 10.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
     )
