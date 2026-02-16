@@ -132,6 +132,8 @@ PLOT_PRESETS: dict[str, list[str]] = {
     ],
     "waveno": [
         "ground_truth",
+        "gt_traj",
+        "pred_traj",
         "pred",
         "mse_error",
         "pde_residual",

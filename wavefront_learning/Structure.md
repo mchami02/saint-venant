@@ -45,7 +45,8 @@ wavefront_learning/
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
 │       ├── characteristic_features.py  # SegmentPhysicsEncoder, CharacteristicFeatureComputer
-│       └── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias
+│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias
+│       └── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
 ├── losses/
 │   ├── __init__.py               # Re-exports all loss classes and flux utilities
 │   ├── base.py                   # BaseLoss abstract class
@@ -166,6 +167,7 @@ wavefront_learning/
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
 - **characteristic_features.py** — `SegmentPhysicsEncoder`, `CharacteristicFeatureComputer`
 - **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`
+- **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)
 
 ### Losses (`losses/`)
 

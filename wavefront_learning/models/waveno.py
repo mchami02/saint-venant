@@ -6,19 +6,28 @@ wavefronts explicitly (trajectories) or selecting a winning segment (softmin),
 WaveNO lets spatial queries discover the relevant segment information via
 physics-biased cross-attention.
 
-Architecture:
+Architecture (with predict_trajectories=True):
     1. SegmentPhysicsEncoder + self-attention -> contextualized segment embeddings
     2. TimeConditioner (FiLM) + CrossSegmentAttention -> time-evolved segments
-    3. Fourier query encoding -> per-(t, x) query embeddings
-    4. Characteristic attention bias -> physics-informed bias (B, nt, nx, K)
-    5. Per-time-step biased cross-attention (queries attend to segments)
-    6. Density head MLP -> output density
+    3. BreakpointEvolution -> predicted breakpoint positions (B, D, nt)
+    4. compute_boundaries -> per-query local boundary positions (x_left, x_right)
+    5. Fourier query encoding with local context -> per-(t, x) query embeddings
+    6. Characteristic attention bias -> physics-informed bias (B, nt, nx, K)
+    7. Per-time-step biased cross-attention (queries attend to segments)
+    8. Density head MLP -> output density
+
+Without predict_trajectories, stages 3-4 are skipped and queries encode
+only (t, x) as before.
 
 Key advantages over CharNO:
     - Cross-attention replaces softmin (continuous gradient flow, no vanishing)
     - Density decoded from attended features (fused, not decoupled)
     - Single characteristic bias as attention prior, not 8 hand-engineered features
     - No temperature scheduling, no auxiliary selection supervision loss
+
+Key advantage of breakpoint evolution (v2):
+    - Local boundary context (x_left, x_right) makes queries K-invariant
+    - Generalizes from 4-piece to 10+ piece initial conditions
 """
 
 import torch
@@ -28,10 +37,12 @@ from .base.biased_cross_attention import (
     BiasedCrossDecoderLayer,
     compute_characteristic_bias,
 )
+from .base.breakpoint_evolution import BreakpointEvolution
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
 from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
+from .traj_deeponet import compute_boundaries
 
 
 class CrossSegmentAttention(nn.Module):
@@ -72,6 +83,14 @@ class WaveNO(nn.Module):
             damping of characteristic bias. Controls how quickly the bias
             fades after estimated wave collision time. Higher = sharper
             transition. Default 5.0.
+        predict_trajectories: If True, predict breakpoint evolution and
+            include local boundary features (x_left, x_right) in queries.
+            This makes the model K-invariant for generalization.
+        num_traj_cross_layers: Cross-attention layers in breakpoint
+            evolution trajectory decoder.
+        num_time_layers: MLP layers in breakpoint time encoder.
+        num_freq_bound: Fourier frequency bands for boundary features
+            in query encoder.
         flux: Flux function instance.
     """
 
@@ -87,14 +106,19 @@ class WaveNO(nn.Module):
         num_heads: int = 4,
         num_cross_segment_layers: int = 1,
         time_condition: bool = True,
-        initial_bias_scale: float = 10.0,
+        initial_bias_scale: float = 5.0,
         initial_damping_sharpness: float = 5.0,
+        predict_trajectories: bool = True,
+        num_traj_cross_layers: int = 2,
+        num_time_layers: int = 2,
+        num_freq_bound: int = 8,
         flux: Flux | None = None,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.time_condition = time_condition
         self.num_heads = num_heads
+        self.predict_trajectories = predict_trajectories
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
@@ -131,7 +155,20 @@ class WaveNO(nn.Module):
         else:
             self.cross_segment_layers = nn.ModuleList()
 
-        # === Stage 3: Query encoder (Fourier + MLP) ===
+        # === Stage 3: Breakpoint evolution (when predict_trajectories) ===
+        if predict_trajectories:
+            self.breakpoint_evolution = BreakpointEvolution(
+                hidden_dim=hidden_dim,
+                num_traj_cross_layers=num_traj_cross_layers,
+                num_time_layers=num_time_layers,
+                num_freq_t=num_freq_t,
+                num_heads=num_heads,
+            )
+            self.fourier_bound = FourierFeatures(
+                num_frequencies=num_freq_bound, include_input=True
+            )
+
+        # === Stage 5: Query encoder (Fourier + MLP) ===
         self.fourier_t = FourierFeatures(
             num_frequencies=num_freq_t, include_input=True
         )
@@ -139,6 +176,8 @@ class WaveNO(nn.Module):
             num_frequencies=num_freq_x, include_input=True
         )
         query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        if predict_trajectories:
+            query_input_dim += 2 * self.fourier_bound.output_dim
         self.query_mlp = nn.Sequential(
             nn.Linear(query_input_dim, hidden_dim),
             nn.GELU(),
@@ -146,13 +185,13 @@ class WaveNO(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        # === Stage 4: Characteristic bias scale + collision-time damping ===
+        # === Stage 6: Characteristic bias scale + collision-time damping ===
         self.bias_scale = nn.Parameter(torch.tensor(initial_bias_scale))
         self.damping_sharpness = nn.Parameter(
             torch.tensor(initial_damping_sharpness)
         )
 
-        # === Stage 5: Biased cross-attention layers ===
+        # === Stage 7: Biased cross-attention layers ===
         self.cross_attn_layers = nn.ModuleList(
             [
                 BiasedCrossDecoderLayer(hidden_dim, num_heads=num_heads)
@@ -160,7 +199,7 @@ class WaveNO(nn.Module):
             ]
         )
 
-        # === Stage 6: Density head ===
+        # === Stage 8: Density head ===
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -181,6 +220,7 @@ class WaveNO(nn.Module):
                 - 'xs': (B, K+1) breakpoint positions
                 - 'ks': (B, K) piece values
                 - 'pieces_mask': (B, K) validity mask
+                - 'disc_mask': (B, D) discontinuity validity mask
                 - 't_coords': (B, 1, nt, nx) time coordinates
                 - 'x_coords': (B, 1, nt, nx) space coordinates
 
@@ -188,6 +228,7 @@ class WaveNO(nn.Module):
             Dict containing:
                 - 'output_grid': (B, 1, nt, nx) predicted density
                 - 'characteristic_bias': (B, nt, nx, K) physics bias (diagnostic)
+                - 'positions': (B, D, nt) breakpoint positions (when predict_trajectories)
         """
         xs = batch_input["xs"]
         ks = batch_input["ks"]
@@ -236,16 +277,40 @@ class WaveNO(nn.Module):
             seg_emb_t = seg_flat.reshape(B, nt, K, self.hidden_dim)
             seg_emb_t = seg_emb_t * pieces_mask.unsqueeze(1).unsqueeze(-1)
 
-        # === Stage 3: Query encoding ===
+        # === Stage 3 & 4: Breakpoint evolution + boundary extraction ===
+        positions = None
+        if self.predict_trajectories:
+            disc_mask = batch_input["disc_mask"]  # (B, D)
+            positions = self.breakpoint_evolution(
+                seg_emb, disc_mask, t_unique
+            )  # (B, D, nt)
+            left_bound, right_bound = compute_boundaries(
+                positions, x_coords, disc_mask
+            )  # each (B, nt, nx)
+
+        # === Stage 5: Query encoding ===
         t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
         x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
         t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
         x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
-        query_features = torch.cat([t_enc, x_enc], dim=-1)  # (B*nt*nx, F_t+F_x)
+
+        if self.predict_trajectories:
+            left_enc = self.fourier_bound(
+                left_bound.reshape(-1)
+            )  # (B*nt*nx, F_bound)
+            right_enc = self.fourier_bound(
+                right_bound.reshape(-1)
+            )  # (B*nt*nx, F_bound)
+            query_features = torch.cat(
+                [t_enc, x_enc, left_enc, right_enc], dim=-1
+            )
+        else:
+            query_features = torch.cat([t_enc, x_enc], dim=-1)
+
         query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
         query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)  # (B, nt, nx, H)
 
-        # === Stage 4: Characteristic attention bias ===
+        # === Stage 6: Characteristic attention bias ===
         char_bias = compute_characteristic_bias(
             t_coords,
             x_coords,
@@ -257,7 +322,7 @@ class WaveNO(nn.Module):
             damping_sharpness=self.damping_sharpness,
         )  # (B, nt, nx, K)
 
-        # === Stage 5: Per-time-step biased cross-attention ===
+        # === Stage 7: Per-time-step biased cross-attention ===
         # Reshape for batched per-timestep attention
         q = query_emb.reshape(B * nt, nx, self.hidden_dim)  # (B*nt, nx, H)
         kv = seg_emb_t.reshape(B * nt, K, self.hidden_dim)  # (B*nt, K, H)
@@ -287,15 +352,19 @@ class WaveNO(nn.Module):
                 q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask
             )
 
-        # === Stage 6: Density head ===
+        # === Stage 8: Density head ===
         density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
         density = density.clamp(0.0, 1.0)
         output_grid = density.reshape(B, 1, nt, nx)
 
-        return {
+        output = {
             "output_grid": output_grid,
             "characteristic_bias": char_bias,
         }
+        if positions is not None:
+            output["positions"] = positions
+
+        return output
 
 
 def build_waveno(args: dict) -> WaveNO:
@@ -321,6 +390,10 @@ def build_waveno(args: dict) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        initial_bias_scale=args.get("initial_bias_scale", 10.0),
+        initial_bias_scale=args.get("initial_bias_scale", 5.0),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
+        predict_trajectories=args.get("predict_trajectories", True),
+        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
+        num_time_layers=args.get("num_time_layers", 2),
+        num_freq_bound=args.get("num_freq_bound", 8),
     )

@@ -726,7 +726,9 @@ $$\rho(t, x) = \sum_k w_k(t,x) \cdot v_k(t,x)$$
 
 Wavefront Neural Operator that replaces CharNO's softmin selection with **physics-biased cross-attention**. Instead of scoring and selecting a winning segment, spatial queries discover relevant segment information via cross-attention with a characteristic-distance attention bias (analogous to ALiBi in NLP, but using wave propagation geometry).
 
-#### Pseudocode
+**v2: Breakpoint Evolution** — Adds breakpoint trajectory prediction to provide each spatial query with local boundary context `(x_left, x_right)`, making the model invariant to the total number of IC segments (K-invariant). This enables generalization from 4-piece to 10+ piece initial conditions.
+
+#### Pseudocode (with predict_trajectories=True)
 
 ```
 xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
@@ -735,7 +737,13 @@ seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
 seg_emb, t_unique → TimeConditioner (FiLM) → seg_emb_t: (nt, K, H)
 seg_emb_t → CrossSegmentAttention × L_cs → seg_emb_t: (nt, K, H)
 
-t_coords, x_coords → Fourier(t) || Fourier(x) → MLP → query_emb: (nt, nx, H)
+# Breakpoint evolution (NEW):
+seg_emb, disc_mask, t_unique → BreakpointEvolution → positions: (D, nt)
+positions, x_coords, disc_mask → compute_boundaries → x_left, x_right: (nt, nx)
+
+# Query encoding with local boundary context:
+t_coords, x_coords, x_left, x_right → Fourier(t) || Fourier(x) || Fourier(x_L) || Fourier(x_R)
+→ MLP → query_emb: (nt, nx, H)
 
 (t, x, xs, ks, flux) → backward char foot → bias: (nt, nx, K)
 
@@ -794,6 +802,27 @@ where $\beta$ is a learnable sharpness parameter (initialized at 5.0). This give
 
 $$\text{bias}(t, x, k) = \text{bias}_{raw}(t, x, k) \cdot \gamma(t, k)$$
 
+##### BreakpointEvolution
+
+**Location**: `models/base/breakpoint_evolution.py`
+
+Predicts how IC breakpoints evolve over time. Creates breakpoint embeddings from adjacent segment pairs, then uses `TrajectoryDecoderTransformer` (from `traj_transformer.py`) for cross-attention trajectory decoding.
+
+```
+seg_emb: (K, H) → pad to (K+1, H)
+left_seg = seg_padded[:K], right_seg = seg_padded[1:K+1]  → concat → (D, 2H)
+→ bp_encoder(Linear(2H→H) → GELU → Linear(H→H)) → bp_emb: (D, H)
+bp_emb *= disc_mask
+
+t_unique: (nt,) → TimeEncoder → time_emb: (nt, H)
+
+(bp_emb as K/V, time_emb as Q) → TrajectoryDecoderTransformer
+  → CrossDecoderLayer × L → time_enriched: (nt, H)
+  → disc_emb + time_enriched → PositionHead → positions: (D, nt) ∈ [0, 1]
+```
+
+The predicted positions are then used by `compute_boundaries` (from `traj_deeponet.py`) to extract per-query local boundary positions `(x_left, x_right)`.
+
 ##### Reused from CharNO
 
 - **SegmentPhysicsEncoder**: Physics-augmented segment encoding (x_center, width, $\rho$, $\lambda$, $f$, $N_k$)
@@ -813,6 +842,7 @@ $$\text{bias}(t, x, k) = \text{bias}_{raw}(t, x, k) \cdot \gamma(t, k)$$
 **Output** (dictionary):
 - `output_grid`: $(B, 1, n_t, n_x)$ — predicted density grid
 - `characteristic_bias`: $(B, n_t, n_x, K)$ — physics-informed bias (diagnostic)
+- `positions`: $(B, D, n_t)$ — predicted breakpoint positions (only when `predict_trajectories=True`)
 
 #### Default Configuration
 
@@ -828,8 +858,12 @@ $$\text{bias}(t, x, k) = \text{bias}_{raw}(t, x, k) \cdot \gamma(t, k)$$
 | `num_heads` | 4 | Attention heads (both self and cross) |
 | `num_cross_segment_layers` | 1 | Cross-segment attention per timestep |
 | `time_condition` | True | FiLM time conditioning |
-| `initial_bias_scale` | 10.0 | Initial characteristic bias scale |
+| `initial_bias_scale` | 5.0 | Initial characteristic bias scale |
 | `initial_damping_sharpness` | 5.0 | Collision-time damping sharpness (learnable) |
+| `predict_trajectories` | True | Enable breakpoint evolution + local boundary features |
+| `num_traj_cross_layers` | 2 | Cross-attention layers in breakpoint trajectory decoder |
+| `num_time_layers` | 2 | MLP layers in breakpoint time encoder |
+| `num_freq_bound` | 8 | Fourier bands for boundary features in query encoder |
 
 #### Factory Functions
 
@@ -1404,15 +1438,18 @@ $$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \math
 
 #### waveno Preset
 
-For WaveNO (wavefront neural operator). Same as charno but without selection supervision.
+For WaveNO (wavefront neural operator). Combines grid losses with trajectory losses for breakpoint evolution.
 
 | Loss | Weight |
 |------|--------|
 | `mse` | 1.0 |
 | `wasserstein` | 0.5 |
 | `conservation` | 0.1 |
+| `ic_anchoring` | 5.0 |
+| `boundary` | 1.0 |
+| `regularize_traj` | 0.1 |
 
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons}$$
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons} + 5.0 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
 
 #### mse Preset
 
@@ -1456,7 +1493,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
-| WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias | Wavefront neural operator (characteristic-biased cross-attention) |
+| WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
