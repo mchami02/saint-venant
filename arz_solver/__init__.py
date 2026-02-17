@@ -11,13 +11,20 @@ Usage:
 """
 
 from .config import ARZConfig
-from .solver import run, rusanov_flux, pressure, dp_drho
+from .solver import run, rusanov_flux, hll_flux, pressure, dp_drho
 from .initial_conditions import (
     initial_condition_from_steps,
     initial_condition_riemann,
     initial_condition_three_region,
 )
 from .plotting import plot_results, compute_regime
+from .wave_decomposition import (
+    eigenstructure,
+    decompose_jump,
+    wave_analysis_at_interface,
+    batch_decompose_jump,
+    shock_indicator,
+)
 
 __all__ = [
     "ARZConfig",
@@ -28,6 +35,13 @@ __all__ = [
     "initial_condition_riemann",
     "initial_condition_three_region",
     "rusanov_flux",
+    "hll_flux",
     "pressure",
     "dp_drho",
+    # Wave decomposition
+    "eigenstructure",
+    "decompose_jump",
+    "wave_analysis_at_interface",
+    "batch_decompose_jump",
+    "shock_indicator",
 ]

@@ -71,3 +71,24 @@ def initial_condition_riemann(
         gamma=gamma,
     )
 
+
+def initial_condition_three_region(
+    x: np.ndarray,
+    rho_left: float = 0.3,
+    rho_mid: float = 0.8,
+    rho_right: float = 0.2,
+    v0: float = 0.1,
+    x1: float = 0.2,
+    x2: float = 0.5,
+    gamma: float = 1.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Three-region piecewise-constant IC: rho_left on [0, x1), rho_mid on [x1, x2), rho_right on [x2, L].
+    """
+    return initial_condition_from_steps(
+        x,
+        rho_steps=[(x1, rho_left), (x2, rho_mid), (x.max() + 1.0, rho_right)],
+        default_v=v0,
+        gamma=gamma,
+    )
+
