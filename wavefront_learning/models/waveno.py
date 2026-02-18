@@ -39,7 +39,7 @@ from .base.biased_cross_attention import (
 )
 from .base.breakpoint_evolution import BreakpointEvolution
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
-from .base.feature_encoders import FourierFeatures
+from .base.feature_encoders import DiscontinuityEncoder, FourierFeatures, TimeEncoder
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
 from .traj_deeponet import compute_boundaries
@@ -113,12 +113,17 @@ class WaveNO(nn.Module):
         num_time_layers: int = 2,
         num_freq_bound: int = 8,
         flux: Flux | None = None,
+        with_classifier: bool = False,
+        local_features: bool = True,
+        independent_traj: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.time_condition = time_condition
         self.num_heads = num_heads
         self.predict_trajectories = predict_trajectories
+        self.with_classifier = with_classifier
+        self.independent_traj = independent_traj
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
@@ -128,6 +133,7 @@ class WaveNO(nn.Module):
             num_frequencies=num_seg_frequencies,
             num_layers=num_seg_mlp_layers,
             flux=flux,
+            include_cumulative_mass=local_features,
         )
 
         # Self-attention over segments
@@ -157,15 +163,48 @@ class WaveNO(nn.Module):
 
         # === Stage 3: Breakpoint evolution (when predict_trajectories) ===
         if predict_trajectories:
-            self.breakpoint_evolution = BreakpointEvolution(
-                hidden_dim=hidden_dim,
-                num_traj_cross_layers=num_traj_cross_layers,
-                num_time_layers=num_time_layers,
-                num_freq_t=num_freq_t,
-                num_heads=num_heads,
-            )
+            if independent_traj:
+                # Independent trajectory: encode raw discontinuities instead
+                # of using adjacent segment pairs from BreakpointEvolution
+                from .traj_transformer import TrajectoryDecoderTransformer
+
+                self.disc_encoder = DiscontinuityEncoder(
+                    input_dim=3,
+                    hidden_dim=hidden_dim,
+                    output_dim=hidden_dim,
+                    num_frequencies=num_seg_frequencies,
+                    num_layers=num_seg_mlp_layers,
+                )
+                self.indep_time_encoder = TimeEncoder(
+                    hidden_dim=hidden_dim,
+                    output_dim=hidden_dim,
+                    num_frequencies=num_freq_t,
+                    num_layers=num_time_layers,
+                )
+                self.indep_traj_decoder = TrajectoryDecoderTransformer(
+                    hidden_dim=hidden_dim,
+                    num_cross_layers=num_traj_cross_layers,
+                    num_attention_heads=num_heads,
+                )
+            else:
+                self.breakpoint_evolution = BreakpointEvolution(
+                    hidden_dim=hidden_dim,
+                    num_traj_cross_layers=num_traj_cross_layers,
+                    num_time_layers=num_time_layers,
+                    num_freq_t=num_freq_t,
+                    num_heads=num_heads,
+                )
             self.fourier_bound = FourierFeatures(
                 num_frequencies=num_freq_bound, include_input=True
+            )
+
+        # === Classifier head (when with_classifier) ===
+        if with_classifier:
+            self.classifier_head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.ReLU(),
+                nn.Linear(hidden_dim // 2, 1),
+                nn.Sigmoid(),
             )
 
         # === Stage 5: Query encoder (Fourier + MLP) ===
@@ -279,13 +318,40 @@ class WaveNO(nn.Module):
 
         # === Stage 3 & 4: Breakpoint evolution + boundary extraction ===
         positions = None
+        existence = None
         if self.predict_trajectories:
             disc_mask = batch_input["disc_mask"]  # (B, D)
-            positions = self.breakpoint_evolution(
-                seg_emb, disc_mask, t_unique
-            )  # (B, D, nt)
+
+            if self.independent_traj:
+                # Independent trajectory: encode raw discontinuities directly
+                discontinuities = batch_input["discontinuities"]  # (B, D, 3)
+                disc_emb = self.disc_encoder(discontinuities, disc_mask)  # (B, D, H)
+                time_emb = self.indep_time_encoder(t_unique)  # (B, nt, H)
+                positions = self.indep_traj_decoder(
+                    disc_emb, time_emb, disc_mask
+                )  # (B, D, nt)
+                bp_emb = disc_emb  # for classifier if needed
+            elif self.with_classifier:
+                # Need bp_emb for classifier head
+                positions, bp_emb = self.breakpoint_evolution(
+                    seg_emb, disc_mask, t_unique, return_embeddings=True
+                )
+            else:
+                positions = self.breakpoint_evolution(
+                    seg_emb, disc_mask, t_unique
+                )  # (B, D, nt)
+
+            # Classifier: filter breakpoints
+            if self.with_classifier:
+                existence = (
+                    self.classifier_head(bp_emb).squeeze(-1) * disc_mask
+                )  # (B, D)
+                effective_mask = disc_mask * (existence > 0.5).float()
+            else:
+                effective_mask = disc_mask
+
             left_bound, right_bound = compute_boundaries(
-                positions, x_coords, disc_mask
+                positions, x_coords, effective_mask
             )  # each (B, nt, nx)
 
         # === Stage 5: Query encoding ===
@@ -363,6 +429,8 @@ class WaveNO(nn.Module):
         }
         if positions is not None:
             output["positions"] = positions
+        if existence is not None:
+            output["existence"] = existence.unsqueeze(-1).expand_as(positions)
 
         return output
 
@@ -397,3 +465,44 @@ def build_waveno(args: dict) -> WaveNO:
         num_time_layers=args.get("num_time_layers", 2),
         num_freq_bound=args.get("num_freq_bound", 8),
     )
+
+
+def _build_waveno_base(args: dict, **overrides) -> WaveNO:
+    """Shared builder for WaveNO variants."""
+    if not isinstance(args, dict):
+        args = vars(args)
+    kwargs = dict(
+        hidden_dim=args.get("hidden_dim", 64),
+        num_freq_t=args.get("num_freq_t", 8),
+        num_freq_x=args.get("num_freq_x", 8),
+        num_seg_frequencies=args.get("num_seg_frequencies", 8),
+        num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
+        num_self_attn_layers=args.get("num_self_attn_layers", 2),
+        num_cross_layers=args.get("num_cross_layers", 2),
+        num_heads=args.get("num_heads", 4),
+        num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
+        time_condition=args.get("time_condition", True),
+        initial_bias_scale=args.get("initial_bias_scale", 5.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
+        predict_trajectories=args.get("predict_trajectories", True),
+        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
+        num_time_layers=args.get("num_time_layers", 2),
+        num_freq_bound=args.get("num_freq_bound", 8),
+    )
+    kwargs.update(overrides)
+    return WaveNO(**kwargs)
+
+
+def build_waveno_cls(args: dict) -> WaveNO:
+    """WaveNO + classifier head to filter breakpoints."""
+    return _build_waveno_base(args, with_classifier=True)
+
+
+def build_waveno_local(args: dict) -> WaveNO:
+    """WaveNO without cumulative mass (N_k) in segment encoder."""
+    return _build_waveno_base(args, local_features=False)
+
+
+def build_waveno_indep_traj(args: dict) -> WaveNO:
+    """WaveNO with independent trajectory decoding from raw discontinuities."""
+    return _build_waveno_base(args, independent_traj=True)

@@ -581,6 +581,7 @@ When enabled, the classifier filters `compute_boundaries` to only use discontinu
 - `build_classifier_traj_transformer(args)`: With classifier (`classifier=True`)
 - `build_no_traj_transformer(args)`: Without trajectory prediction (`with_traj=False`)
 - `build_classifier_all_traj_transformer(args)`: Classifier + all-boundaries density decoding (`classifier=True`, `all_boundaries=True`)
+- `build_biased_classifier_traj_transformer(args)`: Classifier + characteristic attention bias (`classifier=True`, `characteristic_bias=True`)
 
 #### All-Boundaries Mode (`all_boundaries=True`) — DynamicDensityDecoder
 
@@ -592,6 +593,48 @@ When `all_boundaries=True`, the density decoder uses `DynamicDensityDecoder` wit
 4. **Density head**: Output projection maps enriched queries to density values
 
 This design is fully differentiable (no `compute_boundaries` or hard thresholds), enabling end-to-end gradient flow from density loss through existence predictions to the classifier. The attention mechanism naturally learns spatial locality — queries attend primarily to nearby boundary tokens.
+
+#### Characteristic Bias Mode (`characteristic_bias=True`) — BiasedClassifierTrajTransformer
+
+When `characteristic_bias=True`, the density decoder uses `BiasedCrossDecoderLayer` (from `biased_cross_attention.py`) instead of `CrossDecoderLayer`, adding a physics-informed attention bias based on backward characteristic propagation from each discontinuity.
+
+##### Discontinuity Characteristic Bias
+
+For each query $(t, x)$ and discontinuity $d$ at position $x_d$ with states $(\rho_L, \rho_R)$:
+
+1. **Characteristic speeds**: $\lambda_L = f'(\rho_L)$, $\lambda_R = f'(\rho_R)$
+2. **Influence zone**: $[x_d + v_{min} \cdot t,\ x_d + v_{max} \cdot t]$ where $v_{min} = \min(\lambda_L, \lambda_R)$, $v_{max} = \max(\lambda_L, \lambda_R)$
+3. **Distance outside zone**: $d_{outside} = \text{ReLU}(z_{left} - x) + \text{ReLU}(x - z_{right})$
+4. **Bias**: $\text{bias}(t, x, d) = -|\alpha| \cdot d_{outside}^2$
+
+where $\alpha$ is a learnable scale parameter (initialized at 5.0).
+
+- **bias = 0** when query $(t, x)$ falls inside discontinuity $d$'s influence zone (full attention)
+- **bias << 0** when query is far outside (suppressed attention)
+- The model can **override** the bias via learned $Q \cdot K^T$ scores when physics alone is insufficient
+
+##### Collision-Time Damping
+
+The bias fades per-discontinuity after its influence zone collides with adjacent discontinuities' zones:
+
+**Right collision time** (disc $d$ with disc $d+1$):
+$$t_{coll,R} = \frac{x_{d+1} - x_d}{(v_{max,d} - v_{min,d+1})^+}$$
+
+**Left collision time** (disc $d-1$ with disc $d$):
+$$t_{coll,L} = \frac{x_d - x_{d-1}}{(v_{max,d-1} - v_{min,d})^+}$$
+
+$$t_{coll,d} = \min(t_{coll,L}, t_{coll,R})$$
+
+**Damping factor**:
+$$\gamma(t, d) = \sigma\left(|\beta| \cdot (t_{coll,d} - t)\right)$$
+
+**Final bias**: $\text{bias}(t, x, d) = \text{bias}_{raw}(t, x, d) \cdot \gamma(t, d)$
+
+##### Why This Improves Resolution Generalization
+
+At training resolution, standard cross-attention learns which discontinuity embeddings to attend to for each coordinate region. At higher resolutions, the query grid becomes denser with interpolated coordinate values. Without physics bias, the attention patterns must generalize purely from learned Fourier features. With characteristic bias, the backward characteristic foot correctly identifies relevant discontinuities at **any** resolution, providing a resolution-invariant inductive bias.
+
+Uses only `flux.derivative()` — works for any flux function.
 
 ---
 
@@ -1413,6 +1456,20 @@ For ClassifierAllTrajTransformer. Same losses as `classifier_traj_transformer`.
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
 
+#### biased_classifier_traj_transformer Preset
+
+For BiasedClassifierTrajTransformer. Same losses as `classifier_traj_transformer` (the bias is an architectural change, not a loss change).
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
 #### pde_shocks Preset
 
 For models supervised with PDE shock residual.
@@ -1488,6 +1545,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | TrajTransformer | Discontinuities + coordinates | Positions + Full grid | Cross-attention variant of TrajDeepONet |
 | ClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | TrajTransformer with shock/rarefaction classifier |
 | ClassifierAllTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with dynamic boundary tokens (time-varying cross-attention) |
+| BiasedClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with characteristic attention bias for resolution generalization |
 | DeepONet | Grid tensor $(3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
 | FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
@@ -1530,3 +1588,25 @@ loss = get_loss("hybrid", loss_kwargs={
 6. **Independent Discontinuity Encoding**: Each discontinuity is encoded independently via Fourier + MLP, with optional cross-discontinuity self-attention for interaction
 
 7. **Modular Loss Design**: One file per loss enables easy composition and testing
+
+---
+
+## Ablation Models
+
+Six ablation models isolate which architectural component drives the performance gap between WaveNO and ClassifierTrajTransformer.
+
+### WaveNO Ablations (fixing step-generalization weakness)
+
+| Model | Flag | Change |
+|-------|------|--------|
+| `WaveNOCls` | `with_classifier=True` | Adds classifier head on breakpoint embeddings to filter breakpoints in `compute_boundaries` |
+| `WaveNOLocal` | `local_features=False` | Removes cumulative mass $N_k$ from `SegmentPhysicsEncoder` (3 scalar features instead of 4) |
+| `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
+
+### CTT Ablations (fixing resolution weakness)
+
+| Model | Flag | Change |
+|-------|------|--------|
+| `CTTBiased` | `characteristic_bias=True` | Adds characteristic attention bias to density cross-attention (alias for `BiasedClassifierTrajTransformer`) |
+| `CTTSegPhysics` | `segment_physics=True` | Enriches disc encoder input with $\lambda_L$, $\lambda_R$, $s$ (6 features instead of 3) |
+| `CTTFiLM` | `film_time=True` | Applies FiLM time conditioning to disc embeddings, producing per-timestep keys for density decoding |

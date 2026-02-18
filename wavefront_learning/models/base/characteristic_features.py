@@ -40,16 +40,21 @@ class SegmentPhysicsEncoder(nn.Module):
         num_frequencies: int = 8,
         num_layers: int = 2,
         flux: Flux | None = None,
+        include_cumulative_mass: bool = True,
     ):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
+        self.include_cumulative_mass = include_cumulative_mass
 
         self.fourier_x = FourierFeatures(
             num_frequencies=num_frequencies, include_input=True
         )
 
-        # Input: fourier(x_center) + fourier(width) + [rho, lambda, flux_val, N_k_normalized]
-        input_dim = 2 * self.fourier_x.output_dim + 4
+        # Input: fourier(x_center) + fourier(width) + scalar features
+        # With cumulative mass: [rho, lambda, flux_val, N_k_normalized] = 4
+        # Without: [rho, lambda, flux_val] = 3
+        num_scalars = 4 if include_cumulative_mass else 3
+        input_dim = 2 * self.fourier_x.output_dim + num_scalars
 
         layers = []
         in_dim = input_dim
@@ -88,12 +93,6 @@ class SegmentPhysicsEncoder(nn.Module):
         lambda_k = self.flux.derivative(ks)  # (B, K)
         flux_k = self.flux(ks)  # (B, K)
 
-        # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
-        rho_width = ks * width  # (B, K)
-        N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
-        total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
-        N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
-
         # Fourier encode spatial features
         x_center_enc = self.fourier_x(
             x_center.reshape(-1)
@@ -103,9 +102,19 @@ class SegmentPhysicsEncoder(nn.Module):
         ).reshape(B, K, -1)  # (B, K, F)
 
         # Concatenate all features
-        scalar_features = torch.stack(
-            [ks, lambda_k, flux_k, N_k_normalized], dim=-1
-        )  # (B, K, 4)
+        if self.include_cumulative_mass:
+            # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
+            rho_width = ks * width  # (B, K)
+            N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
+            total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+            N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
+            scalar_features = torch.stack(
+                [ks, lambda_k, flux_k, N_k_normalized], dim=-1
+            )  # (B, K, 4)
+        else:
+            scalar_features = torch.stack(
+                [ks, lambda_k, flux_k], dim=-1
+            )  # (B, K, 3)
         features = torch.cat(
             [x_center_enc, width_enc, scalar_features], dim=-1
         )  # (B, K, 2F+3)

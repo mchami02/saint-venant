@@ -172,3 +172,115 @@ def compute_characteristic_bias(
     bias = bias * mask + (~mask.bool()).float() * (-1e9)
 
     return bias  # (B, nt, nx, K)
+
+
+def compute_discontinuity_characteristic_bias(
+    t_coords: torch.Tensor,
+    x_coords: torch.Tensor,
+    disc_positions: torch.Tensor,
+    disc_rhoL: torch.Tensor,
+    disc_rhoR: torch.Tensor,
+    disc_mask: torch.Tensor,
+    flux: Flux,
+    scale: nn.Parameter,
+    damping_sharpness: nn.Parameter | None = None,
+) -> torch.Tensor:
+    """Backward-characteristic attention bias for discontinuity-based models.
+
+    For each query (t, x) and discontinuity d at position x_d with states
+    (rho_L, rho_R), computes the influence zone from characteristic speeds
+    and penalizes queries outside this zone. Queries inside the zone get
+    bias=0 (full attention); distant queries get large negative bias
+    (suppressed attention).
+
+    Analogous to compute_characteristic_bias but operates on discontinuities
+    (D dimension) instead of segments (K dimension). Each discontinuity has
+    two states (rho_L, rho_R) producing two characteristic speeds, defining
+    an influence zone rather than a single characteristic foot.
+
+    Uses only flux.derivative() -- works for any flux function.
+
+    Args:
+        t_coords: (B, nt, nx) time coordinates.
+        x_coords: (B, nt, nx) space coordinates.
+        disc_positions: (B, D) discontinuity x-positions.
+        disc_rhoL: (B, D) left density values.
+        disc_rhoR: (B, D) right density values.
+        disc_mask: (B, D) validity mask.
+        flux: Flux instance.
+        scale: Learnable scale parameter (initialized ~5).
+        damping_sharpness: Learnable sharpness for collision-time damping.
+            None = no damping (backward compat).
+
+    Returns:
+        Attention bias (B, nt, nx, D), negative values suppress attention.
+    """
+    B, nt, nx = t_coords.shape
+    D = disc_positions.shape[1]
+
+    # Characteristic speeds per discontinuity: (B, D)
+    lambda_L = flux.derivative(disc_rhoL)  # (B, D)
+    lambda_R = flux.derivative(disc_rhoR)  # (B, D)
+    v_min = torch.minimum(lambda_L, lambda_R)  # (B, D)
+    v_max = torch.maximum(lambda_L, lambda_R)  # (B, D)
+
+    # Expand for broadcasting: (B, 1, 1, D)
+    x_d = disc_positions.unsqueeze(1).unsqueeze(1)
+    v_min_exp = v_min.unsqueeze(1).unsqueeze(1)
+    v_max_exp = v_max.unsqueeze(1).unsqueeze(1)
+
+    # Query coordinates: (B, nt, nx, 1)
+    t_exp = t_coords.unsqueeze(-1)
+    x_exp = x_coords.unsqueeze(-1)
+
+    # Influence zone at time t: [x_d + v_min*t, x_d + v_max*t]
+    zone_left = x_d + v_min_exp * t_exp  # (B, nt, nx, D)
+    zone_right = x_d + v_max_exp * t_exp  # (B, nt, nx, D)
+
+    # Distance outside influence zone
+    d_outside = torch.relu(zone_left - x_exp) + torch.relu(x_exp - zone_right)
+
+    # Negative bias: 0 inside zone, large negative outside
+    bias = -scale.abs() * d_outside.pow(2)
+
+    # Collision-time damping: fade bias after adjacent discs' waves interact
+    if damping_sharpness is not None:
+        # Compute raw gaps between consecutive discontinuities
+        raw_gap = disc_positions[:, 1:] - disc_positions[:, :-1]  # (B, D-1)
+        # Gaps involving padded discs are meaningless; replace with 1.0
+        pair_mask = disc_mask[:, :-1] * disc_mask[:, 1:]  # (B, D-1)
+        raw_gap = raw_gap * pair_mask + (1.0 - pair_mask) * 1.0
+
+        # Right collision: disc d's zone right edge meets disc (d+1)'s zone left edge
+        # t_coll = (x_{d+1} - x_d) / (v_max_d - v_min_{d+1})
+        gap_right = F.pad(raw_gap, (0, 1))  # (B, D)
+        gap_right[:, -1] = 1.0  # large gap for rightmost disc
+        v_min_right_neighbor = F.pad(v_min[:, 1:], (0, 1))
+        v_min_right_neighbor[:, -1] = v_min[:, -1]  # self-pad
+        speed_diff_right = (v_max - v_min_right_neighbor).clamp(min=1e-3)
+        t_coll_right = gap_right / speed_diff_right
+
+        # Left collision: disc (d-1)'s zone right edge meets disc d's zone left edge
+        # t_coll = (x_d - x_{d-1}) / (v_max_{d-1} - v_min_d)
+        gap_left = F.pad(raw_gap, (1, 0))  # (B, D)
+        gap_left[:, 0] = 1.0  # large gap for leftmost disc
+        v_max_left_neighbor = F.pad(v_max[:, :-1], (1, 0))
+        v_max_left_neighbor[:, 0] = v_max[:, 0]  # self-pad
+        speed_diff_left = (v_max_left_neighbor - v_min).clamp(min=1e-3)
+        t_coll_left = gap_left / speed_diff_left
+
+        t_coll = torch.minimum(t_coll_left, t_coll_right).clamp(min=0.0)  # (B, D)
+
+        t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, D)
+        t_exp_broad = t_coords.unsqueeze(-1)  # (B, nt, nx, 1)
+        damping = torch.sigmoid(
+            damping_sharpness.abs() * (t_coll_exp - t_exp_broad)
+        )  # (B, nt, nx, D) — ~1 before collision, ~0 after
+
+        bias = bias * damping
+
+    # Mask padded discontinuities with large negative value
+    mask = disc_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, D)
+    bias = bias * mask + (~mask.bool()).float() * (-1e9)
+
+    return bias  # (B, nt, nx, D)

@@ -72,7 +72,8 @@ class BreakpointEvolution(nn.Module):
         seg_emb: torch.Tensor,
         disc_mask: torch.Tensor,
         t_unique: torch.Tensor,
-    ) -> torch.Tensor:
+        return_embeddings: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Predict breakpoint positions over time.
 
         Args:
@@ -80,9 +81,11 @@ class BreakpointEvolution(nn.Module):
             disc_mask: Discontinuity validity mask (B, D) where D = K.
                 1 = valid breakpoint between segments i and i+1.
             t_unique: Unique time values (B, nt).
+            return_embeddings: If True, also return breakpoint embeddings.
 
         Returns:
             Predicted breakpoint positions (B, D, nt), clamped to [0, 1].
+            If return_embeddings=True, returns (positions, bp_emb) tuple.
         """
         B, K, H = seg_emb.shape
         D = disc_mask.shape[1]  # D = K (max_pieces = max_discontinuities)
@@ -102,4 +105,6 @@ class BreakpointEvolution(nn.Module):
         # Cross-attention: time queries -> breakpoint keys/values
         positions = self.traj_decoder(bp_emb, time_emb, disc_mask)  # (B, D, nt)
 
+        if return_embeddings:
+            return positions, bp_emb
         return positions
