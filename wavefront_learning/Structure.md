@@ -44,8 +44,8 @@ wavefront_learning/
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
-│       ├── characteristic_features.py  # SegmentPhysicsEncoder, CharacteristicFeatureComputer
-│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias
+│       ├── characteristic_features.py  # SegmentPhysicsEncoder, DiscontinuityPhysicsEncoder, CharacteristicFeatureComputer
+│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias, compute_discontinuity_characteristic_bias
 │       └── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
 ├── losses/
 │   ├── __init__.py               # Re-exports all loss classes and flux utilities
@@ -150,7 +150,7 @@ wavefront_learning/
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
   - `CharNO`, `build_charno()`
 - **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
-  - `WaveNO`, `build_waveno()`
+  - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`
 
 ### Model Base Components (`models/base/`)
 
@@ -165,8 +165,8 @@ wavefront_learning/
 - **cross_decoder.py** — `CrossDecoderLayer`, `CrossDecoder`
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
-- **characteristic_features.py** — `SegmentPhysicsEncoder`, `CharacteristicFeatureComputer`
-- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`
+- **characteristic_features.py** — `SegmentPhysicsEncoder`, `DiscontinuityPhysicsEncoder`, `CharacteristicFeatureComputer`
+- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
 - **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)
 
 ### Losses (`losses/`)

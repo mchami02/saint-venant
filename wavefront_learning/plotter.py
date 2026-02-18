@@ -169,6 +169,14 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "pde_residual",
     ],
+    "waveno_disc": [
+        "ground_truth",
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
     "ctt_biased": [
         "gt_traj",
         "pred_traj",

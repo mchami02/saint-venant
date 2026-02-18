@@ -18,6 +18,7 @@ from .breakpoint_evolution import BreakpointEvolution
 from .blocks import ResidualBlock
 from .characteristic_features import (
     CharacteristicFeatureComputer,
+    DiscontinuityPhysicsEncoder,
     SegmentPhysicsEncoder,
     TimeConditioner,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "TriangularFlux",
     "DEFAULT_FLUX",
     "SegmentPhysicsEncoder",
+    "DiscontinuityPhysicsEncoder",
     "CharacteristicFeatureComputer",
     "TimeConditioner",
 ]

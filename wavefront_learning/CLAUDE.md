@@ -107,6 +107,7 @@ Use `--no_wandb` flag to disable logging.
 | **WaveNOCls** | WaveNO + classifier head to filter breakpoints | `{positions, existence, output_grid}` |
 | **WaveNOLocal** | WaveNO without cumulative mass (N_k) feature | `{positions, output_grid}` |
 | **WaveNOIndepTraj** | WaveNO with independent trajectory from raw discontinuities | `{positions, output_grid}` |
+| **WaveNODisc** | WaveNO with discontinuity tokens instead of segment tokens | `{positions, output_grid}` |
 | **CTTBiased** | CTT + characteristic attention bias (ablation alias) | `{positions, existence, output_grid}` |
 | **CTTSegPhysics** | CTT + physics features in disc encoder | `{positions, existence, output_grid}` |
 | **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |

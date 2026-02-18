@@ -28,6 +28,7 @@ from models.traj_transformer import (
 from models.waveno import (
     build_waveno,
     build_waveno_cls,
+    build_waveno_disc,
     build_waveno_indep_traj,
     build_waveno_local,
 )
@@ -53,6 +54,7 @@ MODELS = {
     "WaveNOCls": build_waveno_cls,
     "WaveNOLocal": build_waveno_local,
     "WaveNOIndepTraj": build_waveno_indep_traj,
+    "WaveNODisc": build_waveno_disc,
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
@@ -79,6 +81,7 @@ MODEL_TRANSFORM = {
     "WaveNOCls": None,
     "WaveNOLocal": None,
     "WaveNOIndepTraj": None,
+    "WaveNODisc": None,
     "CTTBiased": None,
     "CTTSegPhysics": None,
     "CTTFiLM": None,

@@ -128,6 +128,100 @@ class SegmentPhysicsEncoder(nn.Module):
         return output
 
 
+class DiscontinuityPhysicsEncoder(nn.Module):
+    """Encodes IC discontinuities with physics-augmented features.
+
+    For each discontinuity d at (x_d, rho_L, rho_R):
+      - x_d: discontinuity position (Fourier-encoded)
+      - rho_L, rho_R: left and right density values
+      - lambda_L = flux.derivative(rho_L): left characteristic speed
+      - lambda_R = flux.derivative(rho_R): right characteristic speed
+      - s_d = flux.shock_speed(rho_L, rho_R): Rankine-Hugoniot shock speed
+
+    Spatial position is Fourier-encoded; physics scalars are concatenated raw.
+    All features are projected via MLP.
+
+    Args:
+        hidden_dim: Output embedding dimension.
+        num_frequencies: Fourier frequency bands for position encoding.
+        num_layers: MLP depth.
+        flux: Flux function instance.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 64,
+        num_frequencies: int = 8,
+        num_layers: int = 2,
+        flux: Flux | None = None,
+    ):
+        super().__init__()
+        self.flux = flux or DEFAULT_FLUX()
+
+        self.fourier_x = FourierFeatures(
+            num_frequencies=num_frequencies, include_input=True
+        )
+
+        # Input: fourier(x_d) + 5 scalar features
+        # [rho_L, rho_R, lambda_L, lambda_R, s_d]
+        input_dim = self.fourier_x.output_dim + 5
+
+        layers = []
+        in_dim = input_dim
+        for i in range(num_layers):
+            out_dim = hidden_dim
+            layers.append(nn.Linear(in_dim, out_dim))
+            if i < num_layers - 1:
+                layers.append(nn.GELU())
+                layers.append(nn.LayerNorm(out_dim))
+            in_dim = out_dim
+
+        self.mlp = nn.Sequential(*layers)
+        self.output_dim = hidden_dim
+
+    def forward(
+        self,
+        discontinuities: torch.Tensor,
+        disc_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Encode IC discontinuities.
+
+        Args:
+            discontinuities: Discontinuity features (B, D, 3) with [x_d, rho_L, rho_R].
+            disc_mask: Validity mask (B, D), 1 = valid.
+
+        Returns:
+            Discontinuity embeddings (B, D, hidden_dim).
+        """
+        B, D, _ = discontinuities.shape
+
+        x_d = discontinuities[:, :, 0]  # (B, D)
+        rho_L = discontinuities[:, :, 1]  # (B, D)
+        rho_R = discontinuities[:, :, 2]  # (B, D)
+
+        # Compute physics features
+        lambda_L = self.flux.derivative(rho_L)  # (B, D)
+        lambda_R = self.flux.derivative(rho_R)  # (B, D)
+        s_d = self.flux.shock_speed(rho_L, rho_R)  # (B, D)
+
+        # Fourier encode position
+        x_enc = self.fourier_x(x_d.reshape(-1)).reshape(B, D, -1)  # (B, D, F)
+
+        # Stack scalar physics features
+        scalars = torch.stack(
+            [rho_L, rho_R, lambda_L, lambda_R, s_d], dim=-1
+        )  # (B, D, 5)
+
+        # Concatenate and project
+        features = torch.cat([x_enc, scalars], dim=-1)  # (B, D, F+5)
+        output = self.mlp(features)  # (B, D, H)
+
+        # Zero out padded positions
+        output = output * disc_mask.unsqueeze(-1)
+
+        return output
+
+
 class CharacteristicFeatureComputer(nn.Module):
     """Computes characteristic-relative features for (query, segment) pairs.
 

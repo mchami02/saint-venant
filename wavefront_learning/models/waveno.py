@@ -36,13 +36,19 @@ import torch.nn as nn
 from .base.biased_cross_attention import (
     BiasedCrossDecoderLayer,
     compute_characteristic_bias,
+    compute_discontinuity_characteristic_bias,
 )
 from .base.breakpoint_evolution import BreakpointEvolution
-from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
+from .base.characteristic_features import (
+    DiscontinuityPhysicsEncoder,
+    SegmentPhysicsEncoder,
+    TimeConditioner,
+)
 from .base.feature_encoders import DiscontinuityEncoder, FourierFeatures, TimeEncoder
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
 from .traj_deeponet import compute_boundaries
+from .traj_transformer import TrajectoryDecoderTransformer
 
 
 class CrossSegmentAttention(nn.Module):
@@ -116,6 +122,7 @@ class WaveNO(nn.Module):
         with_classifier: bool = False,
         local_features: bool = True,
         independent_traj: bool = False,
+        use_discontinuities: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -124,17 +131,26 @@ class WaveNO(nn.Module):
         self.predict_trajectories = predict_trajectories
         self.with_classifier = with_classifier
         self.independent_traj = independent_traj
+        self.use_discontinuities = use_discontinuities
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
-        # === Stage 1: Segment encoder (reused from CharNO) ===
-        self.segment_encoder = SegmentPhysicsEncoder(
-            hidden_dim=hidden_dim,
-            num_frequencies=num_seg_frequencies,
-            num_layers=num_seg_mlp_layers,
-            flux=flux,
-            include_cumulative_mass=local_features,
-        )
+        # === Stage 1: Token encoder ===
+        if use_discontinuities:
+            self.disc_physics_encoder = DiscontinuityPhysicsEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
+                num_layers=num_seg_mlp_layers,
+                flux=flux,
+            )
+        else:
+            self.segment_encoder = SegmentPhysicsEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
+                num_layers=num_seg_mlp_layers,
+                flux=flux,
+                include_cumulative_mass=local_features,
+            )
 
         # Self-attention over segments
         self.self_attn_layers = nn.ModuleList(
@@ -163,25 +179,25 @@ class WaveNO(nn.Module):
 
         # === Stage 3: Breakpoint evolution (when predict_trajectories) ===
         if predict_trajectories:
-            if independent_traj:
-                # Independent trajectory: encode raw discontinuities instead
-                # of using adjacent segment pairs from BreakpointEvolution
-                from .traj_transformer import TrajectoryDecoderTransformer
-
-                self.disc_encoder = DiscontinuityEncoder(
-                    input_dim=3,
-                    hidden_dim=hidden_dim,
-                    output_dim=hidden_dim,
-                    num_frequencies=num_seg_frequencies,
-                    num_layers=num_seg_mlp_layers,
-                )
-                self.indep_time_encoder = TimeEncoder(
+            if use_discontinuities or independent_traj:
+                # Trajectory decoded directly from disc embeddings
+                # (use_discontinuities: disc_physics_encoder embeddings;
+                #  independent_traj: separate DiscontinuityEncoder embeddings)
+                if independent_traj and not use_discontinuities:
+                    self.disc_encoder = DiscontinuityEncoder(
+                        input_dim=3,
+                        hidden_dim=hidden_dim,
+                        output_dim=hidden_dim,
+                        num_frequencies=num_seg_frequencies,
+                        num_layers=num_seg_mlp_layers,
+                    )
+                self.traj_time_encoder = TimeEncoder(
                     hidden_dim=hidden_dim,
                     output_dim=hidden_dim,
                     num_frequencies=num_freq_t,
                     num_layers=num_time_layers,
                 )
-                self.indep_traj_decoder = TrajectoryDecoderTransformer(
+                self.traj_decoder = TrajectoryDecoderTransformer(
                     hidden_dim=hidden_dim,
                     num_cross_layers=num_traj_cross_layers,
                     num_attention_heads=num_heads,
@@ -260,15 +276,25 @@ class WaveNO(nn.Module):
                 - 'ks': (B, K) piece values
                 - 'pieces_mask': (B, K) validity mask
                 - 'disc_mask': (B, D) discontinuity validity mask
+                - 'discontinuities': (B, D, 3) discontinuity features
                 - 't_coords': (B, 1, nt, nx) time coordinates
                 - 'x_coords': (B, 1, nt, nx) space coordinates
 
         Returns:
             Dict containing:
                 - 'output_grid': (B, 1, nt, nx) predicted density
-                - 'characteristic_bias': (B, nt, nx, K) physics bias (diagnostic)
+                - 'characteristic_bias': (B, nt, nx, K_or_D) physics bias
                 - 'positions': (B, D, nt) breakpoint positions (when predict_trajectories)
         """
+        if self.use_discontinuities:
+            return self._forward_disc(batch_input)
+        return self._forward_seg(batch_input)
+
+    def _forward_seg(
+        self,
+        batch_input: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Segment-based forward pass (original WaveNO)."""
         xs = batch_input["xs"]
         ks = batch_input["ks"]
         pieces_mask = batch_input["pieces_mask"]
@@ -326,8 +352,8 @@ class WaveNO(nn.Module):
                 # Independent trajectory: encode raw discontinuities directly
                 discontinuities = batch_input["discontinuities"]  # (B, D, 3)
                 disc_emb = self.disc_encoder(discontinuities, disc_mask)  # (B, D, H)
-                time_emb = self.indep_time_encoder(t_unique)  # (B, nt, H)
-                positions = self.indep_traj_decoder(
+                time_emb = self.traj_time_encoder(t_unique)  # (B, nt, H)
+                positions = self.traj_decoder(
                     disc_emb, time_emb, disc_mask
                 )  # (B, D, nt)
                 bp_emb = disc_emb  # for classifier if needed
@@ -434,6 +460,152 @@ class WaveNO(nn.Module):
 
         return output
 
+    def _forward_disc(
+        self,
+        batch_input: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Discontinuity-based forward pass (WaveNODisc).
+
+        Uses discontinuities as tokens instead of segments. The token
+        dimension is D (number of discontinuities) instead of K (number
+        of IC pieces).
+        """
+        discontinuities = batch_input["discontinuities"]  # (B, D, 3)
+        disc_mask = batch_input["disc_mask"]  # (B, D)
+        t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
+        x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
+
+        B, nt, nx = t_coords.shape
+        D = disc_mask.shape[1]
+
+        # === Stage 1: Encode discontinuities ===
+        emb = self.disc_physics_encoder(discontinuities, disc_mask)  # (B, D, H)
+
+        # Self-attention over discontinuity tokens
+        key_padding_mask = ~disc_mask.bool()  # True = padded
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
+        for layer in self.self_attn_layers:
+            emb = layer(emb, key_padding_mask=key_padding_mask)
+        emb = emb * disc_mask.unsqueeze(-1)  # re-zero padded
+
+        # === Stage 2: Time-conditioned disc evolution ===
+        t_unique = t_coords[:, :, 0]  # (B, nt)
+        if self.time_condition:
+            emb_t = self.time_conditioner(emb, t_unique)  # (B, nt, D, H)
+        else:
+            emb_t = emb.unsqueeze(1).expand(B, nt, D, self.hidden_dim)
+
+        # Cross-token attention per time step
+        if len(self.cross_segment_layers) > 0:
+            emb_flat = emb_t.reshape(B * nt, D, -1)
+            cs_mask = (
+                (~disc_mask.bool())
+                .unsqueeze(1)
+                .expand(B, nt, D)
+                .reshape(B * nt, D)
+            )
+            all_masked_cs = cs_mask.all(dim=1)
+            if all_masked_cs.any():
+                cs_mask = cs_mask.clone()
+                cs_mask[all_masked_cs] = False
+            for layer in self.cross_segment_layers:
+                emb_flat = layer(emb_flat, key_padding_mask=cs_mask)
+            emb_t = emb_flat.reshape(B, nt, D, self.hidden_dim)
+            emb_t = emb_t * disc_mask.unsqueeze(1).unsqueeze(-1)
+
+        # === Stage 3 & 4: Trajectory from disc embeddings + boundary extraction ===
+        positions = None
+        if self.predict_trajectories:
+            time_emb = self.traj_time_encoder(t_unique)  # (B, nt, H)
+            positions = self.traj_decoder(
+                emb, time_emb, disc_mask
+            )  # (B, D, nt)
+
+            left_bound, right_bound = compute_boundaries(
+                positions, x_coords, disc_mask
+            )  # each (B, nt, nx)
+
+        # === Stage 5: Query encoding ===
+        t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
+        x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
+        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
+        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
+
+        if self.predict_trajectories:
+            left_enc = self.fourier_bound(
+                left_bound.reshape(-1)
+            )  # (B*nt*nx, F_bound)
+            right_enc = self.fourier_bound(
+                right_bound.reshape(-1)
+            )  # (B*nt*nx, F_bound)
+            query_features = torch.cat(
+                [t_enc, x_enc, left_enc, right_enc], dim=-1
+            )
+        else:
+            query_features = torch.cat([t_enc, x_enc], dim=-1)
+
+        query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
+        query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)  # (B, nt, nx, H)
+
+        # === Stage 6: Discontinuity characteristic attention bias ===
+        char_bias = compute_discontinuity_characteristic_bias(
+            t_coords,
+            x_coords,
+            discontinuities[:, :, 0],  # disc positions
+            discontinuities[:, :, 1],  # rho_L
+            discontinuities[:, :, 2],  # rho_R
+            disc_mask,
+            self.flux,
+            self.bias_scale,
+            damping_sharpness=self.damping_sharpness,
+        )  # (B, nt, nx, D)
+
+        # === Stage 7: Per-time-step biased cross-attention ===
+        q = query_emb.reshape(B * nt, nx, self.hidden_dim)  # (B*nt, nx, H)
+        kv = emb_t.reshape(B * nt, D, self.hidden_dim)  # (B*nt, D, H)
+        bias_flat = char_bias.reshape(B * nt, nx, D)  # (B*nt, nx, D)
+
+        # Expand bias for multi-head: (B*nt, nx, D) -> (B*nt*heads, nx, D)
+        attn_mask = (
+            bias_flat.unsqueeze(1)
+            .expand(-1, self.num_heads, -1, -1)
+            .reshape(B * nt * self.num_heads, nx, D)
+        )
+
+        # Key padding mask: (B, D) -> (B*nt, D)
+        kv_padding_mask = (
+            (~disc_mask.bool())
+            .unsqueeze(1)
+            .expand(B, nt, D)
+            .reshape(B * nt, D)
+        )
+        all_masked_kv = kv_padding_mask.all(dim=1)
+        if all_masked_kv.any():
+            kv_padding_mask = kv_padding_mask.clone()
+            kv_padding_mask[all_masked_kv] = False
+
+        for layer in self.cross_attn_layers:
+            q = layer(
+                q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask
+            )
+
+        # === Stage 8: Density head ===
+        density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
+        density = density.clamp(0.0, 1.0)
+        output_grid = density.reshape(B, 1, nt, nx)
+
+        output = {
+            "output_grid": output_grid,
+            "characteristic_bias": char_bias,
+        }
+        if positions is not None:
+            output["positions"] = positions
+
+        return output
+
 
 def build_waveno(args: dict) -> WaveNO:
     """Factory function for WaveNO.
@@ -506,3 +678,8 @@ def build_waveno_local(args: dict) -> WaveNO:
 def build_waveno_indep_traj(args: dict) -> WaveNO:
     """WaveNO with independent trajectory decoding from raw discontinuities."""
     return _build_waveno_base(args, independent_traj=True)
+
+
+def build_waveno_disc(args: dict) -> WaveNO:
+    """WaveNO with discontinuity-based tokens instead of segments."""
+    return _build_waveno_base(args, use_discontinuities=True)
