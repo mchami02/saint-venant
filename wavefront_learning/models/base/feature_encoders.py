@@ -80,6 +80,7 @@ class TimeEncoder(nn.Module):
         output_dim: int = 128,
         num_frequencies: int = 32,
         num_layers: int = 3,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.fourier = FourierFeatures(num_frequencies=num_frequencies)
@@ -91,6 +92,7 @@ class TimeEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 
@@ -126,7 +128,7 @@ class DiscontinuityEncoder(nn.Module):
         output_dim: Output dimension (latent space dimension).
         num_frequencies: Number of Fourier frequency bands for x coordinate.
         num_layers: Number of MLP layers.
-        dropout: Dropout rate (unused, kept for API compatibility).
+        dropout: Dropout rate applied after GELU in MLP layers.
     """
 
     def __init__(
@@ -136,7 +138,7 @@ class DiscontinuityEncoder(nn.Module):
         output_dim: int = 128,
         num_frequencies: int = 16,
         num_layers: int = 3,
-        dropout: float = 0.1,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -159,6 +161,7 @@ class DiscontinuityEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 

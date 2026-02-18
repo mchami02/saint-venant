@@ -28,7 +28,7 @@ class BiasedCrossDecoderLayer(nn.Module):
         num_heads: Number of attention heads.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int = 4):
+    def __init__(self, hidden_dim: int, num_heads: int = 4, dropout: float = 0.0):
         super().__init__()
         self.norm_q = nn.LayerNorm(hidden_dim)
         self.norm_kv = nn.LayerNorm(hidden_dim)
@@ -42,6 +42,7 @@ class BiasedCrossDecoderLayer(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim * 4, hidden_dim),
         )
+        self.drop = nn.Dropout(dropout)
 
     def forward(self, x, z, key_padding_mask=None, attn_mask=None):
         """Forward pass with optional attention bias.
@@ -65,10 +66,10 @@ class BiasedCrossDecoderLayer(nn.Module):
             key_padding_mask=key_padding_mask,
             attn_mask=attn_mask,
         )[0]
-        x = x + att
+        x = x + self.drop(att)
 
         ff = self.feedforward(self.norm_ff(x))
-        x = x + ff
+        x = x + self.drop(ff)
 
         return x
 

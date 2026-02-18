@@ -58,16 +58,17 @@ class CrossSegmentAttention(nn.Module):
     Identical to CharNO's CrossSegmentAttention.
     """
 
-    def __init__(self, dim: int, num_heads: int = 4):
+    def __init__(self, dim: int, num_heads: int = 4, dropout: float = 0.0):
         super().__init__()
         self.attention = nn.MultiheadAttention(
             dim, num_heads=num_heads, batch_first=True
         )
         self.norm = nn.LayerNorm(dim)
+        self.drop = nn.Dropout(dropout)
 
     def forward(self, x, key_padding_mask=None):
         att = self.attention(x, x, x, key_padding_mask=key_padding_mask)[0]
-        return self.norm(x + att)
+        return self.norm(x + self.drop(att))
 
 
 class WaveNO(nn.Module):
@@ -123,6 +124,7 @@ class WaveNO(nn.Module):
         local_features: bool = True,
         independent_traj: bool = False,
         use_discontinuities: bool = False,
+        dropout: float = 0.05,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -142,6 +144,7 @@ class WaveNO(nn.Module):
                 num_frequencies=num_seg_frequencies,
                 num_layers=num_seg_mlp_layers,
                 flux=flux,
+                dropout=dropout,
             )
         else:
             self.segment_encoder = SegmentPhysicsEncoder(
@@ -150,12 +153,13 @@ class WaveNO(nn.Module):
                 num_layers=num_seg_mlp_layers,
                 flux=flux,
                 include_cumulative_mass=local_features,
+                dropout=dropout,
             )
 
         # Self-attention over segments
         self.self_attn_layers = nn.ModuleList(
             [
-                EncoderLayer(hidden_dim, num_heads=num_heads)
+                EncoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
                 for _ in range(num_self_attn_layers)
             ]
         )
@@ -165,12 +169,13 @@ class WaveNO(nn.Module):
             self.time_conditioner = TimeConditioner(
                 hidden_dim=hidden_dim,
                 num_time_frequencies=num_seg_frequencies,
+                dropout=dropout,
             )
 
         if num_cross_segment_layers > 0:
             self.cross_segment_layers = nn.ModuleList(
                 [
-                    CrossSegmentAttention(hidden_dim, num_heads=num_heads)
+                    CrossSegmentAttention(hidden_dim, num_heads=num_heads, dropout=dropout)
                     for _ in range(num_cross_segment_layers)
                 ]
             )
@@ -190,12 +195,14 @@ class WaveNO(nn.Module):
                         output_dim=hidden_dim,
                         num_frequencies=num_seg_frequencies,
                         num_layers=num_seg_mlp_layers,
+                        dropout=dropout,
                     )
                 self.traj_time_encoder = TimeEncoder(
                     hidden_dim=hidden_dim,
                     output_dim=hidden_dim,
                     num_frequencies=num_freq_t,
                     num_layers=num_time_layers,
+                    dropout=dropout,
                 )
                 self.traj_decoder = TrajectoryDecoderTransformer(
                     hidden_dim=hidden_dim,
@@ -209,6 +216,7 @@ class WaveNO(nn.Module):
                     num_time_layers=num_time_layers,
                     num_freq_t=num_freq_t,
                     num_heads=num_heads,
+                    dropout=dropout,
                 )
             self.fourier_bound = FourierFeatures(
                 num_frequencies=num_freq_bound, include_input=True
@@ -219,6 +227,7 @@ class WaveNO(nn.Module):
             self.classifier_head = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim // 2),
                 nn.ReLU(),
+                nn.Dropout(dropout),
                 nn.Linear(hidden_dim // 2, 1),
                 nn.Sigmoid(),
             )
@@ -236,6 +245,7 @@ class WaveNO(nn.Module):
         self.query_mlp = nn.Sequential(
             nn.Linear(query_input_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
         )
@@ -249,7 +259,7 @@ class WaveNO(nn.Module):
         # === Stage 7: Biased cross-attention layers ===
         self.cross_attn_layers = nn.ModuleList(
             [
-                BiasedCrossDecoderLayer(hidden_dim, num_heads=num_heads)
+                BiasedCrossDecoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
                 for _ in range(num_cross_layers)
             ]
         )
@@ -258,6 +268,7 @@ class WaveNO(nn.Module):
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
         )
         # Initialize last layer near zero for stable start
@@ -636,6 +647,7 @@ def build_waveno(args: dict) -> WaveNO:
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
         num_freq_bound=args.get("num_freq_bound", 8),
+        dropout=args.get("dropout", 0.05),
     )
 
 
@@ -660,6 +672,7 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
         num_freq_bound=args.get("num_freq_bound", 8),
+        dropout=args.get("dropout", 0.05),
     )
     kwargs.update(overrides)
     return WaveNO(**kwargs)

@@ -41,6 +41,7 @@ class SegmentPhysicsEncoder(nn.Module):
         num_layers: int = 2,
         flux: Flux | None = None,
         include_cumulative_mass: bool = True,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
@@ -63,6 +64,7 @@ class SegmentPhysicsEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 
@@ -154,6 +156,7 @@ class DiscontinuityPhysicsEncoder(nn.Module):
         num_frequencies: int = 8,
         num_layers: int = 2,
         flux: Flux | None = None,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
@@ -173,6 +176,7 @@ class DiscontinuityPhysicsEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 
@@ -420,6 +424,7 @@ class TimeConditioner(nn.Module):
         self,
         hidden_dim: int = 64,
         num_time_frequencies: int = 8,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.fourier_t = FourierFeatures(
@@ -430,6 +435,7 @@ class TimeConditioner(nn.Module):
         self.film_net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, 2 * hidden_dim),
         )
         # Initialize near identity: gamma ~ 1, beta ~ 0

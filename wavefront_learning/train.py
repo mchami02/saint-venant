@@ -100,6 +100,12 @@ def parse_args() -> argparse.Namespace:
         default=5.0,
         help="Initial sharpness for collision-time bias damping in WaveNO (default: 5.0)",
     )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.05,
+        help="Dropout probability for WaveNO (default: 0.05)",
+    )
 
     # Resume training
     parser.add_argument(

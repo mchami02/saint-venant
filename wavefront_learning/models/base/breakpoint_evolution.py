@@ -38,6 +38,7 @@ class BreakpointEvolution(nn.Module):
         num_time_layers: int = 2,
         num_freq_t: int = 8,
         num_heads: int = 4,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -46,6 +47,7 @@ class BreakpointEvolution(nn.Module):
         self.bp_encoder = nn.Sequential(
             nn.Linear(2 * hidden_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
         )
 
@@ -55,6 +57,7 @@ class BreakpointEvolution(nn.Module):
             output_dim=hidden_dim,
             num_frequencies=num_freq_t,
             num_layers=num_time_layers,
+            dropout=dropout,
         )
 
         # Reuse TrajectoryDecoderTransformer architecture inline
