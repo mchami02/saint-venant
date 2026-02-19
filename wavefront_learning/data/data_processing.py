@@ -8,22 +8,9 @@ This module handles:
 
 import numpy as np
 import torch
-from nfv.flows import Greenshield
-from nfv.initial_conditions import PiecewiseConstant
-from nfv.problem import Problem
-from nfv.solvers import LaxHopf
 
 from data.data_loading import download_grids, upload_grids
-
-
-class PiecewiseRandom(PiecewiseConstant):
-    """Piecewise constant IC with random breakpoint locations."""
-
-    def __init__(self, ks, x_noise=False):
-        super().__init__(ks, x_noise)
-        self.xs = np.random.rand(len(ks) - 1)
-        self.xs = np.sort(self.xs)
-        self.xs = np.concatenate([[0], self.xs, [1]])
+from numerical_solvers.lwr import generate_n as lwr_generate_n
 
 
 def get_nfv_dataset(
@@ -49,21 +36,18 @@ def get_nfv_dataset(
     Returns:
         Grid data of shape (n_samples, nt, nx).
     """
-    ics = [
-        PiecewiseRandom(ks=[np.random.rand() for _ in range(max_steps)], x_noise=False)
-        for _ in range(n_samples)
-    ]
-    if only_shocks:
-        for ic in ics:
-            ic.ks.sort()
-
-    problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=ics, flow=Greenshield())
-    grids = (
-        problem.solve(LaxHopf, batch_size=4, dtype=torch.float64, progressbar=True)
-        .cpu()
-        .numpy()
+    result = lwr_generate_n(
+        n=n_samples,
+        k=max_steps,
+        nx=nx,
+        nt=nt,
+        dx=dx,
+        dt=dt,
+        only_shocks=only_shocks,
+        show_progress=True,
+        batch_size=4,
     )
-    return grids
+    return result["rho"].cpu().numpy()
 
 
 def clean_piecewise_constant_ic(ic_grid: np.ndarray, max_passes: int = 1) -> np.ndarray:
