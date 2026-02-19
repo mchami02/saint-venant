@@ -20,6 +20,7 @@ from models.traj_transformer import (
     build_classifier_all_traj_transformer,
     build_classifier_traj_transformer,
     build_ctt_biased,
+    build_ctt_disc,
     build_ctt_film,
     build_ctt_seg_physics,
     build_no_traj_transformer,
@@ -58,6 +59,7 @@ MODELS = {
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
+    "CTTDisc": build_ctt_disc,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -85,6 +87,7 @@ MODEL_TRANSFORM = {
     "CTTBiased": None,
     "CTTSegPhysics": None,
     "CTTFiLM": None,
+    "CTTDisc": None,
 }
 
 

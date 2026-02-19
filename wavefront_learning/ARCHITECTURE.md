@@ -1508,6 +1508,20 @@ For WaveNO (wavefront neural operator). Combines grid losses with trajectory los
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons} + 5.0 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
 
+#### ctt_disc Preset
+
+For CTTDisc (CTT with segment tokens). Same losses as `classifier_traj_transformer`.
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
 #### mse Preset
 
 Simple grid MSE only.
@@ -1553,6 +1567,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
+| CTTDisc | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
@@ -1612,3 +1627,26 @@ Six ablation models isolate which architectural component drives the performance
 | `CTTBiased` | `characteristic_bias=True` | Adds characteristic attention bias to density cross-attention (alias for `BiasedClassifierTrajTransformer`) |
 | `CTTSegPhysics` | `segment_physics=True` | Enriches disc encoder input with $\lambda_L$, $\lambda_R$, $s$ (6 features instead of 3) |
 | `CTTFiLM` | `film_time=True` | Applies FiLM time conditioning to disc embeddings, producing per-timestep keys for density decoding |
+| `CTTDisc` | `use_segments=True` | Replaces discontinuity tokens with segment tokens (SegmentPhysicsEncoder + BreakpointEvolution), like WaveNO's representation |
+
+#### CTTDisc Architecture
+
+Replaces the discontinuity-based input representation with WaveNO's segment-based representation while keeping the CTT architecture for trajectory decoding and density prediction.
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
+
+seg_emb, disc_mask, t_unique → BreakpointEvolution(return_embeddings=True)
+  → positions: (D, nt), bp_emb: (D, H)
+
+bp_emb → ClassifierHead(MLP → Sigmoid) → existence: (D,)
+
+positions, x_coords, effective_mask → compute_boundaries → x_left, x_right: (nt, nx)
+
+(t, x, x_left, x_right) → FourierEncode → CoordMLP → coord_emb: (nt*nx, H)
+(coord_emb as Q, seg_emb as K/V) → CrossDecoderLayer × L → DensityHead → (nt, nx)
+→ output_grid: (1, nt, nx)
+```
+
+**Key difference from CTT**: Encodes K piecewise-constant segments (center, width, density, characteristic speed, flux, cumulative mass) instead of D discontinuity points (x, rho_L, rho_R). Trajectories are derived from adjacent segment pairs via `BreakpointEvolution` rather than from `TimeEncoder` + `TrajectoryDecoderTransformer`. The density decoder cross-attends to segment embeddings (K tokens) with `pieces_mask`.

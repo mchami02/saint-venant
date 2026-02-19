@@ -198,6 +198,13 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "existence",
     ],
+    "ctt_disc": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
 }
 
 

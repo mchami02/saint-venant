@@ -23,7 +23,8 @@ from .base.biased_cross_attention import (
     BiasedCrossDecoderLayer,
     compute_discontinuity_characteristic_bias,
 )
-from .base.characteristic_features import TimeConditioner
+from .base.breakpoint_evolution import BreakpointEvolution
+from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
 from .base.cross_decoder import CrossDecoderLayer
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
@@ -448,6 +449,7 @@ class TrajTransformer(nn.Module):
         characteristic_bias: bool = False,
         segment_physics: bool = False,
         film_time: bool = False,
+        use_segments: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -455,6 +457,7 @@ class TrajTransformer(nn.Module):
         self.characteristic_bias = characteristic_bias
         self.segment_physics = segment_physics
         self.film_time = film_time
+        self.use_segments = use_segments
         self.num_attention_heads = num_attention_heads
 
         # all_boundaries requires classifier and trajectory prediction
@@ -466,25 +469,35 @@ class TrajTransformer(nn.Module):
         self.has_classifier = classifier
 
         # Characteristic bias: physics-informed attention in density decoder
-        if characteristic_bias or segment_physics:
+        if characteristic_bias or segment_physics or use_segments:
             self.flux = DEFAULT_FLUX()
         if characteristic_bias:
             self.bias_scale = nn.Parameter(torch.tensor(5.0))
             self.damping_sharpness = nn.Parameter(torch.tensor(5.0))
 
-        # Branch: encode discontinuities
-        # With segment_physics: input is [x, rho_L, rho_R, lambda_L, lambda_R, shock_speed]
-        disc_input_dim = 6 if segment_physics else 3
-        self.branch = DiscontinuityEncoder(
-            input_dim=disc_input_dim,
-            hidden_dim=hidden_dim,
-            output_dim=hidden_dim,
-            num_frequencies=num_disc_frequencies,
-            num_layers=num_disc_layers,
-            dropout=dropout,
-        )
+        if use_segments:
+            # Segment-based encoding (like WaveNO)
+            self.segment_encoder = SegmentPhysicsEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_disc_frequencies,
+                num_layers=num_disc_layers,
+                flux=self.flux,
+                dropout=dropout,
+            )
+        else:
+            # Branch: encode discontinuities
+            # With segment_physics: input is [x, rho_L, rho_R, lambda_L, lambda_R, shock_speed]
+            disc_input_dim = 6 if segment_physics else 3
+            self.branch = DiscontinuityEncoder(
+                input_dim=disc_input_dim,
+                hidden_dim=hidden_dim,
+                output_dim=hidden_dim,
+                num_frequencies=num_disc_frequencies,
+                num_layers=num_disc_layers,
+                dropout=dropout,
+            )
 
-        # Cross-discontinuity self-attention
+        # Cross-token self-attention (works on segment or discontinuity tokens)
         self.disc_interaction = nn.ModuleList(
             [
                 EncoderLayer(hidden_dim, num_heads=num_attention_heads)
@@ -503,19 +516,30 @@ class TrajTransformer(nn.Module):
 
         # Trajectory decoder (only when with_traj)
         if self.with_traj:
-            self.time_encoder = TimeEncoder(
-                hidden_dim=hidden_dim,
-                output_dim=hidden_dim,
-                num_frequencies=num_frequencies_t,
-                num_layers=num_time_layers,
-            )
+            if use_segments:
+                # BreakpointEvolution derives trajectories from adjacent segment pairs
+                self.breakpoint_evolution = BreakpointEvolution(
+                    hidden_dim=hidden_dim,
+                    num_traj_cross_layers=num_traj_cross_layers,
+                    num_time_layers=num_time_layers,
+                    num_freq_t=num_frequencies_t,
+                    num_heads=num_attention_heads,
+                    dropout=dropout,
+                )
+            else:
+                self.time_encoder = TimeEncoder(
+                    hidden_dim=hidden_dim,
+                    output_dim=hidden_dim,
+                    num_frequencies=num_frequencies_t,
+                    num_layers=num_time_layers,
+                )
 
-            self.traj_decoder = TrajectoryDecoderTransformer(
-                hidden_dim=hidden_dim,
-                num_cross_layers=num_traj_cross_layers,
-                num_attention_heads=num_attention_heads,
-                dropout=dropout,
-            )
+                self.traj_decoder = TrajectoryDecoderTransformer(
+                    hidden_dim=hidden_dim,
+                    num_cross_layers=num_traj_cross_layers,
+                    num_attention_heads=num_attention_heads,
+                    dropout=dropout,
+                )
 
         # Density decoder
         if self.all_boundaries:
@@ -571,6 +595,9 @@ class TrajTransformer(nn.Module):
                 - 'existence': (B, D, T) shock/rarefaction probability
                   (only when classifier=True, constant across T)
         """
+        if self.use_segments:
+            return self._forward_seg(batch_input)
+
         discontinuities = batch_input["discontinuities"]
         disc_mask = batch_input["disc_mask"]
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
@@ -717,6 +744,92 @@ class TrajTransformer(nn.Module):
         )
         output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
         return {"output_grid": output_grid}
+
+    def _forward_seg(
+        self,
+        batch_input: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Forward pass using segment-based tokens.
+
+        Uses SegmentPhysicsEncoder for encoding and BreakpointEvolution
+        for trajectory prediction instead of discontinuity tokens.
+
+        Args:
+            batch_input: Dict containing:
+                - 'xs': (B, K+1) breakpoint positions
+                - 'ks': (B, K) piece values
+                - 'pieces_mask': (B, K) validity mask for segments
+                - 'disc_mask': (B, D) validity mask for breakpoints
+                - 't_coords': (B, 1, nt, nx) time coordinates
+                - 'x_coords': (B, 1, nt, nx) space coordinates
+
+        Returns:
+            Dict with positions, output_grid, and optionally existence.
+        """
+        xs = batch_input["xs"]
+        ks = batch_input["ks"]
+        pieces_mask = batch_input["pieces_mask"]
+        disc_mask = batch_input["disc_mask"]
+        t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
+        x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
+
+        # === SEGMENT ENCODING ===
+        seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+
+        # === SELF-ATTENTION over segment tokens ===
+        key_padding_mask = ~pieces_mask.bool()
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
+        for layer in self.disc_interaction:
+            seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
+        seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
+
+        # === TRAJECTORY via BreakpointEvolution ===
+        t_unique = t_coords[:, :, 0]  # (B, nt)
+
+        if self.has_classifier:
+            positions, bp_emb = self.breakpoint_evolution(
+                seg_emb, disc_mask, t_unique, return_embeddings=True
+            )
+            existence = (
+                self.classifier_head(bp_emb).squeeze(-1) * disc_mask
+            )  # (B, D)
+        else:
+            positions = self.breakpoint_evolution(
+                seg_emb, disc_mask, t_unique
+            )
+
+        # === BOUNDARIES ===
+        if self.has_classifier:
+            effective_mask = disc_mask * (existence > 0.5).float()
+        else:
+            effective_mask = disc_mask
+
+        left_bound, right_bound = compute_boundaries(
+            positions, x_coords, effective_mask
+        )
+
+        # === DENSITY via cross-attention to segment embeddings ===
+        density = self.density_decoder(
+            seg_emb,
+            t_coords,
+            x_coords,
+            left_bound,
+            right_bound,
+            pieces_mask,
+        )  # (B, nt, nx)
+
+        output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
+
+        output = {
+            "positions": positions,
+            "output_grid": output_grid,
+        }
+        if self.has_classifier:
+            output["existence"] = existence.unsqueeze(-1).expand_as(positions)
+        return output
 
     def count_parameters(self) -> int:
         """Count trainable parameters."""
@@ -905,3 +1018,8 @@ def build_ctt_seg_physics(args: dict) -> TrajTransformer:
 def build_ctt_film(args: dict) -> TrajTransformer:
     """CTT + FiLM time conditioning on disc embeddings for density decoding."""
     return _build_ctt_base(args, film_time=True)
+
+
+def build_ctt_disc(args: dict) -> TrajTransformer:
+    """CTT with segment-based tokens instead of discontinuities."""
+    return _build_ctt_base(args, use_segments=True)
