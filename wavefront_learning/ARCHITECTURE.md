@@ -1508,9 +1508,9 @@ For WaveNO (wavefront neural operator). Combines grid losses with trajectory los
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons} + 5.0 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
 
-#### ctt_disc Preset
+#### ctt_seg Preset
 
-For CTTDisc (CTT with segment tokens). Same losses as `classifier_traj_transformer`.
+For CTTSeg (CTT with segment tokens). Same losses as `classifier_traj_transformer`.
 
 | Loss | Weight | Kwargs |
 |------|--------|--------|
@@ -1567,7 +1567,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
-| CTTDisc | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
+| CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
@@ -1627,9 +1627,9 @@ Six ablation models isolate which architectural component drives the performance
 | `CTTBiased` | `characteristic_bias=True` | Adds characteristic attention bias to density cross-attention (alias for `BiasedClassifierTrajTransformer`) |
 | `CTTSegPhysics` | `segment_physics=True` | Enriches disc encoder input with $\lambda_L$, $\lambda_R$, $s$ (6 features instead of 3) |
 | `CTTFiLM` | `film_time=True` | Applies FiLM time conditioning to disc embeddings, producing per-timestep keys for density decoding |
-| `CTTDisc` | `use_segments=True` | Replaces discontinuity tokens with segment tokens (SegmentPhysicsEncoder + BreakpointEvolution), like WaveNO's representation |
+| `CTTSeg` | `use_segments=True` | Replaces discontinuity tokens with segment tokens (SegmentPhysicsEncoder + BreakpointEvolution), like WaveNO's representation |
 
-#### CTTDisc Architecture
+#### CTTSeg Architecture
 
 Replaces the discontinuity-based input representation with WaveNO's segment-based representation while keeping the CTT architecture for trajectory decoding and density prediction.
 

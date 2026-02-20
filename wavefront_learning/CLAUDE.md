@@ -111,7 +111,7 @@ Use `--no_wandb` flag to disable logging.
 | **CTTBiased** | CTT + characteristic attention bias (ablation alias) | `{positions, existence, output_grid}` |
 | **CTTSegPhysics** | CTT + physics features in disc encoder | `{positions, existence, output_grid}` |
 | **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |
-| **CTTDisc** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
+| **CTTSeg** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
 
 ## Available Losses
 
@@ -145,7 +145,7 @@ Presets (in `loss.py`):
 | `no_traj_transformer` | NoTrajTransformer | mse |
 | `pde_shocks` | Any grid model | mse + pde_shock_residual |
 | `mse` | Any grid model | mse only |
-| `ctt_disc` | CTTDisc | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `ctt_seg` | CTTSeg | mse + ic_anchoring + boundary + regularize_traj + acceleration |
 
 ## Adding a New Loss
 

@@ -15,7 +15,7 @@ from models.traj_deeponet import (
     build_no_traj_deeponet,
     build_traj_deeponet,
 )
-from models.ctt_disc import build_ctt_disc
+from models.ctt_seg import build_ctt_seg
 from models.traj_transformer import (
     build_biased_classifier_traj_transformer,
     build_classifier_all_traj_transformer,
@@ -59,7 +59,7 @@ MODELS = {
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
-    "CTTDisc": build_ctt_disc,
+    "CTTSeg": build_ctt_seg,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -87,7 +87,7 @@ MODEL_TRANSFORM = {
     "CTTBiased": None,
     "CTTSegPhysics": None,
     "CTTFiLM": None,
-    "CTTDisc": None,
+    "CTTSeg": None,
 }
 
 

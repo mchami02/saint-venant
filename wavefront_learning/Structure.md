@@ -26,7 +26,7 @@ wavefront_learning/
 │   ├── hybrid_deeponet.py        # HybridDeepONet (trajectory + grid prediction)
 │   ├── traj_deeponet.py          # TrajDeepONet, ClassifierTrajDeepONet, NoTrajDeepONet
 │   ├── traj_transformer.py       # TrajTransformer, ClassifierTrajTransformer, ClassifierAllTrajTransformer (disc-based variants)
-│   ├── ctt_disc.py               # CTTDisc: standalone segment-based ClassifierTrajTransformer
+│   ├── ctt_seg.py               # CTTSeg: standalone segment-based ClassifierTrajTransformer
 │   ├── deeponet.py               # Classic DeepONet baseline
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
@@ -142,8 +142,8 @@ wavefront_learning/
 - **traj_transformer.py** — Cross-attention trajectory decoder variants (disc-based).
   - `TrajTransformer`, `DynamicDensityDecoder`
   - `build_traj_transformer()`, `build_classifier_traj_transformer()`, `build_classifier_all_traj_transformer()`, `build_no_traj_transformer()`, `build_biased_classifier_traj_transformer()`, `build_ctt_biased()`, `build_ctt_seg_physics()`, `build_ctt_film()`
-- **ctt_disc.py** — Standalone segment-based ClassifierTrajTransformer.
-  - `CTTDisc`, `build_ctt_disc()`
+- **ctt_seg.py** — Standalone segment-based ClassifierTrajTransformer.
+  - `CTTSeg`, `build_ctt_seg()`
 - **deeponet.py** — Classic DeepONet baseline.
   - `DeepONet`, `build_deeponet()`
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.

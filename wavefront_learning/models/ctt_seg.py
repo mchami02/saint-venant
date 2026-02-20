@@ -1,4 +1,4 @@
-"""CTTDisc: Classifier TrajTransformer with segment-based tokens.
+"""CTTSeg: Classifier TrajTransformer with segment-based tokens.
 
 Standalone model extracted from TrajTransformer(use_segments=True).
 Uses segment-based encoding (SegmentPhysicsEncoder) instead of
@@ -25,7 +25,7 @@ from .base.flux import DEFAULT_FLUX
 from .base.transformer_encoder import EncoderLayer
 
 
-class CTTDisc(nn.Module):
+class CTTSeg(nn.Module):
     """Classifier TrajTransformer with segment-based tokens.
 
     Args:
@@ -189,8 +189,8 @@ class CTTDisc(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-def build_ctt_disc(args: dict) -> CTTDisc:
-    """Build CTTDisc from configuration dict.
+def build_ctt_seg(args: dict) -> CTTSeg:
+    """Build CTTSeg from configuration dict.
 
     Args:
         args: Configuration dictionary with optional keys:
@@ -208,9 +208,9 @@ def build_ctt_disc(args: dict) -> CTTDisc:
             - dropout (default 0.0)
 
     Returns:
-        Configured CTTDisc instance.
+        Configured CTTSeg instance.
     """
-    return CTTDisc(
+    return CTTSeg(
         hidden_dim=args.get("hidden_dim", 32),
         num_frequencies_t=args.get("num_frequencies_t", 8),
         num_frequencies_x=args.get("num_frequencies_x", 8),

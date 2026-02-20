@@ -124,7 +124,7 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("boundary", 1.0),
         ("regularize_traj", 0.1),
     ],
-    "ctt_disc": [
+    "ctt_seg": [
         ("mse", 1.0),
         ("ic_anchoring", 0.1),
         ("boundary", 1.0),
