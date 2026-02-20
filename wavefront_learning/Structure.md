@@ -14,7 +14,8 @@ wavefront_learning/
 │   ├── __init__.py               # WavefrontDataset, collate_wavefront_batch, get_wavefront_datasets
 │   ├── data_loading.py           # HuggingFace upload/download for grid caching
 │   ├── data_processing.py        # Grid generation, discontinuity extraction, preprocessing
-│   └── transforms.py             # Input transforms and TRANSFORMS registry
+│   ├── transforms.py             # Input transforms and TRANSFORMS registry
+│   └── visualize_extraction.ipynb # Notebook: IC grid with extracted discontinuity positions
 ├── model.py                      # Model factory and registry
 ├── loss.py                       # Loss factory, CombinedLoss, presets
 ├── logger.py                     # Weights & Biases logging utilities

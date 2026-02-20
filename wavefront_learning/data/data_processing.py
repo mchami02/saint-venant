@@ -315,6 +315,7 @@ def get_wavefront_data(
     dx: float,
     dt: float,
     max_steps: int = 3,
+    min_steps: int = 2,
     only_shocks: bool = True,
     random_seed: int = 42,
     max_discontinuities: int = 10,
@@ -323,7 +324,7 @@ def get_wavefront_data(
     """Get wavefront data, downloading from HuggingFace or generating locally.
 
     This is the main entry point for data loading. It distributes samples
-    uniformly across step counts {2, ..., max_steps}, downloading or
+    uniformly across step counts {min_steps, ..., max_steps}, downloading or
     generating grids for each step count independently. Each step count
     is cached separately on HuggingFace.
 
@@ -334,7 +335,8 @@ def get_wavefront_data(
         dx: Spatial step size.
         dt: Time step size.
         max_steps: Maximum number of pieces in piecewise constant IC.
-            Each sample's piece count is drawn uniformly from {2, ..., max_steps}.
+            Each sample's piece count is drawn uniformly from {min_steps, ..., max_steps}.
+        min_steps: Minimum number of pieces in piecewise constant IC.
         only_shocks: If True, generate only shock waves (no rarefactions).
         random_seed: Random seed for reproducibility.
         max_discontinuities: Maximum number of discontinuities to support.
@@ -345,8 +347,8 @@ def get_wavefront_data(
     """
     np.random.seed(random_seed)
 
-    # Distribute samples uniformly across step counts {2, ..., max_steps}
-    step_counts = list(range(2, max_steps + 1))
+    # Distribute samples uniformly across step counts {min_steps, ..., max_steps}
+    step_counts = list(range(min_steps, max_steps + 1))
     n_per_step = n_samples // len(step_counts)
     remainder = n_samples % len(step_counts)
 

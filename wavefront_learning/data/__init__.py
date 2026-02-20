@@ -98,6 +98,7 @@ def get_wavefront_datasets(
     grid_config: dict,
     model_name: str,
     max_steps: int = 3,
+    min_steps: int = 2,
     max_discontinuities: int = 10,
     train_ratio: float = 0.8,
     val_ratio: float = 0.1,
@@ -114,7 +115,8 @@ def get_wavefront_datasets(
         grid_config: Dict with keys nx, nt, dx, dt.
         model_name: Model name (key into MODEL_TRANSFORM for per-model transforms).
         max_steps: Maximum number of pieces in piecewise constant IC.
-            Samples are distributed uniformly across step counts {2, ..., max_steps}.
+            Samples are distributed uniformly across step counts {min_steps, ..., max_steps}.
+        min_steps: Minimum number of pieces in piecewise constant IC.
         max_discontinuities: Maximum number of discontinuities to support.
         train_ratio: Fraction of data for training.
         val_ratio: Fraction of data for validation.
@@ -141,6 +143,7 @@ def get_wavefront_datasets(
         dx=dx,
         dt=dt,
         max_steps=max_steps,
+        min_steps=min_steps,
         only_shocks=only_shocks,
         random_seed=random_seed,
         max_discontinuities=max_discontinuities,
