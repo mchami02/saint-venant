@@ -38,17 +38,17 @@ from .base.biased_cross_attention import (
     compute_characteristic_bias,
     compute_discontinuity_characteristic_bias,
 )
+from .base.boundaries import compute_boundaries
 from .base.breakpoint_evolution import BreakpointEvolution
 from .base.characteristic_features import (
     DiscontinuityPhysicsEncoder,
     SegmentPhysicsEncoder,
     TimeConditioner,
 )
+from .base.decoders import TrajectoryDecoderTransformer
 from .base.feature_encoders import DiscontinuityEncoder, FourierFeatures, TimeEncoder
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
-from .traj_deeponet import compute_boundaries
-from .traj_transformer import TrajectoryDecoderTransformer
 
 
 class CrossSegmentAttention(nn.Module):

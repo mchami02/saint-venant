@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .decoders import TrajectoryDecoderTransformer
 from .feature_encoders import TimeEncoder
 
 
@@ -59,10 +60,6 @@ class BreakpointEvolution(nn.Module):
             num_layers=num_time_layers,
             dropout=dropout,
         )
-
-        # Reuse TrajectoryDecoderTransformer architecture inline
-        # (cross-attention + additive combination + position head)
-        from ..traj_transformer import TrajectoryDecoderTransformer
 
         self.traj_decoder = TrajectoryDecoderTransformer(
             hidden_dim=hidden_dim,

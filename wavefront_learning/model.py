@@ -15,12 +15,12 @@ from models.traj_deeponet import (
     build_no_traj_deeponet,
     build_traj_deeponet,
 )
+from models.ctt_disc import build_ctt_disc
 from models.traj_transformer import (
     build_biased_classifier_traj_transformer,
     build_classifier_all_traj_transformer,
     build_classifier_traj_transformer,
     build_ctt_biased,
-    build_ctt_disc,
     build_ctt_film,
     build_ctt_seg_physics,
     build_no_traj_transformer,
