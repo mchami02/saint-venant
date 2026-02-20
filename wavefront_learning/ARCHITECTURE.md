@@ -914,6 +914,135 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 
 ---
 
+### WaveFrontModel
+
+**Location**: `models/wavefront_model.py`
+
+A learned Riemann solver that explicitly constructs solutions by predicting wave characteristics (shock vs rarefaction, speeds) for each discontinuity, handling wave interactions iteratively, and reconstructing the full density grid from the resulting wave pattern. No attention mechanisms — each discontinuity is processed independently by a shared encoder + 3 heads.
+
+#### Pseudocode
+
+```
+discontinuities: (D, 3)  →  DiscontinuityEncoder(Fourier + MLP)  →  emb: (D, H)
+emb  →  ClassifierHead(MLP → Sigmoid)    →  is_shock: (D,)
+emb  →  ShockHead(MLP)                   →  shock_speed: (D,)
+emb  →  RarefactionHead(MLP)             →  [speed1, delta]: (D, 2)
+
+Per disc d:
+  shock branch:  1 wave at shock_speed, jump = (rho_R - rho_L) * is_shock
+  rarefaction branch: N sub-waves, speeds linspace(speed1, speed1 + softplus(delta)),
+                      each jump = (rho_R - rho_L) * (1 - is_shock) / N
+
+→ Wave buffer: (W_max,) containing [origin_x, origin_t, speed, jump, active, type]
+
+Collision loop (max_interaction_rounds times):
+  Sort active waves by position → find earliest pairwise collision
+  At collision: create new disc (x_coll, rho_L_outer, rho_R_outer)
+  Re-encode with same encoder+heads → spawn new waves in buffer
+  Soft-deactivate colliding waves
+
+Grid reconstruction (fully vectorized over B, W, nt, nx):
+  density(t, x) = ks[0] + Σ_w jump_w · σ((x - pos_w(t)) / σ) · active_w
+  where pos_w(t) = origin_x_w + speed_w · (t - origin_t_w)
+→ output_grid: (1, nt, nx)
+```
+
+#### Sub-Components
+
+##### DiscontinuityEncoder (shared)
+
+Reuses `models/base/feature_encoders.py:DiscontinuityEncoder`. Fourier features on x coordinate + MLP. Each discontinuity processed independently. Same encoder used for both initial and spawned discontinuities (weight sharing).
+
+##### Classifier Head
+
+$$P(\text{shock})_d = \sigma(W_2 \cdot \text{ReLU}(W_1 \cdot h_d + b_1) + b_2) \cdot m_d$$
+
+Binary per-discontinuity: shock (1) vs rarefaction (0).
+
+##### Shock Head
+
+$$s_d = W_2 \cdot \text{GELU}(W_1 \cdot h_d + b_1) + b_2$$
+
+Predicts shock speed (dx/dt) per discontinuity. Unbounded output.
+
+##### Rarefaction Head
+
+$$[\text{speed}_1, \delta]_d = W_2 \cdot \text{GELU}(W_1 \cdot h_d + b_1) + b_2$$
+
+Speed range: $[\text{speed}_1, \text{speed}_1 + \text{softplus}(\delta)]$. $N$ sub-waves evenly spaced within this range.
+
+##### Wave Buffer
+
+Pre-allocated tensor of size $W_{max} = D \cdot (N + 1) + R \cdot (N + 1)$ where $R$ = `max_interaction_rounds`.
+
+Each wave stores: `(origin_x, origin_t, speed, jump, active, type)`.
+
+##### Collision Processing
+
+For each round:
+1. Sort active waves by spatial position at $t_{ref} = T/2$
+2. Compute pairwise collision time for adjacent converging waves:
+   $$t_{coll} = \frac{x_j - x_i + s_i \cdot t_{o,i} - s_j \cdot t_{o,j}}{s_i - s_j}$$
+3. Find earliest valid collision (both active, converging, within domain)
+4. At collision: spawn new wave(s) by re-encoding $(x_{coll}, \rho_{L,outer}, \rho_{R,outer})$
+5. Soft-deactivate colliding waves: $\text{active}_w \leftarrow \text{active}_w \cdot (1 - \mathbb{1}_{colliding})$
+
+##### Grid Reconstruction (Jump-based)
+
+$$\rho(t, x) = \rho_0 + \sum_{w} j_w \cdot \sigma\left(\frac{x - p_w(t)}{\sigma}\right) \cdot a_w$$
+
+where:
+- $\rho_0 = \text{ks}[0]$ is the leftmost piece value (base density)
+- $j_w$ is the density jump at wave $w$
+- $p_w(t) = x_{o,w} + s_w \cdot (t - t_{o,w})$ is the wave position at time $t$
+- $a_w$ is the soft activity of wave $w$
+- $\sigma$ is the sigmoid sharpness parameter
+
+Fully vectorized: no loops over spatial or temporal dimensions.
+
+#### Soft Blending for Differentiability
+
+During training, both shock and rarefaction waves are active for each discontinuity, weighted by classifier probability:
+- Shock wave jump: $(\\rho_R - \\rho_L) \cdot P(\text{shock})$
+- Rarefaction sub-wave jumps: $(\\rho_R - \\rho_L) \cdot (1 - P(\text{shock})) / N$
+
+This ensures gradients flow through both branches regardless of the classifier output.
+
+#### Input/Output Format
+
+**Input** (dictionary):
+- `discontinuities`: $(D, 3)$ — $[x_0, \\rho_L, \\rho_R]$ per discontinuity
+- `disc_mask`: $(D,)$ — validity mask
+- `t_coords`: $(1, n_t, n_x)$ — time coordinates
+- `x_coords`: $(1, n_t, n_x)$ — space coordinates
+- `ks`: $(K,)$ — piece values (used for base density $\\rho_0 = ks[0]$)
+
+**Output** (dictionary):
+- `output_grid`: $(1, n_t, n_x)$ — predicted density grid
+- `wave_origins_x`: $(W,)$ — wave origin x-positions (for plotting)
+- `wave_origins_t`: $(W,)$ — wave origin times (for plotting)
+- `wave_speeds`: $(W,)$ — wave speeds (for plotting)
+- `wave_active`: $(W,)$ — wave activity masks (for plotting)
+- `wave_types`: $(W,)$ — 0=shock, 1=rarefaction, 2=spawned (for plotting)
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 64 | Encoder and head hidden dimension |
+| `num_disc_frequencies` | 8 | Fourier features for position encoding |
+| `num_disc_layers` | 2 | MLP depth in discontinuity encoder |
+| `rarefaction_angles` | 5 | N sub-waves per rarefaction fan |
+| `max_interaction_rounds` | 5 | Bounded collision processing iterations |
+| `sigma` | 0.01 | Sigmoid sharpness for reconstruction |
+| `dropout` | 0.05 | Dropout rate in encoder |
+
+#### Factory Functions
+
+- `build_wavefront_model(args)`: Creates WaveFrontModel with configuration from args dict
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -1530,6 +1659,16 @@ Simple grid MSE only.
 |------|--------|
 | `mse` | 1.0 |
 
+#### wavefront_model Preset
+
+For WaveFrontModel (learned Riemann solver). Simple MSE supervision only — wave structure emerges from the architecture.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE}$$
+
 #### Using Presets
 
 ```python
@@ -1568,6 +1707,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
+| WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|

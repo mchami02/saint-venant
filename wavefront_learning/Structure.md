@@ -32,6 +32,7 @@ wavefront_learning/
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
+│   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -74,7 +75,8 @@ wavefront_learning/
 │   ├── trajectory_plots.py       # Core trajectory visualization functions
 │   ├── wandb_trajectory_plots.py # Trajectory plots for PLOTS registry (W&B-compatible)
 │   ├── hybrid_plots.py           # HybridDeepONet-specific visualization
-│   └── charno_plots.py           # CharNO diagnostic visualization (selection weights, entropy, etc.)
+│   ├── charno_plots.py           # CharNO diagnostic visualization (selection weights, entropy, etc.)
+│   └── wavefront_plots.py        # WaveFrontModel visualization (wave pattern overlay on GT grid)
 ├── testing/
 │   ├── __init__.py               # Re-exports all test functions
 │   ├── test_running.py           # Sanity checks, profiling, inference testing
@@ -105,7 +107,7 @@ wavefront_learning/
   - `upload_grids()`, `download_grids()`
 - **data_processing.py** — Grid generation and IC preprocessing.
   - `PiecewiseRandom` (IC class)
-  - `get_nfv_dataset()`, `clean_piecewise_constant_ic()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
+  - `get_nfv_dataset()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
 - **transforms.py** — Input representation transforms.
   - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`
   - `TRANSFORMS` registry
@@ -154,6 +156,8 @@ wavefront_learning/
   - `CharNO`, `build_charno()`
 - **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
   - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`
+- **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
+  - `WaveFrontModel`, `build_wavefront_model()`
 
 ### Model Base Components (`models/base/`)
 
@@ -202,6 +206,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **wandb_trajectory_plots.py** — `plot_grid_with_trajectory_existence()`, `plot_grid_with_acceleration()`, `plot_trajectory_vs_analytical()`, `plot_existence()`, `plot_gt_traj()`
 - **hybrid_plots.py** — `plot_prediction_with_trajectory_existence()`, `plot_mse_error()`, `plot_region_weights()`, `plot_pred_traj()`, `plot_hybrid_predictions()`
 - **charno_plots.py** — `plot_selection_weights()`, `plot_winning_segment()`, `plot_selection_entropy()`, `plot_local_densities()`, `plot_charno_decomposition()`
+- **wavefront_plots.py** — `plot_wave_pattern()` (wave lines overlaid on GT grid heatmap)
 
 ### Testing (`testing/`)
 

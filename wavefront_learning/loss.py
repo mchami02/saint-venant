@@ -131,6 +131,9 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("regularize_traj", 0.1),
         ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
     ],
+    "wavefront_model": [
+        ("mse", 1.0),
+    ],
 }
 
 

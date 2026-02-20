@@ -31,6 +31,7 @@ from plotting import (
     plot_selection_entropy,
     plot_selection_weights,
     plot_trajectory_vs_analytical,
+    plot_wave_pattern,
     plot_winning_segment,
 )
 
@@ -54,6 +55,7 @@ PLOTS: dict[str, callable] = {
     "winning_segment": plot_winning_segment,
     "selection_entropy": plot_selection_entropy,
     "local_densities": plot_local_densities,
+    "wave_pattern": plot_wave_pattern,
 }
 
 # Presets for common configurations
@@ -204,6 +206,12 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",
         "mse_error",
         "existence",
+    ],
+    "wavefront_model": [
+        "ground_truth",
+        "wave_pattern",
+        "pred",
+        "mse_error",
     ],
 }
 

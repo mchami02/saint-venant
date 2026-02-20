@@ -33,6 +33,7 @@ from models.waveno import (
     build_waveno_indep_traj,
     build_waveno_local,
 )
+from models.wavefront_model import build_wavefront_model
 
 # Registry of available models
 MODELS = {
@@ -60,6 +61,7 @@ MODELS = {
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
     "CTTSeg": build_ctt_seg,
+    "WaveFrontModel": build_wavefront_model,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -88,6 +90,7 @@ MODEL_TRANSFORM = {
     "CTTSegPhysics": None,
     "CTTFiLM": None,
     "CTTSeg": None,
+    "WaveFrontModel": None,
 }
 
 
