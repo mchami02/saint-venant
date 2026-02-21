@@ -17,6 +17,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+_UNSET = object()
+
+
 class WaveFrontModel(nn.Module):
     """Learned Riemann solver with analytical wave reconstruction.
 
@@ -190,6 +193,7 @@ class WaveFrontModel(nn.Module):
         wave_jumps: torch.Tensor,
         wave_active: torch.Tensor,
         wave_types: torch.Tensor,
+        base_density: torch.Tensor,
         T_max: float,
         rarefaction_angles: int,
         max_interaction_rounds: int,
@@ -282,8 +286,8 @@ class WaveFrontModel(nn.Module):
             left_jm = torch.gather(sorted_jm, 1, idx_left.unsqueeze(1)).squeeze(1)
             right_jm = torch.gather(sorted_jm, 1, idx_right.unsqueeze(1)).squeeze(1)
 
-            rho_L_new = rho_at_left - left_jm  # density just left of left wave
-            rho_R_new = rho_at_left + right_jm  # density just right of right wave
+            rho_L_new = base_density + rho_at_left - left_jm  # density just left of left wave
+            rho_R_new = base_density + rho_at_left + right_jm  # density just right of right wave
 
             # Create new discontinuity for re-encoding
             new_disc = torch.stack(
@@ -295,6 +299,8 @@ class WaveFrontModel(nn.Module):
             new_is_shock, new_shock_speed, new_rar_params = self._encode_and_predict(
                 new_disc, new_mask
             )
+            if not self.training:
+                new_is_shock = (new_is_shock > 0.5).float()
 
             new_jump = rho_R_new - rho_L_new  # (B,)
 
@@ -370,11 +376,14 @@ class WaveFrontModel(nn.Module):
         base_density: torch.Tensor,
         t_coords: torch.Tensor,
         x_coords: torch.Tensor,
-        sigma: float,
+        sigma: float | None,
     ) -> torch.Tensor:
         """Reconstruct density grid from wave pattern.
 
-        density(t, x) = base + sum_w jump_w * sigmoid((x - pos_w(t)) / sigma) * active_w
+        density(t, x) = base + sum_w jump_w * step((x - pos_w(t)) / sigma) * active_w
+
+        When sigma is None, uses Heaviside step function (sharp).
+        When sigma is a float, uses sigmoid (smooth).
 
         Args:
             wave_origin_x: (B, W)
@@ -410,8 +419,11 @@ class WaveFrontModel(nn.Module):
         # Wave position at each time: (B, W, nt, nx)
         wave_pos = ox + sp * (t_exp - ot)
 
-        # Soft step function: sigmoid((x - wave_pos) / sigma)
-        step = torch.sigmoid((x_exp - wave_pos) / sigma)
+        # Step function: Heaviside (sharp) or sigmoid (smooth)
+        if sigma is None:
+            step = (x_exp >= wave_pos).float()
+        else:
+            step = torch.sigmoid((x_exp - wave_pos) / sigma)
 
         # Density contribution per wave: jump * step * activity
         contributions = jm * step * ac  # (B, W, nt, nx)
@@ -460,6 +472,8 @@ class WaveFrontModel(nn.Module):
         is_shock, shock_speed, rar_params = self._encode_and_predict(
             discontinuities, disc_mask
         )
+        if not self.training:
+            is_shock = (is_shock > 0.5).float()
 
         # Build initial waves
         (
@@ -474,25 +488,27 @@ class WaveFrontModel(nn.Module):
             rarefaction_angles,
         )
 
-        # Iterative collision processing
-        (
-            wave_origin_x,
-            wave_origin_t,
-            wave_speeds,
-            wave_jumps,
-            wave_active,
-            wave_types,
-        ) = self._process_collisions(
-            wave_origin_x,
-            wave_origin_t,
-            wave_speeds,
-            wave_jumps,
-            wave_active,
-            wave_types,
-            T_max,
-            rarefaction_angles,
-            max_interaction_rounds,
-        )
+        # Iterative collision processing (eval only; training uses single disc)
+        if not self.training:
+            (
+                wave_origin_x,
+                wave_origin_t,
+                wave_speeds,
+                wave_jumps,
+                wave_active,
+                wave_types,
+            ) = self._process_collisions(
+                wave_origin_x,
+                wave_origin_t,
+                wave_speeds,
+                wave_jumps,
+                wave_active,
+                wave_types,
+                base_density,
+                T_max,
+                rarefaction_angles,
+                max_interaction_rounds,
+            )
 
         return {
             "wave_origin_x": wave_origin_x,
@@ -509,7 +525,7 @@ class WaveFrontModel(nn.Module):
         waves: dict,
         t_coords: torch.Tensor,
         x_coords: torch.Tensor,
-        sigma: float,
+        sigma: float | None,
     ) -> torch.Tensor:
         """Reconstruct density grid from wave data.
 
@@ -535,20 +551,81 @@ class WaveFrontModel(nn.Module):
         )
 
     def forward(self, batch_input: dict) -> dict:
-        """Forward pass — delegates to predict with constructor defaults."""
-        return self.predict(
-            batch_input,
-            rarefaction_angles=self.rarefaction_angles,
-            max_interaction_rounds=self.max_interaction_rounds,
-            sigma=self.sigma,
+        """Forward pass — dispatches to train or eval path."""
+        if self.training:
+            return self._forward_train(batch_input)
+        return self._forward_eval(batch_input)
+
+    def _forward_train(self, batch_input: dict) -> dict:
+        """Training forward: soft blend of shock and rarefaction grids.
+
+        Both wave types are reconstructed at full strength before blending,
+        ensuring full gradient flow to both shock_speed and rar_params
+        regardless of is_shock value.
+        """
+        discontinuities = batch_input["discontinuities"]  # (B, D, 3)
+        disc_mask = batch_input["disc_mask"]  # (B, D)
+        ks = batch_input["ks"]  # (B, K)
+        t_coords = batch_input["t_coords"]
+        x_coords = batch_input["x_coords"]
+
+        base_density = ks[:, 0]  # (B,)
+
+        # Encode and predict wave parameters
+        is_shock, shock_speed, rar_params = self._encode_and_predict(
+            discontinuities, disc_mask
         )
+
+        # Build shock-only waves (is_shock=1 for all discs)
+        ones = torch.ones_like(is_shock)
+        shock_waves = self._build_initial_waves(
+            discontinuities, disc_mask, ones, shock_speed, rar_params,
+            self.rarefaction_angles,
+        )
+        shock_grid = self._reconstruct_grid(
+            *shock_waves[:5], base_density, t_coords, x_coords, self.sigma,
+        )
+
+        # Build rarefaction-only waves (is_shock=0 for all discs)
+        zeros = torch.zeros_like(is_shock)
+        rar_waves = self._build_initial_waves(
+            discontinuities, disc_mask, zeros, shock_speed, rar_params,
+            self.rarefaction_angles,
+        )
+        rar_grid = self._reconstruct_grid(
+            *rar_waves[:5], base_density, t_coords, x_coords, self.sigma,
+        )
+
+        # Blend: p * shock_grid + (1 - p) * rar_grid
+        p = is_shock[:, 0:1, None, None]  # (B, 1, 1, 1)
+        output_grid = shock_grid * p + rar_grid * (1 - p)
+
+        return {"output_grid": output_grid}
+
+    def _forward_eval(self, batch_input: dict) -> dict:
+        """Eval forward: hard threshold + Heaviside reconstruction."""
+        waves = self.build_waves(
+            batch_input, self.rarefaction_angles, self.max_interaction_rounds
+        )
+        output_grid = self.get_grid(
+            waves, batch_input["t_coords"], batch_input["x_coords"], sigma=None
+        )
+
+        return {
+            "output_grid": output_grid,
+            "wave_origins_x": waves["wave_origin_x"].detach(),
+            "wave_origins_t": waves["wave_origin_t"].detach(),
+            "wave_speeds": waves["wave_speeds"].detach(),
+            "wave_active": waves["wave_active"].detach(),
+            "wave_types": waves["wave_types"].detach(),
+        }
 
     def predict(
         self,
         batch_input: dict,
-        rarefaction_angles: int,
-        max_interaction_rounds: int,
-        sigma: float,
+        rarefaction_angles: int | None = None,
+        max_interaction_rounds: int | None = None,
+        sigma: float | None = _UNSET,
     ) -> dict:
         """Run the full pipeline with overridable hyperparameters.
 
@@ -560,8 +637,12 @@ class WaveFrontModel(nn.Module):
                 - x_coords: (B, 1, nt, nx) space coordinates
                 - ks: (B, K) piece values (used for base density)
             rarefaction_angles: Number of sub-waves per rarefaction fan.
+                Defaults to constructor value.
             max_interaction_rounds: Maximum collision processing iterations.
+                Defaults to constructor value.
             sigma: Sigmoid sharpness for grid reconstruction.
+                Defaults to self.sigma in training, None (Heaviside) in eval.
+                Pass an explicit float to override in either mode.
 
         Returns:
             Dictionary containing:
@@ -572,6 +653,13 @@ class WaveFrontModel(nn.Module):
                 - wave_active: (B, W) wave activity
                 - wave_types: (B, W) wave types (0=shock, 1=rarefaction, 2=spawned)
         """
+        if rarefaction_angles is None:
+            rarefaction_angles = self.rarefaction_angles
+        if max_interaction_rounds is None:
+            max_interaction_rounds = self.max_interaction_rounds
+        if sigma is _UNSET:
+            sigma = self.sigma if self.training else None
+
         waves = self.build_waves(batch_input, rarefaction_angles, max_interaction_rounds)
         output_grid = self.get_grid(
             waves, batch_input["t_coords"], batch_input["x_coords"], sigma
