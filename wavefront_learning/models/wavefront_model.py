@@ -5,35 +5,29 @@ discontinuity, handles wave interactions iteratively, and reconstructs
 the full density grid from the resulting wave pattern.
 
 Architecture:
-    (x, rho_L, rho_R) per disc
-      -> DiscontinuityEncoder (Fourier + MLP, no attention)
+    (rho_L, rho_R) per disc
+      -> MLP encoder (2 -> H)
       -> 3 heads: classifier, shock_head, rarefaction_head
-      -> Build waves (shocks as single lines, rarefactions as N sub-wave fans)
-      -> Iterative collision processing (re-encode spawned discs with same encoder+heads)
-      -> Grid reconstruction via jump-based soft sigmoid formula
-      -> output_grid (B, 1, nt, nx)
+      -> build_waves: initial waves + collision processing -> wave dict
+      -> get_grid: wave dict + query coords -> density grid (B, 1, nt, nx)
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.base import DiscontinuityEncoder
-
 
 class WaveFrontModel(nn.Module):
     """Learned Riemann solver with analytical wave reconstruction.
 
     Components:
-        disc_encoder: Fourier + MLP encoder for discontinuities
+        disc_encoder: MLP encoder for (rho_L, rho_R) discontinuities
         classifier_head: P(shock) per discontinuity
         shock_head: shock speed (dx/dt) per discontinuity
         rarefaction_head: [speed1, delta] per discontinuity
 
     Args:
         hidden_dim: Hidden dimension for encoder and heads.
-        num_disc_frequencies: Fourier frequency bands for position encoding.
-        num_disc_layers: MLP depth in discontinuity encoder.
         rarefaction_angles: Number of sub-waves per rarefaction fan.
         max_interaction_rounds: Maximum collision processing iterations.
         sigma: Sigmoid sharpness for grid reconstruction.
@@ -43,8 +37,6 @@ class WaveFrontModel(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_disc_frequencies: int = 8,
-        num_disc_layers: int = 2,
         rarefaction_angles: int = 5,
         max_interaction_rounds: int = 5,
         sigma: float = 0.01,
@@ -56,14 +48,13 @@ class WaveFrontModel(nn.Module):
         self.max_interaction_rounds = max_interaction_rounds
         self.sigma = sigma
 
-        # Shared discontinuity encoder (used for initial and spawned discs)
-        self.disc_encoder = DiscontinuityEncoder(
-            input_dim=3,
-            hidden_dim=hidden_dim,
-            output_dim=hidden_dim,
-            num_frequencies=num_disc_frequencies,
-            num_layers=num_disc_layers,
-            dropout=dropout,
+        # Shared discontinuity encoder: (rho_L, rho_R) -> H
+        self.disc_encoder = nn.Sequential(
+            nn.Linear(2, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
         )
 
         # Three prediction heads
@@ -102,7 +93,8 @@ class WaveFrontModel(nn.Module):
             shock_speed: (B, D) predicted shock speed.
             rar_params: (B, D, 2) rarefaction [speed1, delta].
         """
-        emb = self.disc_encoder(discs, mask)  # (B, D, H)
+        features = discs[:, :, 1:]  # (B, D, 2) — just rho_L, rho_R
+        emb = self.disc_encoder(features) * mask.unsqueeze(-1)  # (B, D, H)
         is_shock = torch.sigmoid(self.classifier_head(emb).squeeze(-1)) * mask
         shock_speed = self.shock_head(emb).squeeze(-1)  # (B, D)
         rar_params = self.rarefaction_head(emb)  # (B, D, 2)
@@ -115,6 +107,7 @@ class WaveFrontModel(nn.Module):
         is_shock: torch.Tensor,
         shock_speed: torch.Tensor,
         rar_params: torch.Tensor,
+        rarefaction_angles: int,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -134,7 +127,7 @@ class WaveFrontModel(nn.Module):
             wave_types: (B, W) 0=shock, 1=rarefaction
         """
         B, D, _ = discontinuities.shape
-        N = self.rarefaction_angles
+        N = rarefaction_angles
         device = discontinuities.device
 
         x_pos = discontinuities[:, :, 0]  # (B, D)
@@ -198,6 +191,8 @@ class WaveFrontModel(nn.Module):
         wave_active: torch.Tensor,
         wave_types: torch.Tensor,
         T_max: float,
+        rarefaction_angles: int,
+        max_interaction_rounds: int,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -212,10 +207,10 @@ class WaveFrontModel(nn.Module):
         spawn new waves from the collision point, and soft-deactivate colliding waves.
         """
         B = wave_origin_x.shape[0]
-        N = self.rarefaction_angles
+        N = rarefaction_angles
         device = wave_origin_x.device
 
-        for _ in range(self.max_interaction_rounds):
+        for _ in range(max_interaction_rounds):
             W = wave_origin_x.shape[1]
 
             # Position of each wave at a reference time (use T_max/2 for sorting)
@@ -375,6 +370,7 @@ class WaveFrontModel(nn.Module):
         base_density: torch.Tensor,
         t_coords: torch.Tensor,
         x_coords: torch.Tensor,
+        sigma: float,
     ) -> torch.Tensor:
         """Reconstruct density grid from wave pattern.
 
@@ -415,7 +411,7 @@ class WaveFrontModel(nn.Module):
         wave_pos = ox + sp * (t_exp - ot)
 
         # Soft step function: sigmoid((x - wave_pos) / sigma)
-        step = torch.sigmoid((x_exp - wave_pos) / self.sigma)
+        step = torch.sigmoid((x_exp - wave_pos) / sigma)
 
         # Density contribution per wave: jump * step * activity
         contributions = jm * step * ac  # (B, W, nt, nx)
@@ -425,44 +421,47 @@ class WaveFrontModel(nn.Module):
 
         return density.unsqueeze(1)  # (B, 1, nt, nx)
 
-    def forward(self, batch_input: dict) -> dict:
-        """Forward pass.
+    def build_waves(
+        self,
+        batch_input: dict,
+        rarefaction_angles: int,
+        max_interaction_rounds: int,
+    ) -> dict:
+        """Encode discontinuities, build initial waves, and process collisions.
 
         Args:
             batch_input: Dictionary containing:
                 - discontinuities: (B, D, 3) [x, rho_L, rho_R]
                 - disc_mask: (B, D) validity mask
-                - t_coords: (B, 1, nt, nx) time coordinates
-                - x_coords: (B, 1, nt, nx) space coordinates
                 - ks: (B, K) piece values (used for base density)
+                - t_coords: (B, 1, nt, nx) time coordinates
+            rarefaction_angles: Number of sub-waves per rarefaction fan.
+            max_interaction_rounds: Maximum collision processing iterations.
 
         Returns:
-            Dictionary containing:
-                - output_grid: (B, 1, nt, nx) predicted density
-                - wave_origins_x: (B, W) wave origin x positions
-                - wave_origins_t: (B, W) wave origin times
+            Dictionary containing wave data:
+                - wave_origin_x: (B, W) wave origin x positions
+                - wave_origin_t: (B, W) wave origin times
                 - wave_speeds: (B, W) wave speeds
-                - wave_active: (B, W) wave activity
-                - wave_types: (B, W) wave types (0=shock, 1=rarefaction, 2=spawned)
+                - wave_jumps: (B, W) density jumps
+                - wave_active: (B, W) soft activity mask
+                - wave_types: (B, W) 0=shock, 1=rarefaction, 2=spawned
+                - base_density: (B,) leftmost density value
         """
         discontinuities = batch_input["discontinuities"]  # (B, D, 3)
         disc_mask = batch_input["disc_mask"]  # (B, D)
-        t_coords = batch_input["t_coords"]  # (B, 1, nt, nx)
-        x_coords = batch_input["x_coords"]  # (B, 1, nt, nx)
-
-        # Base density: leftmost piece value
         ks = batch_input["ks"]  # (B, K)
-        base_density = ks[:, 0]  # (B,)
+        t_coords = batch_input["t_coords"]  # (B, 1, nt, nx)
 
-        # T_max from time coordinates
+        base_density = ks[:, 0]  # (B,)
         T_max = float(t_coords[:, 0, -1, 0].max())
 
-        # Step 1: Encode and predict wave parameters
+        # Encode and predict wave parameters
         is_shock, shock_speed, rar_params = self._encode_and_predict(
             discontinuities, disc_mask
         )
 
-        # Step 2: Build initial waves
+        # Build initial waves
         (
             wave_origin_x,
             wave_origin_t,
@@ -471,10 +470,11 @@ class WaveFrontModel(nn.Module):
             wave_active,
             wave_types,
         ) = self._build_initial_waves(
-            discontinuities, disc_mask, is_shock, shock_speed, rar_params
+            discontinuities, disc_mask, is_shock, shock_speed, rar_params,
+            rarefaction_angles,
         )
 
-        # Step 3: Iterative collision processing
+        # Iterative collision processing
         (
             wave_origin_x,
             wave_origin_t,
@@ -490,27 +490,100 @@ class WaveFrontModel(nn.Module):
             wave_active,
             wave_types,
             T_max,
+            rarefaction_angles,
+            max_interaction_rounds,
         )
 
-        # Step 4: Grid reconstruction
-        output_grid = self._reconstruct_grid(
-            wave_origin_x,
-            wave_origin_t,
-            wave_speeds,
-            wave_jumps,
-            wave_active,
-            base_density,
+        return {
+            "wave_origin_x": wave_origin_x,
+            "wave_origin_t": wave_origin_t,
+            "wave_speeds": wave_speeds,
+            "wave_jumps": wave_jumps,
+            "wave_active": wave_active,
+            "wave_types": wave_types,
+            "base_density": base_density,
+        }
+
+    def get_grid(
+        self,
+        waves: dict,
+        t_coords: torch.Tensor,
+        x_coords: torch.Tensor,
+        sigma: float,
+    ) -> torch.Tensor:
+        """Reconstruct density grid from wave data.
+
+        Args:
+            waves: Dictionary from build_waves().
+            t_coords: (B, 1, nt, nx) time coordinates.
+            x_coords: (B, 1, nt, nx) space coordinates.
+            sigma: Sigmoid sharpness for grid reconstruction.
+
+        Returns:
+            output_grid: (B, 1, nt, nx) predicted density.
+        """
+        return self._reconstruct_grid(
+            waves["wave_origin_x"],
+            waves["wave_origin_t"],
+            waves["wave_speeds"],
+            waves["wave_jumps"],
+            waves["wave_active"],
+            waves["base_density"],
             t_coords,
             x_coords,
+            sigma,
+        )
+
+    def forward(self, batch_input: dict) -> dict:
+        """Forward pass — delegates to predict with constructor defaults."""
+        return self.predict(
+            batch_input,
+            rarefaction_angles=self.rarefaction_angles,
+            max_interaction_rounds=self.max_interaction_rounds,
+            sigma=self.sigma,
+        )
+
+    def predict(
+        self,
+        batch_input: dict,
+        rarefaction_angles: int,
+        max_interaction_rounds: int,
+        sigma: float,
+    ) -> dict:
+        """Run the full pipeline with overridable hyperparameters.
+
+        Args:
+            batch_input: Dictionary containing:
+                - discontinuities: (B, D, 3) [x, rho_L, rho_R]
+                - disc_mask: (B, D) validity mask
+                - t_coords: (B, 1, nt, nx) time coordinates
+                - x_coords: (B, 1, nt, nx) space coordinates
+                - ks: (B, K) piece values (used for base density)
+            rarefaction_angles: Number of sub-waves per rarefaction fan.
+            max_interaction_rounds: Maximum collision processing iterations.
+            sigma: Sigmoid sharpness for grid reconstruction.
+
+        Returns:
+            Dictionary containing:
+                - output_grid: (B, 1, nt, nx) predicted density
+                - wave_origins_x: (B, W) wave origin x positions
+                - wave_origins_t: (B, W) wave origin times
+                - wave_speeds: (B, W) wave speeds
+                - wave_active: (B, W) wave activity
+                - wave_types: (B, W) wave types (0=shock, 1=rarefaction, 2=spawned)
+        """
+        waves = self.build_waves(batch_input, rarefaction_angles, max_interaction_rounds)
+        output_grid = self.get_grid(
+            waves, batch_input["t_coords"], batch_input["x_coords"], sigma
         )
 
         return {
             "output_grid": output_grid,
-            "wave_origins_x": wave_origin_x.detach(),
-            "wave_origins_t": wave_origin_t.detach(),
-            "wave_speeds": wave_speeds.detach(),
-            "wave_active": wave_active.detach(),
-            "wave_types": wave_types.detach(),
+            "wave_origins_x": waves["wave_origin_x"].detach(),
+            "wave_origins_t": waves["wave_origin_t"].detach(),
+            "wave_speeds": waves["wave_speeds"].detach(),
+            "wave_active": waves["wave_active"].detach(),
+            "wave_types": waves["wave_types"].detach(),
         }
 
 
@@ -527,8 +600,6 @@ def build_wavefront_model(args: dict) -> WaveFrontModel:
         args = vars(args)
     return WaveFrontModel(
         hidden_dim=args.get("hidden_dim", 64),
-        num_disc_frequencies=args.get("num_disc_frequencies", 8),
-        num_disc_layers=args.get("num_disc_layers", 2),
         rarefaction_angles=args.get("rarefaction_angles", 5),
         max_interaction_rounds=args.get("max_interaction_rounds", 5),
         sigma=args.get("sigma", 0.01),
