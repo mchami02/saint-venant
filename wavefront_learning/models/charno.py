@@ -97,6 +97,7 @@ class CharNO(nn.Module):
         # Stage 1: Segment encoder
         self.segment_encoder = SegmentPhysicsEncoder(
             hidden_dim=hidden_dim,
+            num_frequencies=num_frequencies,
             num_layers=num_seg_mlp_layers,
             flux=flux,
         )

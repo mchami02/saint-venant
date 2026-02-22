@@ -15,107 +15,61 @@ from .flux import DEFAULT_FLUX, Flux
 
 
 class SegmentPhysicsEncoder(nn.Module):
-    """Encodes IC segments with physics-augmented features and rotary position encoding.
+    """Encodes IC segments with physics-augmented features.
 
     For each constant piece k with value rho_k on [xs[k], xs[k+1]]:
-      - x_center = (xs[k] + xs[k+1]) / 2   (position, encoded via RoPE)
+      - x_center = (xs[k] + xs[k+1]) / 2
       - width = xs[k+1] - xs[k]
       - rho_k = ks[k]
       - lambda_k = flux.derivative(rho_k)    (characteristic speed)
       - f_k = flux(rho_k)                    (flux value)
 
-    Content features (width, density, lambda, flux, cumulative mass) are
-    projected to hidden_dim, then rotary positional embedding injects
-    x_center as position information by rotating pairs of dimensions.
+    Spatial features (x_center, width) are Fourier-encoded.
+    All features are concatenated and projected via MLP.
 
     Args:
-        hidden_dim: Output embedding dimension (must be even).
+        hidden_dim: Output embedding dimension.
+        num_frequencies: Fourier frequency bands for spatial features.
         num_layers: MLP depth.
         flux: Flux function instance.
-        include_cumulative_mass: Include cumulative mass feature.
-        dropout: Dropout rate.
-        density_poly_degree: Polynomial degree for density features. Degree 1
-            uses rho as-is (default); degree 3 adds rho^2 and rho^3 as extra
-            scalar features, giving the MLP a richer nonlinear basis.
-        rope_base: Base for RoPE inverse-frequency computation.
     """
 
     def __init__(
         self,
         hidden_dim: int = 64,
+        num_frequencies: int = 8,
         num_layers: int = 2,
         flux: Flux | None = None,
         include_cumulative_mass: bool = True,
         dropout: float = 0.0,
-        density_poly_degree: int = 1,
-        rope_base: float = 10000.0,
     ):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
         self.include_cumulative_mass = include_cumulative_mass
-        self.density_poly_degree = density_poly_degree
 
-        assert hidden_dim % 2 == 0, "hidden_dim must be even for RoPE"
-
-        # Content features: width + [rho^1..d, lambda, flux_val, (optional N_k)]
-        num_scalars = density_poly_degree + (3 if include_cumulative_mass else 2)
-        input_dim = 1 + num_scalars  # width + scalar features
-
-        # RoPE inverse frequencies for x_center positioning
-        inv_freq = 1.0 / (
-            rope_base ** (torch.arange(0, hidden_dim, 2).float() / hidden_dim)
+        self.fourier_x = FourierFeatures(
+            num_frequencies=num_frequencies, include_input=True
         )
-        self.register_buffer("inv_freq", inv_freq)
 
-        # Pre-RoPE: project content features to hidden_dim
-        pre_layers: list[nn.Module] = [nn.Linear(input_dim, hidden_dim)]
-        if num_layers > 1:
-            pre_layers.extend(
-                [nn.GELU(), nn.Dropout(dropout), nn.LayerNorm(hidden_dim)]
-            )
-        self.pre_rope = nn.Sequential(*pre_layers)
+        # Input: fourier(x_center) + fourier(width) + scalar features
+        # With cumulative mass: [rho, lambda, flux_val, N_k_normalized] = 4
+        # Without: [rho, lambda, flux_val] = 3
+        num_scalars = 4 if include_cumulative_mass else 3
+        input_dim = 2 * self.fourier_x.output_dim + num_scalars
 
-        # Post-RoPE: refine position-aware representation
-        post_layers: list[nn.Module] = []
-        for i in range(1, num_layers):
-            post_layers.append(nn.Linear(hidden_dim, hidden_dim))
+        layers = []
+        in_dim = input_dim
+        for i in range(num_layers):
+            out_dim = hidden_dim
+            layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
-                post_layers.extend(
-                    [nn.GELU(), nn.Dropout(dropout), nn.LayerNorm(hidden_dim)]
-                )
-        self.post_rope = (
-            nn.Sequential(*post_layers) if post_layers else nn.Identity()
-        )
+                layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
+                layers.append(nn.LayerNorm(out_dim))
+            in_dim = out_dim
 
+        self.mlp = nn.Sequential(*layers)
         self.output_dim = hidden_dim
-
-    def _apply_rope(
-        self, x: torch.Tensor, positions: torch.Tensor
-    ) -> torch.Tensor:
-        """Apply rotary positional embedding.
-
-        Rotates consecutive dimension pairs by angles determined by the
-        position and a geometric frequency schedule (inv_freq buffer).
-
-        Args:
-            x: Input tensor (B, K, H) with H even.
-            positions: Scalar positions (B, K).
-
-        Returns:
-            Rotated tensor (B, K, H).
-        """
-        # (B, K, H//2)
-        freqs = torch.einsum("bk,d->bkd", positions, self.inv_freq)
-        cos_val = freqs.cos()
-        sin_val = freqs.sin()
-
-        x1 = x[..., 0::2]  # (B, K, H//2)
-        x2 = x[..., 1::2]  # (B, K, H//2)
-
-        out1 = x1 * cos_val - x2 * sin_val
-        out2 = x1 * sin_val + x2 * cos_val
-
-        return torch.stack([out1, out2], dim=-1).flatten(-2)  # (B, K, H)
 
     def forward(
         self,
@@ -141,38 +95,34 @@ class SegmentPhysicsEncoder(nn.Module):
         lambda_k = self.flux.derivative(ks)  # (B, K)
         flux_k = self.flux(ks)  # (B, K)
 
-        # Build density polynomial features: [rho, rho^2, ..., rho^d]
-        density_feats = [ks]
-        rho_power = ks
-        for _ in range(1, self.density_poly_degree):
-            rho_power = rho_power * ks
-            density_feats.append(rho_power)
+        # Fourier encode spatial features
+        x_center_enc = self.fourier_x(
+            x_center.reshape(-1)
+        ).reshape(B, K, -1)  # (B, K, F)
+        width_enc = self.fourier_x(
+            width.reshape(-1)
+        ).reshape(B, K, -1)  # (B, K, F)
 
-        # Concatenate content features (non-positional)
+        # Concatenate all features
         if self.include_cumulative_mass:
             # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
             rho_width = ks * width  # (B, K)
             N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
-            total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(
-                min=1e-8
-            )
+            total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
             N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
             scalar_features = torch.stack(
-                [width, *density_feats, lambda_k, flux_k, N_k_normalized], dim=-1
-            )  # (B, K, 1+d+3)
+                [ks, lambda_k, flux_k, N_k_normalized], dim=-1
+            )  # (B, K, 4)
         else:
             scalar_features = torch.stack(
-                [width, *density_feats, lambda_k, flux_k], dim=-1
-            )  # (B, K, 1+d+2)
+                [ks, lambda_k, flux_k], dim=-1
+            )  # (B, K, 3)
+        features = torch.cat(
+            [x_center_enc, width_enc, scalar_features], dim=-1
+        )  # (B, K, 2F+3/4)
 
-        # Project content features to hidden_dim
-        h = self.pre_rope(scalar_features)  # (B, K, H)
-
-        # Inject spatial position via rotary embedding
-        h = self._apply_rope(h, x_center)
-
-        # Refine position-aware representation
-        output = self.post_rope(h)  # (B, K, H)
+        # MLP projection
+        output = self.mlp(features)  # (B, K, H)
 
         # Zero out padded positions
         output = output * pieces_mask.unsqueeze(-1)

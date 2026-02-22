@@ -149,6 +149,7 @@ class WaveNO(nn.Module):
         else:
             self.segment_encoder = SegmentPhysicsEncoder(
                 hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
                 num_layers=num_seg_mlp_layers,
                 flux=flux,
                 include_cumulative_mass=local_features,
