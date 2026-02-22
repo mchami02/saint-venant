@@ -98,11 +98,20 @@ Use `--no_wandb` flag to disable logging.
 | **TrajTransformer** | Cross-attention variant of TrajDeepONet | `{positions, output_grid}` |
 | **ClassifierTrajTransformer** | TrajTransformer + shock/rarefaction classifier | `{positions, existence, output_grid}` |
 | **ClassifierAllTrajTransformer** | ClassifierTrajTransformer with all-boundary cross-attention density decoding | `{positions, existence, output_grid}` |
+| **BiasedClassifierTrajTransformer** | ClassifierTrajTransformer with characteristic attention bias for resolution generalization | `{positions, existence, output_grid}` |
 | **NoTrajTransformer** | TrajTransformer without trajectory prediction | `{output_grid}` |
 | **DeepONet** | Classic branch-trunk dot product baseline | `{output_grid}` |
 | **FNO** | Fourier Neural Operator baseline (neuralop wrapper) | `{output_grid}` |
 | **EncoderDecoder** | Transformer encoder + axial attention decoder | `{output_grid}` |
 | **EncoderDecoderCross** | Transformer encoder + cross-attention decoder | `{output_grid}` |
+| **WaveNOCls** | WaveNO + classifier head to filter breakpoints | `{positions, existence, output_grid}` |
+| **WaveNOLocal** | WaveNO without cumulative mass (N_k) feature | `{positions, output_grid}` |
+| **WaveNOIndepTraj** | WaveNO with independent trajectory from raw discontinuities | `{positions, output_grid}` |
+| **WaveNODisc** | WaveNO with discontinuity tokens instead of segment tokens | `{positions, output_grid}` |
+| **CTTBiased** | CTT + characteristic attention bias (ablation alias) | `{positions, existence, output_grid}` |
+| **CTTSegPhysics** | CTT + physics features in disc encoder | `{positions, existence, output_grid}` |
+| **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |
+| **CTTSeg** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
 
 ## Available Losses
 
@@ -132,9 +141,11 @@ Presets (in `loss.py`):
 | `traj_transformer` | TrajTransformer | mse + ic_anchoring + boundary + regularize_traj |
 | `classifier_traj_transformer` | ClassifierTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
 | `classifier_all_traj_transformer` | ClassifierAllTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `biased_classifier_traj_transformer` | BiasedClassifierTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
 | `no_traj_transformer` | NoTrajTransformer | mse |
 | `pde_shocks` | Any grid model | mse + pde_shock_residual |
 | `mse` | Any grid model | mse only |
+| `ctt_seg` | CTTSeg | mse + ic_anchoring + boundary + regularize_traj + acceleration |
 
 ## Adding a New Loss
 

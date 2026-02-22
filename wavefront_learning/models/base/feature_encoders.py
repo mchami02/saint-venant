@@ -80,6 +80,7 @@ class TimeEncoder(nn.Module):
         output_dim: int = 128,
         num_frequencies: int = 32,
         num_layers: int = 3,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.fourier = FourierFeatures(num_frequencies=num_frequencies)
@@ -91,6 +92,7 @@ class TimeEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 
@@ -126,7 +128,7 @@ class DiscontinuityEncoder(nn.Module):
         output_dim: Output dimension (latent space dimension).
         num_frequencies: Number of Fourier frequency bands for x coordinate.
         num_layers: Number of MLP layers.
-        dropout: Dropout rate (unused, kept for API compatibility).
+        dropout: Dropout rate applied after GELU in MLP layers.
     """
 
     def __init__(
@@ -136,7 +138,7 @@ class DiscontinuityEncoder(nn.Module):
         output_dim: int = 128,
         num_frequencies: int = 16,
         num_layers: int = 3,
-        dropout: float = 0.1,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -148,8 +150,8 @@ class DiscontinuityEncoder(nn.Module):
             num_frequencies=num_frequencies, include_input=True
         )
 
-        # Input dimension: Fourier features for x + raw rho_L and rho_R
-        mlp_input_dim = self.fourier_x.output_dim + 2  # 2 for [rho_L, rho_R]
+        # Input dimension: Fourier features for x + remaining features
+        mlp_input_dim = self.fourier_x.output_dim + (input_dim - 1)
 
         # Build MLP layers
         layers = []
@@ -159,6 +161,7 @@ class DiscontinuityEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 
@@ -172,8 +175,8 @@ class DiscontinuityEncoder(nn.Module):
         """Encode discontinuities.
 
         Args:
-            discontinuities: Discontinuity features of shape (B, D, 3)
-                where each row is [x_position, rho_L, rho_R].
+            discontinuities: Discontinuity features of shape (B, D, input_dim)
+                where first column is x_position, rest are extra features.
             mask: Validity mask of shape (B, D) where 1 = valid, 0 = padding.
 
         Returns:
@@ -181,17 +184,17 @@ class DiscontinuityEncoder(nn.Module):
         """
         B, D, _ = discontinuities.shape
 
-        # Extract x coordinate and density values
+        # Extract x coordinate and remaining features
         x_coord = discontinuities[:, :, 0]  # (B, D)
-        rho_values = discontinuities[:, :, 1:]  # (B, D, 2) = [rho_L, rho_R]
+        extra_features = discontinuities[:, :, 1:]  # (B, D, input_dim-1)
 
         # Apply Fourier features to x coordinate
         x_flat = x_coord.reshape(-1)  # (B*D,)
         x_fourier = self.fourier_x(x_flat)  # (B*D, fourier_dim)
         x_fourier = x_fourier.reshape(B, D, -1)  # (B, D, fourier_dim)
 
-        # Concatenate Fourier features with density values
-        features = torch.cat([x_fourier, rho_values], dim=-1)  # (B, D, fourier_dim + 2)
+        # Concatenate Fourier features with extra features
+        features = torch.cat([x_fourier, extra_features], dim=-1)
 
         # Apply MLP
         output = self.mlp(features)  # (B, D, output_dim)

@@ -309,6 +309,7 @@ def eval_steps(
             grid_config=grid_config,
             model_name=args.model,
             max_steps=n_steps,
+            min_steps=n_steps,
             train_ratio=0.0,
             val_ratio=0.0,
             only_shocks=only_shocks,

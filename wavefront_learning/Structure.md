@@ -14,7 +14,8 @@ wavefront_learning/
 │   ├── __init__.py               # WavefrontDataset, collate_wavefront_batch, get_wavefront_datasets
 │   ├── data_loading.py           # HuggingFace upload/download for grid caching
 │   ├── data_processing.py        # Grid generation, discontinuity extraction, preprocessing
-│   └── transforms.py             # Input transforms and TRANSFORMS registry
+│   ├── transforms.py             # Input transforms and TRANSFORMS registry
+│   └── visualize_extraction.ipynb # Notebook: IC grid with extracted discontinuity positions
 ├── model.py                      # Model factory and registry
 ├── loss.py                       # Loss factory, CombinedLoss, presets
 ├── logger.py                     # Weights & Biases logging utilities
@@ -25,18 +26,21 @@ wavefront_learning/
 │   ├── shock_trajectory_net.py   # ShockTrajectoryNet (DeepONet-like trajectory model)
 │   ├── hybrid_deeponet.py        # HybridDeepONet (trajectory + grid prediction)
 │   ├── traj_deeponet.py          # TrajDeepONet, ClassifierTrajDeepONet, NoTrajDeepONet
-│   ├── traj_transformer.py       # TrajTransformer, ClassifierTrajTransformer, ClassifierAllTrajTransformer
+│   ├── traj_transformer.py       # TrajTransformer, ClassifierTrajTransformer, ClassifierAllTrajTransformer (disc-based variants)
+│   ├── ctt_seg.py               # CTTSeg: standalone segment-based ClassifierTrajTransformer
 │   ├── deeponet.py               # Classic DeepONet baseline
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
+│   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
 │       ├── blocks.py             # ResidualBlock
 │       ├── feature_encoders.py   # FourierFeatures, TimeEncoder, DiscontinuityEncoder, SpaceTimeEncoder
-│       ├── decoders.py           # TrajectoryDecoder
+│       ├── boundaries.py         # compute_boundaries (left/right boundary extraction)
+│       ├── decoders.py           # TrajectoryDecoder, TrajectoryDecoderTransformer, DensityDecoderTransformer
 │       ├── regions.py            # RegionTrunk, RegionTrunkSet
 │       ├── assemblers.py         # GridAssembler (soft region boundaries)
 │       ├── transformer_encoder.py # Tokenizer, EncoderLayer, Encoder
@@ -44,8 +48,8 @@ wavefront_learning/
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
-│       ├── characteristic_features.py  # SegmentPhysicsEncoder, CharacteristicFeatureComputer
-│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias
+│       ├── characteristic_features.py  # SegmentPhysicsEncoder, DiscontinuityPhysicsEncoder, CharacteristicFeatureComputer
+│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias, compute_discontinuity_characteristic_bias
 │       └── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
 ├── losses/
 │   ├── __init__.py               # Re-exports all loss classes and flux utilities
@@ -72,7 +76,8 @@ wavefront_learning/
 │   ├── trajectory_plots.py       # Core trajectory visualization functions
 │   ├── wandb_trajectory_plots.py # Trajectory plots for PLOTS registry (W&B-compatible)
 │   ├── hybrid_plots.py           # HybridDeepONet-specific visualization
-│   └── charno_plots.py           # CharNO diagnostic visualization (selection weights, entropy, etc.)
+│   ├── charno_plots.py           # CharNO diagnostic visualization (selection weights, entropy, etc.)
+│   └── wavefront_plots.py        # WaveFrontModel visualization (wave pattern overlay on GT grid)
 ├── testing/
 │   ├── __init__.py               # Re-exports all test functions
 │   ├── test_running.py           # Sanity checks, profiling, inference testing
@@ -102,6 +107,7 @@ wavefront_learning/
 - **data_loading.py** — Upload/download grids to HuggingFace for caching.
   - `upload_grids()`, `download_grids()`
 - **data_processing.py** — Grid generation and IC preprocessing.
+  - `PiecewiseRandom` (IC class)
   - `get_nfv_dataset()`, `clean_piecewise_constant_ic()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
 - **transforms.py** — Input representation transforms.
   - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`
@@ -134,12 +140,13 @@ wavefront_learning/
 - **hybrid_deeponet.py** — Combined trajectory + grid prediction.
   - `HybridDeepONet`, `build_hybrid_deeponet()`
 - **traj_deeponet.py** — Trajectory-conditioned single trunk variants.
-  - `TrajDeepONet`, `ClassifierTrajDeepONet`, `NoTrajDeepONet`, `PositionDecoder`
+  - `TrajDeepONet`, `PositionDecoder`, `BoundaryConditionedTrunk`
   - `build_traj_deeponet()`, `build_classifier_traj_deeponet()`, `build_no_traj_deeponet()`
-  - `compute_boundaries()`
-- **traj_transformer.py** — Cross-attention trajectory decoder variants.
-  - `TrajTransformer`, `ClassifierTrajTransformer`, `ClassifierAllTrajTransformer`, `NoTrajTransformer`, `TrajectoryDecoderTransformer`
-  - `build_traj_transformer()`, `build_classifier_traj_transformer()`, `build_classifier_all_traj_transformer()`, `build_no_traj_transformer()`
+- **traj_transformer.py** — Cross-attention trajectory decoder variants (disc-based).
+  - `TrajTransformer`, `DynamicDensityDecoder`
+  - `build_traj_transformer()`, `build_classifier_traj_transformer()`, `build_classifier_all_traj_transformer()`, `build_no_traj_transformer()`, `build_biased_classifier_traj_transformer()`, `build_ctt_biased()`, `build_ctt_seg_physics()`, `build_ctt_film()`
+- **ctt_seg.py** — Standalone segment-based ClassifierTrajTransformer.
+  - `CTTSeg`, `build_ctt_seg()`
 - **deeponet.py** — Classic DeepONet baseline.
   - `DeepONet`, `build_deeponet()`
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.
@@ -149,14 +156,17 @@ wavefront_learning/
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
   - `CharNO`, `build_charno()`
 - **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
-  - `WaveNO`, `build_waveno()`
+  - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`
+- **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
+  - `WaveFrontModel`, `build_wavefront_model()`
 
 ### Model Base Components (`models/base/`)
 
 - **base_model.py** — `BaseWavefrontModel` (abstract base with `count_parameters()`)
 - **blocks.py** — `ResidualBlock`
 - **feature_encoders.py** — `FourierFeatures`, `TimeEncoder`, `DiscontinuityEncoder`, `SpaceTimeEncoder`
-- **decoders.py** — `TrajectoryDecoder`
+- **boundaries.py** — `compute_boundaries()` (left/right boundary extraction from trajectory positions)
+- **decoders.py** — `TrajectoryDecoder`, `TrajectoryDecoderTransformer`, `DensityDecoderTransformer`
 - **regions.py** — `RegionTrunk`, `RegionTrunkSet`
 - **assemblers.py** — `GridAssembler`
 - **transformer_encoder.py** — `Tokenizer`, `EncoderLayer`, `Encoder`
@@ -164,8 +174,8 @@ wavefront_learning/
 - **cross_decoder.py** — `CrossDecoderLayer`, `CrossDecoder`
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
-- **characteristic_features.py** — `SegmentPhysicsEncoder`, `CharacteristicFeatureComputer`
-- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`
+- **characteristic_features.py** — `SegmentPhysicsEncoder`, `DiscontinuityPhysicsEncoder`, `CharacteristicFeatureComputer`
+- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
 - **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)
 
 ### Losses (`losses/`)
@@ -197,6 +207,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **wandb_trajectory_plots.py** — `plot_grid_with_trajectory_existence()`, `plot_grid_with_acceleration()`, `plot_trajectory_vs_analytical()`, `plot_existence()`, `plot_gt_traj()`
 - **hybrid_plots.py** — `plot_prediction_with_trajectory_existence()`, `plot_mse_error()`, `plot_region_weights()`, `plot_pred_traj()`, `plot_hybrid_predictions()`
 - **charno_plots.py** — `plot_selection_weights()`, `plot_winning_segment()`, `plot_selection_entropy()`, `plot_local_densities()`, `plot_charno_decomposition()`
+- **wavefront_plots.py** — `plot_wave_pattern()` (wave lines overlaid on GT grid heatmap)
 
 ### Testing (`testing/`)
 

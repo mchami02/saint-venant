@@ -15,13 +15,25 @@ from models.traj_deeponet import (
     build_no_traj_deeponet,
     build_traj_deeponet,
 )
+from models.ctt_seg import build_ctt_seg
 from models.traj_transformer import (
+    build_biased_classifier_traj_transformer,
     build_classifier_all_traj_transformer,
     build_classifier_traj_transformer,
+    build_ctt_biased,
+    build_ctt_film,
+    build_ctt_seg_physics,
     build_no_traj_transformer,
     build_traj_transformer,
 )
-from models.waveno import build_waveno
+from models.waveno import (
+    build_waveno,
+    build_waveno_cls,
+    build_waveno_disc,
+    build_waveno_indep_traj,
+    build_waveno_local,
+)
+from models.wavefront_model import build_wavefront_model
 
 # Registry of available models
 MODELS = {
@@ -37,9 +49,19 @@ MODELS = {
     "TrajTransformer": build_traj_transformer,
     "ClassifierTrajTransformer": build_classifier_traj_transformer,
     "ClassifierAllTrajTransformer": build_classifier_all_traj_transformer,
+    "BiasedClassifierTrajTransformer": build_biased_classifier_traj_transformer,
     "NoTrajTransformer": build_no_traj_transformer,
     "CharNO": build_charno,
     "WaveNO": build_waveno,
+    "WaveNOCls": build_waveno_cls,
+    "WaveNOLocal": build_waveno_local,
+    "WaveNOIndepTraj": build_waveno_indep_traj,
+    "WaveNODisc": build_waveno_disc,
+    "CTTBiased": build_ctt_biased,
+    "CTTSegPhysics": build_ctt_seg_physics,
+    "CTTFiLM": build_ctt_film,
+    "CTTSeg": build_ctt_seg,
+    "WaveFrontModel": build_wavefront_model,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -56,9 +78,19 @@ MODEL_TRANSFORM = {
     "TrajTransformer": None,
     "ClassifierTrajTransformer": None,
     "ClassifierAllTrajTransformer": None,
+    "BiasedClassifierTrajTransformer": None,
     "NoTrajTransformer": None,
     "CharNO": None,
     "WaveNO": None,
+    "WaveNOCls": None,
+    "WaveNOLocal": None,
+    "WaveNOIndepTraj": None,
+    "WaveNODisc": None,
+    "CTTBiased": None,
+    "CTTSegPhysics": None,
+    "CTTFiLM": None,
+    "CTTSeg": None,
+    "WaveFrontModel": None,
 }
 
 

@@ -14,7 +14,7 @@ class Tokenizer(nn.Module):
 
 class EncoderLayer(nn.Module):
     """Transformer encoder layer with self-attention and feedforward."""
-    def __init__(self, hidden_dim: int, num_heads: int = 8):
+    def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.0):
         super().__init__()
         self.attention = nn.MultiheadAttention(hidden_dim, num_heads=num_heads, batch_first=True)
         self.feedforward = nn.Sequential(
@@ -24,22 +24,23 @@ class EncoderLayer(nn.Module):
         )
         self.norm1 = nn.LayerNorm(hidden_dim)
         self.norm2 = nn.LayerNorm(hidden_dim)
+        self.drop = nn.Dropout(dropout)
 
     def forward(self, x, key_padding_mask=None):
         att = self.attention(x, x, x, key_padding_mask=key_padding_mask)[0]
-        x = self.norm1(x + att)
+        x = self.norm1(x + self.drop(att))
         ff = self.feedforward(x)
-        x = self.norm2(x + ff)
+        x = self.norm2(x + self.drop(ff))
         return x
 
 
 class Encoder(nn.Module):
     """Transformer encoder with tokenizer and stacked encoder layers."""
-    def __init__(self, input_dim: int, hidden_dim: int, num_layers: int, num_heads: int = 8):
+    def __init__(self, input_dim: int, hidden_dim: int, num_layers: int, num_heads: int = 8, dropout: float = 0.0):
         super().__init__()
         self.tokenizer = Tokenizer(input_dim=input_dim, hidden_dim=hidden_dim)
         self.layers = nn.ModuleList([
-            EncoderLayer(hidden_dim, num_heads) for _ in range(num_layers)
+            EncoderLayer(hidden_dim, num_heads, dropout=dropout) for _ in range(num_layers)
         ])
 
     def forward(self, x, key_padding_mask=None):
