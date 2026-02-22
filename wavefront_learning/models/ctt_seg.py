@@ -66,7 +66,6 @@ class CTTSeg(nn.Module):
         # Segment-based encoding
         self.segment_encoder = SegmentPhysicsEncoder(
             hidden_dim=hidden_dim,
-            num_frequencies=num_disc_frequencies,
             num_layers=num_disc_layers,
             flux=self.flux,
             dropout=dropout,
