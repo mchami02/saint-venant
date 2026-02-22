@@ -40,6 +40,7 @@ class EncoderDecoder(nn.Module):
         dt: float = None,
         dx: float = None,
         device=None,
+        output_dim: int = 1,
     ):
         super().__init__()
 
@@ -53,7 +54,9 @@ class EncoderDecoder(nn.Module):
             )
         elif decoder_type == "cross":
             self.decoder = CrossDecoder(
-                hidden_dim=hidden_dim, num_layers=layers_decoder
+                hidden_dim=hidden_dim,
+                num_layers=layers_decoder,
+                output_dim=output_dim,
             )
         else:
             raise ValueError(
@@ -135,7 +138,7 @@ class EncoderDecoder(nn.Module):
                where channels are [ic_masked, t_coords, x_coords].
 
         Returns:
-            Dict with "output_grid" of shape (B, 1, nt, nx).
+            Dict with "output_grid" of shape (B, output_dim, nt, nx).
         """
         grid = x["grid_input"]
         B, C, T, N = grid.shape
@@ -149,8 +152,12 @@ class EncoderDecoder(nn.Module):
         max_length = int(counts.max().item())
 
         # Extract and pad conditions
-        conds = torch.full((B, max_length, C), 0.0, device=grid.device, dtype=grid.dtype)
-        key_padding_mask = torch.ones(B, max_length, device=grid.device, dtype=torch.bool)
+        conds = torch.full(
+            (B, max_length, C), 0.0, device=grid.device, dtype=grid.dtype
+        )
+        key_padding_mask = torch.ones(
+            B, max_length, device=grid.device, dtype=torch.bool
+        )
         for b in range(B):
             valid_elements = grid_permuted[b][mask[b]]
             conds[b, : counts[b]] = valid_elements
@@ -215,4 +222,27 @@ def build_encoder_decoder_cross(args: dict) -> EncoderDecoder:
         nx=args.get("nx"),
         dt=args.get("dt"),
         dx=args.get("dx"),
+    )
+
+
+def build_ecarz(args: dict) -> EncoderDecoder:
+    """Build EncoderDecoderCross with 2-channel output for ARZ equations.
+
+    Same architecture as EncoderDecoderCross but outputs (B, 2, nt, nx)
+    for the two ARZ components (rho, v).
+
+    Args:
+        args: Configuration dictionary. Same keys as build_encoder_decoder.
+    """
+    return EncoderDecoder(
+        hidden_dim=args.get("hidden_dim", 64),
+        layers_encoder=args.get("layers_encoder", 2),
+        decoder_type="cross",
+        layers_decoder=args.get("layers_decoder", 2),
+        layers_gnn=args.get("layers_gnn", 0),
+        nt=args.get("nt"),
+        nx=args.get("nx"),
+        dt=args.get("dt"),
+        dx=args.get("dx"),
+        output_dim=2,
     )

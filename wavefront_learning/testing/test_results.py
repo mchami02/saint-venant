@@ -17,6 +17,18 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
+def _get_equation_kwargs(args) -> dict | None:
+    """Extract ARZ-specific kwargs from args, if applicable."""
+    if getattr(args, "equation", "LWR") != "ARZ":
+        return None
+    return {
+        "gamma": getattr(args, "gamma", 1.0),
+        "flux_type": getattr(args, "flux_type", "hll"),
+        "reconstruction": getattr(args, "reconstruction", "weno5"),
+        "bc_type": getattr(args, "bc_type", "zero_gradient"),
+    }
+
+
 def collect_samples(
     pred: dict | torch.Tensor,
     batch_input: dict | torch.Tensor,
@@ -67,9 +79,7 @@ def collect_samples(
             )
         for key in ("xs", "ks", "pieces_mask"):
             if key in batch_input:
-                samples[key] = (
-                    batch_input[key][:num_samples].detach().cpu().numpy()
-                )
+                samples[key] = batch_input[key][:num_samples].detach().cpu().numpy()
 
     # Add target (ground truth grid)
     grids = batch_target[:num_samples].detach().cpu().numpy()
@@ -208,6 +218,8 @@ def eval_res(
         train_ratio=0.0,
         val_ratio=0.0,
         only_shocks=False,
+        equation=getattr(args, "equation", "LWR"),
+        equation_kwargs=_get_equation_kwargs(args),
     )
 
     high_res_loader = DataLoader(
@@ -313,6 +325,8 @@ def eval_steps(
             train_ratio=0.0,
             val_ratio=0.0,
             only_shocks=only_shocks,
+            equation=getattr(args, "equation", "LWR"),
+            equation_kwargs=_get_equation_kwargs(args),
         )
 
         step_loader = DataLoader(

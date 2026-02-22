@@ -14,9 +14,10 @@ Submodules:
 
 import numpy as np
 import torch
+from torch.utils.data import Dataset
+
 from data.data_processing import get_wavefront_data
 from data.transforms import TRANSFORMS
-from torch.utils.data import Dataset
 
 
 class WavefrontDataset(Dataset):
@@ -104,6 +105,8 @@ def get_wavefront_datasets(
     val_ratio: float = 0.1,
     random_seed: int = 42,
     only_shocks: bool = True,
+    equation: str = "LWR",
+    equation_kwargs: dict | None = None,
 ) -> tuple[WavefrontDataset, WavefrontDataset, WavefrontDataset]:
     """Get train, val, and test datasets for wavefront learning.
 
@@ -122,6 +125,9 @@ def get_wavefront_datasets(
         val_ratio: Fraction of data for validation.
         random_seed: Random seed for reproducibility.
         only_shocks: If True, generate only shock waves (no rarefactions).
+        equation: Equation system ("LWR" or "ARZ").
+        equation_kwargs: Extra keyword arguments for the ARZ solver
+            (gamma, flux_type, reconstruction, bc_type).
 
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset).
@@ -147,6 +153,8 @@ def get_wavefront_datasets(
         only_shocks=only_shocks,
         random_seed=random_seed,
         max_discontinuities=max_discontinuities,
+        equation=equation,
+        equation_kwargs=equation_kwargs,
     )
 
     # Resolve per-model transform

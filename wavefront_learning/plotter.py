@@ -15,6 +15,8 @@ centrally by plot().
 import matplotlib.pyplot as plt
 from plotting import (
     _log_figure,
+    plot_arz_ground_truth,
+    plot_arz_pred,
     plot_charno_decomposition,
     plot_existence,
     plot_grid_with_acceleration,
@@ -56,6 +58,8 @@ PLOTS: dict[str, callable] = {
     "selection_entropy": plot_selection_entropy,
     "local_densities": plot_local_densities,
     "wave_pattern": plot_wave_pattern,
+    "arz_ground_truth": plot_arz_ground_truth,
+    "arz_pred": plot_arz_pred,
 }
 
 # Presets for common configurations
@@ -212,6 +216,10 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "wave_pattern",
         "pred",
         "mse_error",
+    ],
+    "ecarz": [
+        "arz_ground_truth",
+        "arz_pred",
     ],
 }
 

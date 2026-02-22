@@ -20,9 +20,9 @@ from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
+from losses.selection_supervision import SelectionSupervisionLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
-from losses.selection_supervision import SelectionSupervisionLoss
 from losses.wasserstein import WassersteinLoss
 
 # Registry of available loss functions
@@ -78,6 +78,9 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("pde_shock_residual", 1.0),
     ],
     "mse": [
+        ("mse", 1.0),
+    ],
+    "ecarz": [
         ("mse", 1.0),
     ],
     "traj_transformer": [

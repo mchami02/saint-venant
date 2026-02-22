@@ -104,6 +104,7 @@ Use `--no_wandb` flag to disable logging.
 | **FNO** | Fourier Neural Operator baseline (neuralop wrapper) | `{output_grid}` |
 | **EncoderDecoder** | Transformer encoder + axial attention decoder | `{output_grid}` |
 | **EncoderDecoderCross** | Transformer encoder + cross-attention decoder | `{output_grid}` |
+| **ECARZ** | EncoderDecoderCross with 2-channel output for ARZ (rho, v) | `{output_grid}` (B,2,T,X) |
 | **WaveNOCls** | WaveNO + classifier head to filter breakpoints | `{positions, existence, output_grid}` |
 | **WaveNOLocal** | WaveNO without cumulative mass (N_k) feature | `{positions, output_grid}` |
 | **WaveNOIndepTraj** | WaveNO with independent trajectory from raw discontinuities | `{positions, output_grid}` |
@@ -145,6 +146,7 @@ Presets (in `loss.py`):
 | `no_traj_transformer` | NoTrajTransformer | mse |
 | `pde_shocks` | Any grid model | mse + pde_shock_residual |
 | `mse` | Any grid model | mse only |
+| `ecarz` | ECARZ | mse only |
 | `ctt_seg` | CTTSeg | mse + ic_anchoring + boundary + regularize_traj + acceleration |
 
 ## Adding a New Loss

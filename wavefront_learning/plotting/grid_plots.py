@@ -516,3 +516,92 @@ def plot_pred(
         figures.append((f"pred_sample_{b + 1}", fig))
 
     return figures
+
+
+_ARZ_CHANNELS = [
+    ("rho", "Density (rho)", "viridis"),
+    ("v", "Velocity (v)", "plasma"),
+]
+
+
+def plot_arz_ground_truth(
+    traj_data: dict,
+    grid_config: dict,
+) -> list[tuple[str, Figure]]:
+    """Plot ARZ ground truth with rho and v side by side.
+
+    Args:
+        traj_data: Dict containing 'grids' of shape (B, 2, nt, nx).
+        grid_config: Dict with {nx, nt, dx, dt}.
+
+    Returns:
+        List of (log_key, figure) pairs.
+    """
+    grids = traj_data["grids"]
+    extent = _get_extent(
+        grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    )
+
+    B = grids.shape[0]
+    figures = []
+    for b in range(min(B, 3)):
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        for c, (name, label, cmap) in enumerate(_ARZ_CHANNELS):
+            im = axes[c].imshow(
+                grids[b, c],
+                extent=extent,
+                aspect="auto",
+                origin="lower",
+                cmap=cmap,
+            )
+            axes[c].set_xlabel("Space x")
+            axes[c].set_ylabel("Time t")
+            axes[c].set_title(f"Ground Truth {name} (Sample {b + 1})")
+            plt.colorbar(im, ax=axes[c], label=label)
+        plt.tight_layout()
+        figures.append((f"arz_gt_sample_{b + 1}", fig))
+
+    return figures
+
+
+def plot_arz_pred(
+    traj_data: dict,
+    grid_config: dict,
+) -> list[tuple[str, Figure]]:
+    """Plot ARZ predictions with rho and v side by side.
+
+    Args:
+        traj_data: Dict containing 'output_grid' of shape (B, 2, nt, nx).
+        grid_config: Dict with {nx, nt, dx, dt}.
+
+    Returns:
+        List of (log_key, figure) pairs.
+    """
+    if "output_grid" not in traj_data:
+        return []
+
+    output_grid = traj_data["output_grid"]
+    extent = _get_extent(
+        grid_config["nx"], grid_config["nt"], grid_config["dx"], grid_config["dt"]
+    )
+
+    B = output_grid.shape[0]
+    figures = []
+    for b in range(min(B, 3)):
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        for c, (name, label, cmap) in enumerate(_ARZ_CHANNELS):
+            im = axes[c].imshow(
+                output_grid[b, c],
+                extent=extent,
+                aspect="auto",
+                origin="lower",
+                cmap=cmap,
+            )
+            axes[c].set_xlabel("Space x")
+            axes[c].set_ylabel("Time t")
+            axes[c].set_title(f"Prediction {name} (Sample {b + 1})")
+            plt.colorbar(im, ax=axes[c], label=label)
+        plt.tight_layout()
+        figures.append((f"arz_pred_sample_{b + 1}", fig))
+
+    return figures
