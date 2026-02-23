@@ -78,10 +78,12 @@ def _group_consecutive_diff_indices(
     This function recovers the exact discontinuity position by interpolating.
 
     Groups consecutive np.diff indices:
-    - Single index ``a``: clean boundary. Position = (a + 0.5) * dx.
+    - Single index ``a``: clean boundary between cells ``a`` and ``a+1``.
+      Position = (a + 1) * dx (the shared cell boundary).
     - Two consecutive indices ``[a, a+1]``: mid-cell discontinuity.
       The intermediate cell is at ``a+1``. We invert the cell-average
-      formula to recover the sub-cell position.
+      formula to recover the sub-cell position within cell ``a+1``,
+      giving position = (a + 1 + alpha) * dx.
     - 3+ consecutive (shouldn't happen for piecewise constant ICs):
       fallback to midpoint of the group.
 
@@ -117,7 +119,7 @@ def _group_consecutive_diff_indices(
         if len(group) == 1:
             # Clean boundary: discontinuity falls exactly between cells
             a = group[0]
-            x_pos = (a + 0.5) * dx
+            x_pos = (a + 1) * dx
             left_val = float(ic_grid[a])
             right_val = float(ic_grid[min(a + 1, nx - 1)])
         elif len(group) == 2:
@@ -132,12 +134,12 @@ def _group_consecutive_diff_indices(
                 alpha = np.clip((mid_val - right_val) / denom, 0.0, 1.0)
             else:
                 alpha = 0.5
-            x_pos = (a + 0.5 + alpha) * dx
+            x_pos = (a + 1 + alpha) * dx
         else:
             # Fallback for 3+ consecutive indices (unexpected)
             a = group[0]
             b = group[-1]
-            x_pos = ((a + b) / 2.0 + 0.5) * dx
+            x_pos = ((a + b) / 2.0 + 1.0) * dx
             left_val = float(ic_grid[a])
             right_val = float(ic_grid[min(b + 1, nx - 1)])
 
@@ -288,7 +290,7 @@ def preprocess_wavefront_data(
             (torch.arange(nt).float() * dt)[:, None].expand(nt, nx).unsqueeze(0)
         )  # (1, nt, nx)
         x_coords = (
-            (torch.arange(nx).float() * dx)[None, :].expand(nt, nx).unsqueeze(0)
+            ((torch.arange(nx).float() + 0.5) * dx)[None, :].expand(nt, nx).unsqueeze(0)
         )  # (1, nt, nx)
 
         input_data = {
@@ -386,27 +388,33 @@ def get_wavefront_data(
 
 
 if __name__ == "__main__":
-    # --- Unit tests for mid-cell discontinuity extraction ---
+    # --- Unit tests for discontinuity extraction using nfv discretization ---
+    # These tests use PiecewiseConstant.discretize() from nfv to generate
+    # cell-averaged grids, validating extraction against the actual solver output.
 
     def _assert_close(actual, expected, tol, label):
         assert abs(actual - expected) < tol, f"{label}: expected {expected}, got {actual}"
 
     passed = 0
     total = 0
+    nx = 10
+    dx = 1.0 / nx
 
-    # Test 1: Mid-cell discontinuity
-    # Discontinuity at x_d = 0.33, cell 3 centered at 0.3 spans [0.25, 0.35]
-    # alpha = (0.33 - 0.25) / 0.1 = 0.8
-    # mid_val = 0.8 * 1.0 + 0.2 * 0.0 = 0.8
+    # Test 1: Mid-cell discontinuity via nfv discretization
+    # Discontinuity at x_d = 0.33, cell 3 spans [0.3, 0.4]
+    # alpha = (0.33 - 0.3) / 0.1 = 0.3 of cell is left_val
+    # mid_val = 0.3 * 1.0 + 0.7 * 0.0 = 0.3
     total += 1
-    ic1 = np.array([1.0, 1.0, 1.0, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    discs1 = _group_consecutive_diff_indices(ic1, dx=0.1, threshold=0.01)
+    ic1 = PiecewiseConstant(ks=[1.0, 0.0])
+    ic1.xs = np.array([0.0, 0.33, 1.0])
+    ic1_grid = ic1.discretize(nx)
+    discs1 = _group_consecutive_diff_indices(ic1_grid, dx=dx, threshold=0.01)
     assert len(discs1) == 1, f"Test 1: expected 1 disc, got {len(discs1)}"
     _assert_close(discs1[0]["x_pos"], 0.33, 1e-6, "Test 1 x_pos")
     _assert_close(discs1[0]["left_val"], 1.0, 1e-6, "Test 1 left_val")
     _assert_close(discs1[0]["right_val"], 0.0, 1e-6, "Test 1 right_val")
     # Also test via extract_discontinuities_from_grid
-    disc_t, mask_t = extract_discontinuities_from_grid(ic1, dx=0.1, threshold=0.01)
+    disc_t, mask_t = extract_discontinuities_from_grid(ic1_grid, dx=dx, threshold=0.01)
     _assert_close(disc_t[0, 0].item(), 0.33, 1e-6, "Test 1 tensor x_pos")
     _assert_close(disc_t[0, 1].item(), 1.0, 1e-6, "Test 1 tensor left_val")
     _assert_close(disc_t[0, 2].item(), 0.0, 1e-6, "Test 1 tensor right_val")
@@ -415,43 +423,59 @@ if __name__ == "__main__":
     passed += 1
 
     # Test 2: Clean boundary discontinuity
-    # Discontinuity exactly between cells 3 and 4 -> position = (3 + 0.5) * 0.1 = 0.35
+    # Discontinuity exactly at cell boundary x=0.4 (between cells 3 and 4)
+    # position = (3 + 1) * 0.1 = 0.4
     total += 1
-    ic2 = np.array([1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    discs2 = _group_consecutive_diff_indices(ic2, dx=0.1, threshold=0.01)
+    ic2 = PiecewiseConstant(ks=[1.0, 0.0])
+    ic2.xs = np.array([0.0, 0.4, 1.0])
+    ic2_grid = ic2.discretize(nx)
+    discs2 = _group_consecutive_diff_indices(ic2_grid, dx=dx, threshold=0.01)
     assert len(discs2) == 1, f"Test 2: expected 1 disc, got {len(discs2)}"
-    _assert_close(discs2[0]["x_pos"], 0.35, 1e-6, "Test 2 x_pos")
+    _assert_close(discs2[0]["x_pos"], 0.4, 1e-6, "Test 2 x_pos")
     _assert_close(discs2[0]["left_val"], 1.0, 1e-6, "Test 2 left_val")
     _assert_close(discs2[0]["right_val"], 0.0, 1e-6, "Test 2 right_val")
-    print("Test 2 PASSED: clean boundary discontinuity at x=0.35")
+    print("Test 2 PASSED: clean boundary discontinuity at x=0.4")
     passed += 1
 
-    # Test 3: Multiple discontinuities, one mid-cell
-    # Disc 1: mid-cell, left=1.0, right=0.0, mid_val=0.6 at cell 2
-    #   alpha = (0.6 - 0.0) / (1.0 - 0.0) = 0.6
-    #   x_pos = (1 + 0.5 + 0.6) * 0.1 = 0.21
-    # Disc 2: mid-cell, left=0.0, right=1.0, mid_val=0.7 at cell 5
-    #   alpha = (0.7 - 1.0) / (0.0 - 1.0) = 0.3
-    #   x_pos = (4 + 0.5 + 0.3) * 0.1 = 0.48
+    # Test 3: Multiple discontinuities, both mid-cell
+    # Disc 1: x_d=0.16, cell 1 spans [0.1, 0.2]
+    #   alpha = (0.16 - 0.1) / 0.1 = 0.6, mid_val = 0.6*1.0 + 0.4*0.0 = 0.6
+    #   x_pos = (0 + 1 + 0.6) * 0.1 = 0.16
+    # Disc 2: x_d=0.53, cell 5 spans [0.5, 0.6]
+    #   alpha = (0.53 - 0.5) / 0.1 = 0.3, mid_val = 0.3*0.0 + 0.7*1.0 = 0.7
+    #   x_pos = (4 + 1 + 0.3) * 0.1 = 0.53
     total += 1
-    ic3 = np.array([1.0, 1.0, 0.6, 0.0, 0.0, 0.7, 1.0, 1.0, 1.0, 1.0])
-    discs3 = _group_consecutive_diff_indices(ic3, dx=0.1, threshold=0.01)
+    ic3 = PiecewiseConstant(ks=[1.0, 0.0, 1.0])
+    ic3.xs = np.array([0.0, 0.16, 0.53, 1.0])
+    ic3_grid = ic3.discretize(nx)
+    discs3 = _group_consecutive_diff_indices(ic3_grid, dx=dx, threshold=0.01)
     assert len(discs3) == 2, f"Test 3: expected 2 discs, got {len(discs3)}"
-    _assert_close(discs3[0]["x_pos"], 0.21, 1e-6, "Test 3 disc1 x_pos")
+    _assert_close(discs3[0]["x_pos"], 0.16, 1e-6, "Test 3 disc1 x_pos")
     _assert_close(discs3[0]["left_val"], 1.0, 1e-6, "Test 3 disc1 left_val")
     _assert_close(discs3[0]["right_val"], 0.0, 1e-6, "Test 3 disc1 right_val")
-    _assert_close(discs3[1]["x_pos"], 0.48, 1e-6, "Test 3 disc2 x_pos")
+    _assert_close(discs3[1]["x_pos"], 0.53, 1e-6, "Test 3 disc2 x_pos")
     _assert_close(discs3[1]["left_val"], 0.0, 1e-6, "Test 3 disc2 left_val")
     _assert_close(discs3[1]["right_val"], 1.0, 1e-6, "Test 3 disc2 right_val")
     # Also test extract_ic_representation_from_grid
-    xs3, ks3, mask3 = extract_ic_representation_from_grid(ic3, dx=0.1, threshold=0.01)
+    xs3, ks3, mask3 = extract_ic_representation_from_grid(ic3_grid, dx=dx, threshold=0.01)
     _assert_close(xs3[0].item(), 0.0, 1e-6, "Test 3 xs[0]")
-    _assert_close(xs3[1].item(), 0.21, 1e-6, "Test 3 xs[1]")
-    _assert_close(xs3[2].item(), 0.48, 1e-6, "Test 3 xs[2]")
+    _assert_close(xs3[1].item(), 0.16, 1e-6, "Test 3 xs[1]")
+    _assert_close(xs3[2].item(), 0.53, 1e-6, "Test 3 xs[2]")
     _assert_close(ks3[0].item(), 1.0, 1e-6, "Test 3 ks[0]")
     _assert_close(ks3[1].item(), 0.0, 1e-6, "Test 3 ks[1]")
     _assert_close(ks3[2].item(), 1.0, 1e-6, "Test 3 ks[2]")
     print("Test 3 PASSED: multiple discontinuities with mid-cell")
+    passed += 1
+
+    # Test 4: Discontinuity at domain boundary (x=0.1, first cell boundary)
+    total += 1
+    ic4 = PiecewiseConstant(ks=[0.8, 0.2])
+    ic4.xs = np.array([0.0, 0.1, 1.0])
+    ic4_grid = ic4.discretize(nx)
+    discs4 = _group_consecutive_diff_indices(ic4_grid, dx=dx, threshold=0.01)
+    assert len(discs4) == 1, f"Test 4: expected 1 disc, got {len(discs4)}"
+    _assert_close(discs4[0]["x_pos"], 0.1, 1e-6, "Test 4 x_pos")
+    print("Test 4 PASSED: discontinuity at x=0.1 (first interior boundary)")
     passed += 1
 
     print(f"\nAll {passed}/{total} tests passed!")

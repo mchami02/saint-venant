@@ -40,6 +40,7 @@ class ToGridInputTransform:
         self.nx = nx
         self.nt = nt
         self.include_coords = include_coords
+        self.dx = kwargs.get("dx", 1.0 / nx)
 
     def __call__(self, input_data: dict, target_grid: torch.Tensor):
         xs = input_data["xs"]
@@ -50,7 +51,7 @@ class ToGridInputTransform:
 
         # Reconstruct IC on grid from piecewise constant representation
         ic_grid = torch.zeros(self.nx, dtype=torch.float32)
-        x_positions = torch.linspace(0, 1, self.nx)
+        x_positions = (torch.arange(self.nx, dtype=torch.float32) + 0.5) * self.dx
 
         n_pieces = int(mask.sum().item())
         for i in range(n_pieces):
@@ -114,8 +115,8 @@ class DiscretizeICTransform:
         n_pieces = int(mask.sum().item())
         n_pts = self.discretization
 
-        # Evenly spaced positions in [0, 1]
-        x_positions = torch.linspace(0, 1, n_pts)
+        # Cell-center positions in [0, 1]
+        x_positions = (torch.arange(n_pts, dtype=torch.float32) + 0.5) / n_pts
 
         # Evaluate piecewise constant IC at each position
         ic_values = torch.zeros(n_pts, dtype=torch.float32)
