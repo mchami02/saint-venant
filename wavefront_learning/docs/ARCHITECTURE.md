@@ -1446,6 +1446,29 @@ where $e_{min}^{(b,d,t)} = \min(e^{(b,d,t)}, e^{(b,d,t+1)})$ if existence is ava
 
 ---
 
+#### CellAverageMSELoss
+
+**Location**: `losses/cell_avg_mse.py`
+
+Cell-average MSE loss for finite-volume-consistent training. When used with `CellSamplingTransform`, the model predicts density at $k$ random query points per FV cell. This loss reshapes and averages those predictions back to cell level before computing MSE against the cell-averaged ground truth from the FV solver.
+
+**Formula**:
+
+Given model output $\hat{\rho}(t, x_{i,j})$ at $k$ query points $x_{i,j} \sim \mathcal{U}[i \cdot \Delta x, (i+1) \cdot \Delta x)$ within cell $i$:
+
+$$\bar{\rho}_{pred}(t, i) = \frac{1}{k} \sum_{j=1}^{k} \hat{\rho}(t, x_{i,j})$$
+
+$$\mathcal{L}_{cell\_avg\_mse} = \frac{1}{n_t \cdot n_x} \sum_{t,i} \left( \bar{\rho}_{pred}(t, i) - \rho_{FV}(t, i) \right)^2$$
+
+Falls back to standard MSE when `cell_sampling_k` is not present in `input_dict`.
+
+**Required inputs** (optional): `cell_sampling_k`, `original_nx` (set by `CellSamplingTransform`)
+**Required outputs**: `output_grid`
+
+**Components returned**: `{"cell_avg_mse": float}`
+
+---
+
 ### CombinedLoss
 
 **Location**: `loss.py`

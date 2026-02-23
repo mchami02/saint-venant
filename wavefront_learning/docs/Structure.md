@@ -68,6 +68,7 @@ wavefront_learning/
 │   ├── regularize_traj.py        # RegularizeTrajLoss
 │   ├── wasserstein.py            # WassersteinLoss (W1 / Earth Mover's Distance)
 │   ├── conservation.py           # ConservationLoss (mass conservation regularizer)
+│   ├── cell_avg_mse.py           # CellAverageMSELoss (FV-consistent cell-average MSE)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -110,7 +111,7 @@ wavefront_learning/
   - `PiecewiseRandom` (IC class)
   - `get_nfv_dataset()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
 - **transforms.py** — Input representation transforms.
-  - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`
+  - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`, `CellSamplingTransform`
   - `TRANSFORMS` registry
 
 ### Factories & Registries
@@ -197,6 +198,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **regularize_traj.py** — `RegularizeTrajLoss` (penalize erratic trajectory jumps)
 - **wasserstein.py** — `WassersteinLoss` (W1 / Earth Mover's Distance for sharp shocks)
 - **conservation.py** — `ConservationLoss` (mass conservation regularizer)
+- **cell_avg_mse.py** — `CellAverageMSELoss` (cell-average MSE for FV-consistent training with `CellSamplingTransform`)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)
