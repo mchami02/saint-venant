@@ -61,17 +61,6 @@ PLOTS: dict[str, callable] = {
 # Presets for common configurations
 # Each preset lists which plots to generate
 PLOT_PRESETS: dict[str, list[str]] = {
-    "shock_net": [
-        "grid_with_trajectory_existence",  # Uses ground truth grid as background
-        "grid_with_acceleration",  # Shows acceleration magnitude (shock locations)
-    ],
-    "hybrid": [
-        "pred",  # Predicted grid heatmap
-        "prediction_with_trajectory_existence",  # Uses predicted grid as background
-        "mse_error",
-        "existence",
-        "region_weights",
-    ],
     "traj_net": [
         "ground_truth",
         "gt_traj",
@@ -80,144 +69,11 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "pde_residual",
     ],
-    "classifier_traj_net": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
     "grid_only": [
         "ground_truth",
         "pred",  # Predicted grid heatmap
         "mse_error",
         "pde_residual",
-    ],
-    "traj_transformer": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "classifier_traj_transformer": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "no_traj_transformer": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "classifier_all_traj_transformer": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "biased_classifier_traj_transformer": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "charno": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "pde_residual",
-        "charno_decomposition",
-        "selection_weights",
-        "winning_segment",
-        "selection_entropy",
-        "local_densities",
-    ],
-    "waveno": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "waveno_cls": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "waveno_local": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "waveno_indep_traj": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "waveno_disc": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "ctt_biased": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "ctt_seg_physics": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "ctt_film": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "ctt_seg": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "transformer_seg": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "wavefront_model": [
-        "ground_truth",
-        "wave_pattern",
-        "pred",
-        "mse_error",
     ],
 }
 
