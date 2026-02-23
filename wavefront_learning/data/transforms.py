@@ -145,10 +145,62 @@ class DiscretizeICTransform:
 
 ToGridNoCoords = partial(ToGridInputTransform, include_coords=False)
 
+
+class CellSamplingTransform:
+    """Transform that samples k random query points per FV cell.
+
+    Replaces the single-point x_coords (1, nt, nx) with k uniformly
+    sampled points per cell, yielding (1, nt, nx*k). Expands t_coords
+    to match. Stores metadata for downstream cell-averaging.
+
+    Because sampling is stochastic (fresh offsets every call), this acts
+    like data augmentation when used inside __getitem__.
+
+    Args:
+        k: Number of random query points per cell.
+        **kwargs: Absorbs grid_config keys (nx, nt, dx, dt).
+    """
+
+    def __init__(self, k: int = 10, **kwargs):
+        self.k = k
+
+    def __call__(self, input_data: dict, target_grid: torch.Tensor):
+        x_coords = input_data["x_coords"]  # (1, nt, nx)
+        t_coords = input_data["t_coords"]  # (1, nt, nx)
+        dx = input_data["dx"]  # scalar tensor
+
+        _, nt, nx = x_coords.shape
+        dx_val = dx.item()
+
+        # Cell left edges: (nx,)
+        cell_starts = torch.arange(nx, dtype=torch.float32) * dx_val
+
+        # Random offsets within each cell: (nt, nx, k) in [0, dx)
+        offsets = torch.rand(nt, nx, self.k) * dx_val
+
+        # New x coordinates: (nt, nx, k) → (1, nt, nx*k)
+        new_x = (cell_starts[None, :, None] + offsets).reshape(nt, nx * self.k)
+        new_x = new_x.unsqueeze(0)  # (1, nt, nx*k)
+
+        # Expand t_coords: repeat each time row nx*k times
+        # t_coords[:, t, :] is constant across spatial dim, so just take
+        # the time values and expand to nx*k columns
+        t_values = t_coords[:, :, 0:1]  # (1, nt, 1)
+        new_t = t_values.expand(1, nt, nx * self.k)  # (1, nt, nx*k)
+
+        result = dict(input_data)
+        result["x_coords"] = new_x
+        result["t_coords"] = new_t
+        result["cell_sampling_k"] = torch.tensor(self.k, dtype=torch.long)
+        result["original_nx"] = torch.tensor(nx, dtype=torch.long)
+        return result, target_grid
+
+
 # Registry of available transforms (string name -> class)
 TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
     "ToGridInput": ToGridInputTransform,
     "ToGridNoCoords": ToGridNoCoords,
     "DiscretizeIC": DiscretizeICTransform,
+    "CellSampling": CellSamplingTransform,
 }

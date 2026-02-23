@@ -29,6 +29,7 @@ Utilities:
 
 from .acceleration import AccelerationLoss, compute_acceleration
 from .base import BaseLoss
+from .cell_avg_mse import CellAverageMSELoss
 from .conservation import ConservationLoss
 from .boundary import BoundaryLoss
 from .collision import CollisionLoss
@@ -54,6 +55,7 @@ __all__ = [
     "BaseLoss",
     # Grid losses
     "MSELoss",
+    "CellAverageMSELoss",
     "ICLoss",
     # Trajectory losses
     "TrajectoryConsistencyLoss",

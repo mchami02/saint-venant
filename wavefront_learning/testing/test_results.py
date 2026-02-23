@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import WandbLogger
-from metrics import compute_metrics
+from metrics import cell_average_prediction, compute_metrics
 from plotter import plot
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -38,6 +38,15 @@ def collect_samples(
     """
     samples = {}
 
+    # Check for cell sampling metadata
+    _cell_k = None
+    _cell_nx = None
+    if isinstance(batch_input, dict) and "cell_sampling_k" in batch_input:
+        k_t = batch_input["cell_sampling_k"]
+        nx_t = batch_input["original_nx"]
+        _cell_k = k_t.item() if k_t.dim() == 0 else k_t[0].item()
+        _cell_nx = nx_t.item() if nx_t.dim() == 0 else nx_t[0].item()
+
     if isinstance(pred, dict):
         for k, v in pred.items():
             if isinstance(v, torch.Tensor):
@@ -45,7 +54,11 @@ def collect_samples(
                 if v.ndim == 0:
                     samples[k] = v.detach().cpu().item()
                     continue
-                arr = v[:num_samples].detach().cpu().numpy()
+                val = v[:num_samples].detach().cpu()
+                # Cell-average output_grid so plots have shape (B, nt, nx)
+                if k == "output_grid" and _cell_k is not None:
+                    val = cell_average_prediction(val, _cell_k, _cell_nx)
+                arr = val.numpy()
                 # Squeeze channel dim for grid outputs: (B, 1, H, W) -> (B, H, W)
                 if arr.ndim == 4 and arr.shape[1] == 1:
                     arr = arr.squeeze(1)
@@ -129,8 +142,19 @@ def eval_model(
             # Compute metrics
             if isinstance(pred, dict):
                 if "output_grid" in pred:
+                    grid_out = pred["output_grid"]
+                    # Cell-average predictions when using cell sampling
+                    if (
+                        isinstance(batch_input, dict)
+                        and "cell_sampling_k" in batch_input
+                    ):
+                        k_t = batch_input["cell_sampling_k"]
+                        nx_t = batch_input["original_nx"]
+                        k = k_t.item() if k_t.dim() == 0 else k_t[0].item()
+                        nx = nx_t.item() if nx_t.dim() == 0 else nx_t[0].item()
+                        grid_out = cell_average_prediction(grid_out, k, nx)
                     batch_metrics.append(
-                        compute_metrics(pred["output_grid"], batch_target)
+                        compute_metrics(grid_out, batch_target)
                     )
                 elif loss_fn is not None:
                     _, components = loss_fn(batch_input, pred, batch_target)
@@ -201,6 +225,7 @@ def eval_res(
     )
 
     # Generate high-res dataset (all samples go to test split)
+    cell_sampling_k = getattr(args, "cell_sampling_k", 0)
     _, _, high_res_dataset = get_wavefront_datasets(
         n_samples=n_samples,
         grid_config=grid_config,
@@ -208,6 +233,7 @@ def eval_res(
         train_ratio=0.0,
         val_ratio=0.0,
         only_shocks=False,
+        cell_sampling_k=cell_sampling_k,
     )
 
     high_res_loader = DataLoader(
@@ -304,6 +330,7 @@ def eval_steps(
     for n_steps in range(args.max_steps + 1, args.max_test_steps + 1):
         print(f"\nStep-count test: max_steps={n_steps} ({n_samples} samples)")
 
+        cell_sampling_k = getattr(args, "cell_sampling_k", 0)
         _, _, step_dataset = get_wavefront_datasets(
             n_samples=n_samples,
             grid_config=grid_config,
@@ -313,6 +340,7 @@ def eval_steps(
             train_ratio=0.0,
             val_ratio=0.0,
             only_shocks=only_shocks,
+            cell_sampling_k=cell_sampling_k,
         )
 
         step_loader = DataLoader(

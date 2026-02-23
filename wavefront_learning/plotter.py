@@ -207,6 +207,12 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "existence",
     ],
+    "transformer_seg": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
     "wavefront_model": [
         "ground_truth",
         "wave_pattern",

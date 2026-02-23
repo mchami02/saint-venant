@@ -12,6 +12,7 @@ import torch.nn as nn
 from losses.acceleration import AccelerationLoss
 from losses.base import BaseLoss
 from losses.boundary import BoundaryLoss
+from losses.cell_avg_mse import CellAverageMSELoss
 from losses.collision import CollisionLoss
 from losses.conservation import ConservationLoss
 from losses.existence_regularization import ICAnchoringLoss
@@ -28,6 +29,7 @@ from losses.wasserstein import WassersteinLoss
 # Registry of available loss functions
 LOSSES: dict[str, type[BaseLoss]] = {
     "mse": MSELoss,
+    "cell_avg_mse": CellAverageMSELoss,
     "trajectory": TrajectoryConsistencyLoss,
     "rh_residual": RHResidualLoss,
     "pde_residual": PDEResidualLoss,
@@ -47,32 +49,6 @@ LOSSES: dict[str, type[BaseLoss]] = {
 # Presets for common configurations
 # Each preset is a list of (loss_name, weight) or (loss_name, weight, kwargs) tuples
 LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
-    "shock_net": [
-        # ("rh_residual", 1.0, {"mode": "gt"}),
-        ("boundary", 1.0),
-        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-        ("ic_anchoring", 0.1),
-    ],
-    "hybrid": [
-        ("mse", 1.0),
-        ("rh_residual", 1.0),
-        ("pde_residual", 0.1),
-        ("ic", 10.0),
-        ("ic_anchoring", 0.01),
-    ],
-    "traj_net": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-    ],
-    "classifier_traj_net": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-    ],
     "pde_shocks": [
         ("mse", 1.0),
         ("pde_shock_residual", 1.0),
@@ -80,58 +56,10 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "mse": [
         ("mse", 1.0),
     ],
-    "traj_transformer": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
+    "cell_avg_mse": [
+        ("cell_avg_mse", 1.0),
     ],
-    "classifier_traj_transformer": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-    ],
-    "no_traj_transformer": [
-        ("mse", 1.0),
-    ],
-    "classifier_all_traj_transformer": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-    ],
-    "biased_classifier_traj_transformer": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-    ],
-    "charno": [
-        ("mse", 1.0),
-        ("wasserstein", 0.5),
-        ("conservation", 0.1),
-        ("selection_supervision", 0.3, {"sigma": 0.05}),
-    ],
-    "waveno": [
-        ("mse", 1.0),
-        ("wasserstein", 0.5),
-        ("conservation", 0.1),
-        ("ic_anchoring", 5.0),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-    ],
-    "ctt_seg": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
-    ],
-    "wavefront_model": [
+    "transformer_seg": [
         ("mse", 1.0),
     ],
 }

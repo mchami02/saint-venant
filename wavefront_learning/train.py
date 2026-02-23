@@ -12,9 +12,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
+from data.transforms import TRANSFORMS
 from logger import WandbLogger, init_logger, log_values
 from loss import LOSS_PRESETS, LOSSES, create_loss_from_args
-from metrics import compute_metrics, extract_grid_prediction
+from metrics import cell_average_prediction, compute_metrics, extract_grid_prediction
 from model import MODELS, get_model, load_model, save_model
 from plotter import PLOT_PRESETS, plot
 from testing import (
@@ -105,6 +106,23 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.05,
         help="Dropout probability for WaveNO (default: 0.05)",
+    )
+
+    # Cell sampling
+    parser.add_argument(
+        "--cell_sampling_k",
+        type=int,
+        default=0,
+        help="Number of random query points per FV cell (0 = disabled)",
+    )
+
+    # Transform override
+    parser.add_argument(
+        "--transform",
+        type=str,
+        default=None,
+        choices=list(TRANSFORMS.keys()),
+        help="Override the model's default transform (default: use MODEL_TRANSFORM)",
     )
 
     # Resume training
@@ -235,6 +253,13 @@ def train_epoch(
         # Collect grid predictions for metrics (if available)
         grid_pred = extract_grid_prediction(pred)
         if grid_pred is not None:
+            # Cell-average predictions when using cell sampling
+            if isinstance(batch_input, dict) and "cell_sampling_k" in batch_input:
+                k_t = batch_input["cell_sampling_k"]
+                nx_t = batch_input["original_nx"]
+                k = k_t.item() if k_t.dim() == 0 else k_t[0].item()
+                nx = nx_t.item() if nx_t.dim() == 0 else nx_t[0].item()
+                grid_pred = cell_average_prediction(grid_pred, k, nx)
             all_predictions.append(grid_pred.cpu())
             all_targets.append(batch_target.cpu())
 
@@ -306,6 +331,13 @@ def validate_epoch(
             # Collect grid predictions for metrics (if available)
             grid_pred = extract_grid_prediction(pred)
             if grid_pred is not None:
+                # Cell-average predictions when using cell sampling
+                if isinstance(batch_input, dict) and "cell_sampling_k" in batch_input:
+                    k_t = batch_input["cell_sampling_k"]
+                    nx_t = batch_input["original_nx"]
+                    k = k_t.item() if k_t.dim() == 0 else k_t[0].item()
+                    nx = nx_t.item() if nx_t.dim() == 0 else nx_t[0].item()
+                    grid_pred = cell_average_prediction(grid_pred, k, nx)
                 all_predictions.append(grid_pred.cpu())
                 all_targets.append(batch_target.cpu())
 
@@ -464,6 +496,8 @@ def main():
         model_name=args.model,
         only_shocks=args.only_shocks,
         max_steps=args.max_steps,
+        cell_sampling_k=args.cell_sampling_k,
+        transform_override=args.transform,
     )
 
     train_loader = DataLoader(

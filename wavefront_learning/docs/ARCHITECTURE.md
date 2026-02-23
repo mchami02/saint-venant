@@ -1730,6 +1730,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
+| TransformerSeg | IC segments (xs, ks) + coordinates | Full grid | Segment-based encoding + cross-attention density decoder, no trajectory prediction |
 | WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
@@ -1813,3 +1814,18 @@ positions, x_coords, effective_mask → compute_boundaries → x_left, x_right: 
 ```
 
 **Key difference from CTT**: Encodes K piecewise-constant segments (center, width, density, characteristic speed, flux, cumulative mass) instead of D discontinuity points (x, rho_L, rho_R). Trajectories are derived from adjacent segment pairs via `BreakpointEvolution` rather than from `TimeEncoder` + `TrajectoryDecoderTransformer`. The density decoder cross-attends to segment embeddings (K tokens) with `pieces_mask`.
+
+#### TransformerSeg Architecture
+
+Combines CTTSeg's segment-based input encoding with NoTrajTransformer's grid-only output. No trajectory prediction, no classifier, no boundary conditioning.
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
+
+(t, x) → FourierEncode → CoordMLP → coord_emb: (nt*nx, H)
+(coord_emb as Q, seg_emb as K/V) → CrossDecoderLayer × L → DensityHead → (nt, nx)
+→ output_grid: (1, nt, nx)
+```
+
+**Key difference from CTTSeg**: Removes BreakpointEvolution (trajectory prediction), classifier head, and boundary conditioning. The density decoder uses `with_boundaries=False`, encoding only `(t, x)` coordinates instead of `(t, x, x_left, x_right)`.
