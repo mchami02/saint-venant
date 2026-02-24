@@ -442,29 +442,65 @@ def get_wavefront_data(
         if n == 0:
             continue
 
+        valid_grids = []
+        still_needed = n
+        need_upload = False
+
         # Try to download from HuggingFace (each step count cached independently)
-        grids = download_grids(
+        cached = download_grids(
             nx, nt, dx, dt, n_steps, only_shocks, solver=solver, equation=equation
         )
 
-        need_upload = False
-        if grids is not None and len(grids) >= n:
-            print(f"  steps={n_steps}: using {n} cached samples")
-            grids = grids[:n]
-        else:
-            print(f"  steps={n_steps}: generating {n} samples locally...")
+        if cached is not None and len(cached) > 0:
             if is_arz:
-                grids = get_arz_dataset(n, nx, nt, dx, dt, n_steps, **arz_kw)
+                original_len = len(cached)
+                cached = _filter_arz_samples(
+                    cached, label=f"steps={n_steps} (cached)"
+                )
+                if len(cached) < original_len:
+                    need_upload = True  # cache was dirty
+            available = cached[:n]
+            if len(available) > 0:
+                valid_grids.append(available)
+                still_needed = n - len(available)
+            if still_needed <= 0:
+                print(f"  steps={n_steps}: using {n} cached samples")
+
+        # Regeneration loop for missing samples
+        max_regen = 5
+        regen_round = 0
+        while still_needed > 0 and regen_round < max_regen:
+            regen_round += 1
+            batch_size = still_needed
+            print(
+                f"  steps={n_steps}: generating {batch_size} samples"
+                f" (round {regen_round})..."
+            )
+            if is_arz:
+                raw = get_arz_dataset(
+                    batch_size, nx, nt, dx, dt, n_steps, **arz_kw
+                )
+                raw = _filter_arz_samples(raw, label=f"steps={n_steps}")
             else:
-                grids = get_nfv_dataset(n, nx, nt, dx, dt, n_steps, only_shocks)
+                raw = get_nfv_dataset(
+                    batch_size, nx, nt, dx, dt, n_steps, only_shocks
+                )
+            if len(raw) > 0:
+                valid_grids.append(raw)
+                still_needed -= len(raw)
             need_upload = True
 
-        # Filter broken ARZ samples
-        if is_arz:
-            grids = _filter_arz_samples(grids, label=f"steps={n_steps}")
-            if len(grids) == 0:
-                print(f"  WARNING: steps={n_steps}: no valid samples after filtering!")
-                continue
+        if still_needed > 0:
+            print(
+                f"  WARNING steps={n_steps}: only got {n - still_needed}/{n}"
+                f" after {max_regen} regeneration rounds"
+            )
+
+        if len(valid_grids) == 0:
+            print(f"  WARNING: steps={n_steps}: no valid samples after filtering!")
+            continue
+
+        grids = np.concatenate(valid_grids, axis=0)
 
         if need_upload and upload_to_hf:
             try:
