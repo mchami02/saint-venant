@@ -32,9 +32,6 @@ class SegmentPhysicsEncoder(nn.Module):
         num_frequencies: Fourier frequency bands for spatial features.
         num_layers: MLP depth.
         flux: Flux function instance.
-        density_poly_degree: Polynomial degree for density features. Degree 1
-            uses rho as-is (default); degree 3 adds rho^2 and rho^3 as extra
-            scalar features, giving the MLP a richer nonlinear basis.
     """
 
     def __init__(
@@ -45,22 +42,19 @@ class SegmentPhysicsEncoder(nn.Module):
         flux: Flux | None = None,
         include_cumulative_mass: bool = True,
         dropout: float = 0.0,
-        density_poly_degree: int = 1,
     ):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
         self.include_cumulative_mass = include_cumulative_mass
-        self.density_poly_degree = density_poly_degree
 
         self.fourier_x = FourierFeatures(
             num_frequencies=num_frequencies, include_input=True
         )
 
         # Input: fourier(x_center) + fourier(width) + scalar features
-        # Density contributes density_poly_degree scalars (rho, rho^2, ..., rho^d)
-        # With cumulative mass: [rho^1..d, lambda, flux_val, N_k_normalized]
-        # Without: [rho^1..d, lambda, flux_val]
-        num_scalars = density_poly_degree + (3 if include_cumulative_mass else 2)
+        # With cumulative mass: [rho, lambda, flux_val, N_k_normalized] = 4
+        # Without: [rho, lambda, flux_val] = 3
+        num_scalars = 4 if include_cumulative_mass else 3
         input_dim = 2 * self.fourier_x.output_dim + num_scalars
 
         layers = []
@@ -109,13 +103,6 @@ class SegmentPhysicsEncoder(nn.Module):
             width.reshape(-1)
         ).reshape(B, K, -1)  # (B, K, F)
 
-        # Build density polynomial features: [rho, rho^2, ..., rho^d]
-        density_feats = [ks]
-        rho_power = ks
-        for _ in range(1, self.density_poly_degree):
-            rho_power = rho_power * ks
-            density_feats.append(rho_power)
-
         # Concatenate all features
         if self.include_cumulative_mass:
             # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
@@ -124,15 +111,15 @@ class SegmentPhysicsEncoder(nn.Module):
             total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
             N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
             scalar_features = torch.stack(
-                [*density_feats, lambda_k, flux_k, N_k_normalized], dim=-1
-            )  # (B, K, d+3)
+                [ks, lambda_k, flux_k, N_k_normalized], dim=-1
+            )  # (B, K, 4)
         else:
             scalar_features = torch.stack(
-                [*density_feats, lambda_k, flux_k], dim=-1
-            )  # (B, K, d+2)
+                [ks, lambda_k, flux_k], dim=-1
+            )  # (B, K, 3)
         features = torch.cat(
             [x_center_enc, width_enc, scalar_features], dim=-1
-        )  # (B, K, 2F+3)
+        )  # (B, K, 2F+3/4)
 
         # MLP projection
         output = self.mlp(features)  # (B, K, H)

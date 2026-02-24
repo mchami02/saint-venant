@@ -676,7 +676,7 @@ Encodes IC segments with physics-augmented features. For each constant piece $k$
 | $\lambda_k$ | $f'(\rho_k)$ | Characteristic speed |
 | $f_k$ | $f(\rho_k)$ | Flux value |
 
-Spatial features are Fourier-encoded. All features concatenated and projected via MLP → $(B, K, H)$.
+Content features (width, density, characteristic speed, flux, cumulative mass) are projected to $H$ via a linear layer, then **rotary positional embedding (RoPE)** injects $x_{center}$ as position by rotating consecutive dimension pairs. A post-RoPE MLP refines the position-aware representation → $(B, K, H)$.
 
 ##### CharacteristicFeatureComputer
 
@@ -868,7 +868,7 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 
 ##### Reused from CharNO
 
-- **SegmentPhysicsEncoder**: Physics-augmented segment encoding (x_center, width, $\rho$, $\lambda$, $f$, $N_k$)
+- **SegmentPhysicsEncoder**: Physics-augmented segment encoding with RoPE (x_center via rotation; width, $\rho$, $\lambda$, $f$, $N_k$ as content)
 - **TimeConditioner**: FiLM-based time modulation of segment embeddings
 - **CrossSegmentAttention**: Lightweight self-attention over K segments per timestep
 - **EncoderLayer**: Standard transformer self-attention for initial segment interaction
