@@ -277,7 +277,7 @@ def eval_steps(
 ) -> dict[int, tuple[dict[str, float], dict[str, np.ndarray]]]:
     """Evaluate model on increasing step counts to test generalization.
 
-    For each step count from args.max_steps+1 to args.max_test_steps (inclusive),
+    For each step count from 2 to args.max_test_steps (inclusive),
     generates a test dataset with that many pieces in the piecewise constant IC
     and evaluates the model.
 
@@ -301,7 +301,7 @@ def eval_steps(
 
     all_step_results = {}
 
-    for n_steps in range(args.max_steps + 1, args.max_test_steps + 1):
+    for n_steps in range(2, args.max_test_steps + 1):
         print(f"\nStep-count test: max_steps={n_steps} ({n_samples} samples)")
 
         _, _, step_dataset = get_wavefront_datasets(
@@ -511,10 +511,10 @@ def test_model(
     max_test_steps = getattr(args, "max_test_steps", None)
     max_steps = getattr(args, "max_steps", 3)
 
-    if max_test_steps is not None and max_test_steps > max_steps:
+    if max_test_steps is not None and max_test_steps >= 2:
         print(
             f"\nRunning step-count generalization test "
-            f"(max_steps={max_steps + 1}..{max_test_steps})..."
+            f"(max_steps=2..{max_test_steps})..."
         )
         step_results = eval_steps(
             model=model,
