@@ -58,6 +58,7 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     ],
     "cell_avg_mse": [
         ("cell_avg_mse", 1.0),
+        # ("pde_residual", 1.0)
     ],
     "transformer_seg": [
         ("mse", 1.0),
@@ -268,6 +269,9 @@ def get_loss(loss_name: str, **kwargs) -> nn.Module:
 
     # Check if it's an individual loss
     if loss_name in LOSSES:
+        loss_kwargs = kwargs.pop("loss_kwargs", None)
+        if loss_kwargs and loss_name in loss_kwargs:
+            kwargs.update(loss_kwargs[loss_name])
         return LOSSES[loss_name](**kwargs)
 
     raise ValueError(

@@ -197,6 +197,60 @@ class CellSamplingTransform:
         return result, target_grid
 
 
+class CellRefinementTransform:
+    """Transform that subdivides each FV cell into k*k subcells (space x time).
+
+    Deterministic alternative to CellSamplingTransform. Replaces
+    x_coords (1, nt, nx) and t_coords (1, nt, nx) with subcell-center
+    grids of shape (1, nt*k, nx*k), where k subcells are placed
+    uniformly within each spatial cell and each temporal cell.
+
+    Args:
+        k: Number of subdivisions per dimension (produces k*k subcells
+           per original cell).
+        **kwargs: Absorbs grid_config keys (nx, nt, dx, dt).
+    """
+
+    def __init__(self, k: int = 4, **kwargs):
+        self.k = k
+
+    def __call__(self, input_data: dict, target_grid: torch.Tensor):
+        x_coords = input_data["x_coords"]  # (1, nt, nx)
+        t_coords = input_data["t_coords"]  # (1, nt, nx)
+        dx = input_data["dx"]  # scalar tensor
+        dt = input_data["dt"]  # scalar tensor
+
+        _, nt, nx = x_coords.shape
+        dx_val = dx.item()
+        dt_val = dt.item()
+        k = self.k
+
+        # Spatial subcell centers: i*dx + (j+0.5)*dx/k for j in 0..k-1
+        cell_starts_x = torch.arange(nx, dtype=torch.float32) * dx_val
+        sub_offsets_x = (torch.arange(k, dtype=torch.float32) + 0.5) * (dx_val / k)
+        # (nx, k) -> (nx*k,)
+        new_x_1d = (cell_starts_x[:, None] + sub_offsets_x[None, :]).reshape(nx * k)
+
+        # Temporal subcell centers: t*dt + (j+0.5)*dt/k for j in 0..k-1
+        cell_starts_t = torch.arange(nt, dtype=torch.float32) * dt_val
+        sub_offsets_t = (torch.arange(k, dtype=torch.float32) + 0.5) * (dt_val / k)
+        # (nt, k) -> (nt*k,)
+        new_t_1d = (cell_starts_t[:, None] + sub_offsets_t[None, :]).reshape(nt * k)
+
+        # Broadcast to (1, nt*k, nx*k)
+        new_x = new_x_1d[None, None, :].expand(1, nt * k, nx * k)
+        new_t = new_t_1d[None, :, None].expand(1, nt * k, nx * k)
+
+        result = dict(input_data)
+        result["x_coords"] = new_x
+        result["t_coords"] = new_t
+        result["cell_sampling_k"] = torch.tensor(k, dtype=torch.long)
+        result["original_nx"] = torch.tensor(nx, dtype=torch.long)
+        result["original_nt"] = torch.tensor(nt, dtype=torch.long)
+        result["cell_refinement"] = torch.tensor(True)
+        return result, target_grid
+
+
 # Registry of available transforms (string name -> class)
 TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
@@ -204,4 +258,5 @@ TRANSFORMS = {
     "ToGridNoCoords": ToGridNoCoords,
     "DiscretizeIC": DiscretizeICTransform,
     "CellSampling": CellSamplingTransform,
+    "CellRefinement": CellRefinementTransform,
 }

@@ -71,6 +71,7 @@ Use `--no_wandb` flag to disable logging.
 - `FlattenDiscontinuitiesTransform`: Converts dict input to flat tensor for simple MLPs
 - `ToGridInputTransform`: Reconstructs discretized IC from discontinuities (for grid-based models like FNO)
 - `DiscretizeICTransform`: Evaluates IC at evenly-spaced points, stores as "discontinuities" for model compatibility
+- `CellRefinementTransform`: Deterministic subcell refinement (k subdivisions in space and time, producing k*k query points per cell)
 
 ## Implementation Status
 

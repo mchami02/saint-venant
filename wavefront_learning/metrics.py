@@ -42,23 +42,36 @@ def cell_average_prediction(
     prediction: torch.Tensor,
     k: int,
     original_nx: int,
+    original_nt: int | None = None,
 ) -> torch.Tensor:
-    """Average k per-cell query predictions back to cell-level values.
+    """Average per-cell query predictions back to cell-level values.
 
-    Reshapes prediction from (..., nt, nx*k) to (..., nt, nx, k) and
-    averages over the k dimension.
+    For spatial-only sampling, reshapes (..., nt, nx*k) → (..., nt, nx).
+    For spatiotemporal refinement (when original_nt is given), reshapes
+    (..., nt*k_t, nx*k_x) → (..., nt, nx).
 
     Args:
-        prediction: Tensor with last dim = nx*k.
-        k: Number of query points per cell.
-        original_nx: Original number of cells.
+        prediction: Tensor with expanded spatial (and optionally temporal) dims.
+        k: Number of query points per spatial cell.
+        original_nx: Original number of spatial cells.
+        original_nt: Original number of timesteps (None for spatial-only).
 
     Returns:
-        Tensor with last dim = nx (cell-averaged).
+        Tensor averaged back to original (nt, nx) shape.
     """
     shape = prediction.shape
-    *leading, nt, nxk = shape
-    return prediction.reshape(*leading, nt, original_nx, k).mean(dim=-1)
+    *leading, nt_exp, nxk = shape
+
+    if original_nt is not None:
+        k_t = nt_exp // original_nt
+        k_x = nxk // original_nx
+        return (
+            prediction.reshape(*leading, original_nt, k_t, original_nx, k_x)
+            .mean(dim=-1)
+            .mean(dim=-2)
+        )
+
+    return prediction.reshape(*leading, nt_exp, original_nx, k).mean(dim=-1)
 
 
 def extract_grid_prediction(model_output: dict | torch.Tensor) -> torch.Tensor | None:

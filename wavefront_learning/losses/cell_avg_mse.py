@@ -42,10 +42,22 @@ class CellAverageMSELoss(BaseLoss):
             # After collation these may be (B,) tensors; all values are identical
             k = k_tensor.item() if k_tensor.dim() == 0 else k_tensor[0].item()
             nx = nx_tensor.item() if nx_tensor.dim() == 0 else nx_tensor[0].item()
-            B, C, nt, nxk = output_grid.shape
+            B, C, nt_exp, nxk = output_grid.shape
 
-            # Reshape (B, 1, nt, nx*k) → (B, 1, nt, nx, k) → average over k
-            output_grid = output_grid.reshape(B, C, nt, nx, k).mean(dim=-1)
+            if "original_nt" in input_dict:
+                # 2D refinement: (B, C, nt*k_t, nx*k_x) → (B, C, nt, nx)
+                nt_tensor = input_dict["original_nt"]
+                nt = nt_tensor.item() if nt_tensor.dim() == 0 else nt_tensor[0].item()
+                k_t = nt_exp // nt
+                k_x = nxk // nx
+                output_grid = (
+                    output_grid.reshape(B, C, nt, k_t, nx, k_x)
+                    .mean(dim=-1)
+                    .mean(dim=-2)
+                )
+            else:
+                # Spatial-only: (B, C, nt, nx*k) → (B, C, nt, nx)
+                output_grid = output_grid.reshape(B, C, nt_exp, nx, k).mean(dim=-1)
 
         loss = F.mse_loss(output_grid, target)
         return loss, {"cell_avg_mse": loss.item()}

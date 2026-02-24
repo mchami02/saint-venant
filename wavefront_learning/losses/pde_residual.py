@@ -271,8 +271,22 @@ class PDEResidualLoss(BaseLoss):
         # Squeeze channel dimension
         density = output_grid.squeeze(1)  # (B, nt, nx)
 
+        # Adjust spacings for cell refinement (subcell grid has smaller spacing)
+        dt = self.dt
+        dx = self.dx
+        if "original_nt" in input_dict:
+            nt_tensor = input_dict["original_nt"]
+            nx_tensor = input_dict["original_nx"]
+            orig_nt = nt_tensor.item() if nt_tensor.dim() == 0 else nt_tensor[0].item()
+            orig_nx = nx_tensor.item() if nx_tensor.dim() == 0 else nx_tensor[0].item()
+            _, _, nt_exp, nx_exp = output_grid.shape
+            k_t = nt_exp // orig_nt
+            k_x = nx_exp // orig_nx
+            dt = self.dt / k_t
+            dx = self.dx / k_x
+
         # Compute PDE residual (interior points only)
-        residual = compute_pde_residual(density, self.dt, self.dx)  # (B, nt-2, nx-2)
+        residual = compute_pde_residual(density, dt, dx)  # (B, nt-2, nx-2)
 
         pde_loss = (residual**2).mean()
 

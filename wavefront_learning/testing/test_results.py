@@ -152,7 +152,11 @@ def eval_model(
                         nx_t = batch_input["original_nx"]
                         k = k_t.item() if k_t.dim() == 0 else k_t[0].item()
                         nx = nx_t.item() if nx_t.dim() == 0 else nx_t[0].item()
-                        grid_out = cell_average_prediction(grid_out, k, nx)
+                        nt = None
+                        if "original_nt" in batch_input:
+                            nt_t = batch_input["original_nt"]
+                            nt = nt_t.item() if nt_t.dim() == 0 else nt_t[0].item()
+                        grid_out = cell_average_prediction(grid_out, k, nx, nt)
                     batch_metrics.append(
                         compute_metrics(grid_out, batch_target)
                     )

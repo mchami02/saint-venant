@@ -17,7 +17,7 @@ import warnings
 import numpy as np
 import torch
 from data.data_processing import get_wavefront_data
-from data.transforms import TRANSFORMS, CellSamplingTransform
+from data.transforms import TRANSFORMS, CellRefinementTransform, CellSamplingTransform
 from torch.utils.data import Dataset
 
 
