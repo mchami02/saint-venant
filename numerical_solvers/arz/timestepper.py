@@ -57,7 +57,7 @@ def solve(
     v_hist = torch.zeros_like(rho_hist)
 
     rho_hist[0] = rho
-    w_hist[0] = rho_w / (rho + eps)
+    w_hist[0] = torch.where(rho > eps, rho_w / rho, torch.zeros_like(rho_w))
     v_hist[0] = w_hist[0] - pressure(rho, gamma)
 
     # ------------------------------------------------------------------ RHS
@@ -105,21 +105,25 @@ def solve(
             k1_rho, k1_rw = _compute_rhs(rho, rho_w, t)
             rho_1 = (rho + dt * k1_rho).clamp(min=0.0)
             rho_w_1 = rho_w + dt * k1_rw
+            rho_w_1 = torch.where(rho_1 > 0, rho_w_1, torch.zeros_like(rho_w_1))
 
             k2_rho, k2_rw = _compute_rhs(rho_1, rho_w_1, t + dt)
             rho_2 = (0.75 * rho + 0.25 * (rho_1 + dt * k2_rho)).clamp(min=0.0)
             rho_w_2 = 0.75 * rho_w + 0.25 * (rho_w_1 + dt * k2_rw)
+            rho_w_2 = torch.where(rho_2 > 0, rho_w_2, torch.zeros_like(rho_w_2))
 
             k3_rho, k3_rw = _compute_rhs(rho_2, rho_w_2, t + 0.5 * dt)
             rho = ((1 / 3) * rho + (2 / 3) * (rho_2 + dt * k3_rho)).clamp(min=0.0)
             rho_w = (1 / 3) * rho_w + (2 / 3) * (rho_w_2 + dt * k3_rw)
+            rho_w = torch.where(rho > 0, rho_w, torch.zeros_like(rho_w))
         else:
             # Forward Euler
             k1_rho, k1_rw = _compute_rhs(rho, rho_w, t)
             rho = (rho + dt * k1_rho).clamp(min=0.0)
             rho_w = rho_w + dt * k1_rw
+            rho_w = torch.where(rho > 0, rho_w, torch.zeros_like(rho_w))
 
-        w = rho_w / (rho + eps)
+        w = torch.where(rho > eps, rho_w / rho, torch.zeros_like(rho_w))
         v = w - pressure(rho, gamma)
 
         rho_hist[n + 1] = rho

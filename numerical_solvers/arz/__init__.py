@@ -6,6 +6,7 @@ generate_one : solve a single ARZ problem from given initial conditions.
 generate_n   : generate *n* samples with random piecewise-constant ICs.
 """
 
+import warnings
 from collections.abc import Callable
 
 import torch
@@ -128,23 +129,47 @@ def generate_n(
     v_all = torch.zeros_like(rho_all)
     w_all = torch.zeros_like(rho_all)
 
+    max_retries = 10
+    rejected = 0
+
     it = trange(n, desc="ARZ samples", disable=not show_progress)
     for i in it:
-        rho0, v0 = random_piecewise(x, k, rng, rho_range=rho_range, v_range=v_range)
-        result = generate_one(
-            rho0,
-            v0,
-            dx=dx,
-            dt=dt,
-            nt=nt,
-            gamma=gamma,
-            bc_type=bc_type,
-            flux_type=flux_type,
-            reconstruction=reconstruction,
-        )
+        for attempt in range(max_retries):
+            rho0, v0 = random_piecewise(
+                x, k, rng, rho_range=rho_range, v_range=v_range
+            )
+            result = generate_one(
+                rho0,
+                v0,
+                dx=dx,
+                dt=dt,
+                nt=nt,
+                gamma=gamma,
+                bc_type=bc_type,
+                flux_type=flux_type,
+                reconstruction=reconstruction,
+            )
+            if (
+                torch.isfinite(result["rho"]).all()
+                and torch.isfinite(result["v"]).all()
+                and torch.isfinite(result["w"]).all()
+            ):
+                break
+            rejected += 1
+        else:
+            warnings.warn(
+                f"Sample {i}: all {max_retries} retries produced NaN/Inf, "
+                "using zero-filled sample.",
+                stacklevel=2,
+            )
+            result = {"rho": torch.zeros(nt + 1, nx), "v": torch.zeros(nt + 1, nx), "w": torch.zeros(nt + 1, nx)}
+
         rho_all[i] = result["rho"]
         v_all[i] = result["v"]
         w_all[i] = result["w"]
+
+    if rejected > 0:
+        print(f"Rejected {rejected} NaN/Inf samples during generation.")
 
     t_arr = torch.arange(nt + 1, device=device, dtype=torch.float32) * dt
 

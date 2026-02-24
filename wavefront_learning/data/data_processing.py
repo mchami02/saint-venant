@@ -88,6 +88,15 @@ def get_arz_dataset(
     )
     rho = result["rho"].cpu().numpy()  # (n, nt, nx)
     v = result["v"].cpu().numpy()  # (n, nt, nx)
+
+    # Last-resort guard: replace any remaining NaN/Inf with 0
+    for name, arr in [("rho", rho), ("v", v)]:
+        bad = ~np.isfinite(arr)
+        n_bad = bad.sum()
+        if n_bad > 0:
+            print(f"WARNING: {n_bad} NaN/Inf values found in ARZ {name}, replacing with 0.")
+            arr[bad] = 0.0
+
     return np.stack([rho, v], axis=1)  # (n, 2, nt, nx)
 
 
