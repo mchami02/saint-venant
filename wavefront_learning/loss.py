@@ -76,6 +76,7 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "pde_shocks": [
         ("mse", 1.0),
         ("pde_shock_residual", 1.0),
+        ("rh_residual", 1.0, {"mode": "gt"}),
     ],
     "mse": [
         ("mse", 1.0),
