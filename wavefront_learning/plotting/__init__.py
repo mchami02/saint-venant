@@ -33,6 +33,7 @@ from .charno_plots import (
 )
 from .grid_plots import (
     plot_arz_ground_truth,
+    plot_arz_mse_error,
     plot_arz_pred,
     plot_comparison,
     plot_error_map,
@@ -85,6 +86,7 @@ __all__ = [
     "plot_pred",
     "plot_arz_ground_truth",
     "plot_arz_pred",
+    "plot_arz_mse_error",
     # Trajectory plots (core)
     "plot_shock_trajectories",
     "plot_existence_heatmap",

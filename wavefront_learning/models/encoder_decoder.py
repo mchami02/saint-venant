@@ -3,9 +3,10 @@
 Transformer encoder processes masked IC conditions, decoder reconstructs
 full space-time solution via axial or cross-attention.
 
-Input: dict with "grid_input" key containing tensor of shape (B, 3, nt, nx)
-       from ToGridInputTransform. Channels are [ic_masked, t_coords, x_coords].
-Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
+Input: dict with "grid_input" key containing tensor of shape (B, C, nt, nx)
+       from ToGridInputTransform. Channels are [ic_masked..., t_coords, x_coords].
+       C = n_ic_channels + 2 (e.g. 3 for LWR, 4 for ARZ with rho+v).
+Output: dict {"output_grid": tensor of shape (B, output_dim, nt, nx)}
 """
 
 import torch
@@ -41,11 +42,13 @@ class EncoderDecoder(nn.Module):
         dx: float = None,
         device=None,
         output_dim: int = 1,
+        n_ic_channels: int = 1,
     ):
         super().__init__()
+        self.n_ic_channels = n_ic_channels
 
         self.encoder = Encoder(
-            input_dim=3, hidden_dim=hidden_dim, num_layers=layers_encoder
+            input_dim=n_ic_channels + 2, hidden_dim=hidden_dim, num_layers=layers_encoder
         )
 
         if decoder_type == "axial":
@@ -134,8 +137,8 @@ class EncoderDecoder(nn.Module):
         """Forward pass.
 
         Args:
-            x: Input dict with "grid_input" tensor of shape (B, 3, nt, nx)
-               where channels are [ic_masked, t_coords, x_coords].
+            x: Input dict with "grid_input" tensor of shape (B, C, nt, nx)
+               where channels are [ic_masked..., t_coords, x_coords].
 
         Returns:
             Dict with "output_grid" of shape (B, output_dim, nt, nx).
@@ -166,8 +169,8 @@ class EncoderDecoder(nn.Module):
         # Encode
         encoder_output = self.encoder(conds, key_padding_mask=key_padding_mask)
 
-        # Decode
-        all_coords = grid[:, 1:].permute(0, 2, 3, 1)  # (B, T, N, 2)
+        # Decode — coordinates are the last 2 channels (after IC channels)
+        all_coords = grid[:, self.n_ic_channels:].permute(0, 2, 3, 1)  # (B, T, N, 2)
         u = self.decoder(all_coords, encoder_output, key_padding_mask=key_padding_mask)
 
         # Shock correction
@@ -229,7 +232,8 @@ def build_ecarz(args: dict) -> EncoderDecoder:
     """Build EncoderDecoderCross with 2-channel output for ARZ equations.
 
     Same architecture as EncoderDecoderCross but outputs (B, 2, nt, nx)
-    for the two ARZ components (rho, v).
+    for the two ARZ components (rho, v). Uses n_ic_channels=2 to accept
+    both rho and v initial conditions.
 
     Args:
         args: Configuration dictionary. Same keys as build_encoder_decoder.
@@ -245,4 +249,5 @@ def build_ecarz(args: dict) -> EncoderDecoder:
         dt=args.get("dt"),
         dx=args.get("dx"),
         output_dim=2,
+        n_ic_channels=2,
     )

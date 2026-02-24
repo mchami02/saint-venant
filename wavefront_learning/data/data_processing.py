@@ -14,6 +14,38 @@ from numerical_solvers.arz import generate_n as arz_generate_n
 from numerical_solvers.lwr import generate_n as lwr_generate_n
 
 
+def _filter_arz_samples(grids, max_value=10.0, label=""):
+    """Remove broken ARZ samples (NaN/Inf, all-zeros, extreme values).
+
+    Args:
+        grids: Array of shape (n, 2, nt, nx).
+        max_value: Maximum allowed absolute value.
+        label: Label for log messages (e.g. "steps=3").
+
+    Returns:
+        Filtered array with bad samples removed.
+    """
+    n = len(grids)
+    # Reshape to (n, -1) for per-sample checks
+    flat = grids.reshape(n, -1)
+
+    nan_inf = ~np.isfinite(flat).all(axis=1)
+    all_zero = (flat == 0).all(axis=1)
+    extreme = (np.abs(flat) > max_value).any(axis=1)
+
+    bad = nan_inf | all_zero | extreme
+    n_bad = bad.sum()
+
+    if n_bad > 0:
+        print(
+            f"  {label}: removed {n_bad}/{n} ARZ samples "
+            f"(NaN/Inf: {nan_inf.sum()}, all-zero: {all_zero.sum()}, "
+            f"extreme (>{max_value}): {(extreme & ~nan_inf).sum()})"
+        )
+
+    return grids[~bad]
+
+
 def get_nfv_dataset(
     n_samples: int,
     nx: int,
@@ -88,14 +120,6 @@ def get_arz_dataset(
     )
     rho = result["rho"].cpu().numpy()  # (n, nt, nx)
     v = result["v"].cpu().numpy()  # (n, nt, nx)
-
-    # Last-resort guard: replace any remaining NaN/Inf with 0
-    for name, arr in [("rho", rho), ("v", v)]:
-        bad = ~np.isfinite(arr)
-        n_bad = bad.sum()
-        if n_bad > 0:
-            print(f"WARNING: {n_bad} NaN/Inf values found in ARZ {name}, replacing with 0.")
-            arr[bad] = 0.0
 
     return np.stack([rho, v], axis=1)  # (n, 2, nt, nx)
 
@@ -345,6 +369,16 @@ def preprocess_wavefront_data(
             "dt": torch.tensor(dt, dtype=torch.float32),
         }
 
+        # For ARZ, also extract velocity IC (channel 1)
+        if equation == "ARZ":
+            ic_grid_v = grids[idx, 1, 0, :].copy()
+            xs_v, ks_v, pieces_mask_v = extract_ic_representation_from_grid(
+                ic_grid_v, dx, max_pieces=max_discontinuities
+            )
+            input_data["xs_v"] = xs_v
+            input_data["ks_v"] = ks_v
+            input_data["pieces_mask_v"] = pieces_mask_v
+
         processed.append((input_data, target_grid))
 
     return processed
@@ -413,6 +447,7 @@ def get_wavefront_data(
             nx, nt, dx, dt, n_steps, only_shocks, solver=solver, equation=equation
         )
 
+        need_upload = False
         if grids is not None and len(grids) >= n:
             print(f"  steps={n_steps}: using {n} cached samples")
             grids = grids[:n]
@@ -422,24 +457,35 @@ def get_wavefront_data(
                 grids = get_arz_dataset(n, nx, nt, dx, dt, n_steps, **arz_kw)
             else:
                 grids = get_nfv_dataset(n, nx, nt, dx, dt, n_steps, only_shocks)
+            need_upload = True
 
-            if upload_to_hf:
-                try:
-                    upload_grids(
-                        grids,
-                        nx,
-                        nt,
-                        dx,
-                        dt,
-                        n_steps,
-                        only_shocks,
-                        solver=solver,
-                        equation=equation,
-                    )
-                except Exception as e:
-                    print(f"  Failed to upload steps={n_steps}: {e}")
+        # Filter broken ARZ samples
+        if is_arz:
+            grids = _filter_arz_samples(grids, label=f"steps={n_steps}")
+            if len(grids) == 0:
+                print(f"  WARNING: steps={n_steps}: no valid samples after filtering!")
+                continue
+
+        if need_upload and upload_to_hf:
+            try:
+                upload_grids(
+                    grids,
+                    nx,
+                    nt,
+                    dx,
+                    dt,
+                    n_steps,
+                    only_shocks,
+                    solver=solver,
+                    equation=equation,
+                )
+            except Exception as e:
+                print(f"  Failed to upload steps={n_steps}: {e}")
 
         all_grids.append(grids)
+
+    if len(all_grids) == 0:
+        raise RuntimeError("No valid samples remain after filtering!")
 
     grids = np.concatenate(all_grids, axis=0)
     np.random.shuffle(grids)

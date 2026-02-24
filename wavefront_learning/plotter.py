@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from plotting import (
     _log_figure,
     plot_arz_ground_truth,
+    plot_arz_mse_error,
     plot_arz_pred,
     plot_charno_decomposition,
     plot_existence,
@@ -60,6 +61,7 @@ PLOTS: dict[str, callable] = {
     "wave_pattern": plot_wave_pattern,
     "arz_ground_truth": plot_arz_ground_truth,
     "arz_pred": plot_arz_pred,
+    "arz_mse_error": plot_arz_mse_error,
 }
 
 # Presets for common configurations
@@ -220,6 +222,7 @@ PLOT_PRESETS: dict[str, list[str]] = {
     "ecarz": [
         "arz_ground_truth",
         "arz_pred",
+        "arz_mse_error",
     ],
 }
 
