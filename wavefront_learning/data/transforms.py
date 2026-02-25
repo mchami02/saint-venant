@@ -145,10 +145,29 @@ class DiscretizeICTransform:
 
 ToGridNoCoords = partial(ToGridInputTransform, include_coords=False)
 
+
+class LDDeepONetTransform:
+    """Transform that copies target_grid into the input dict.
+
+    The latent diffusion model needs access to the target grid during
+    training (for VAE encoding). At inference the field is present but
+    unused.
+    """
+
+    def __init__(self, **kwargs):
+        pass
+
+    def __call__(self, input_data: dict, target_grid: torch.Tensor):
+        result = dict(input_data)
+        result["target_grid"] = target_grid
+        return result, target_grid
+
+
 # Registry of available transforms (string name -> class)
 TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
     "ToGridInput": ToGridInputTransform,
     "ToGridNoCoords": ToGridNoCoords,
     "DiscretizeIC": DiscretizeICTransform,
+    "LDDeepONet": LDDeepONetTransform,
 }

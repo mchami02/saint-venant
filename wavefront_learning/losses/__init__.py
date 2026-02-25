@@ -29,12 +29,14 @@ Utilities:
 
 from .acceleration import AccelerationLoss, compute_acceleration
 from .base import BaseLoss
-from .conservation import ConservationLoss
 from .boundary import BoundaryLoss
 from .collision import CollisionLoss
+from .conservation import ConservationLoss
 from .existence_regularization import ICAnchoringLoss
+from .flow_matching import FlowMatchingLoss
 from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_derivative
 from .ic import ICLoss
+from .kl_divergence import KLDivergenceLoss
 from .mse import MSELoss
 from .pde_residual import (
     PDEResidualLoss,
@@ -44,9 +46,10 @@ from .pde_residual import (
 )
 from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
+from .selection_supervision import SelectionSupervisionLoss
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
-from .selection_supervision import SelectionSupervisionLoss
+from .vae_reconstruction import VAEReconstructionLoss
 from .wasserstein import WassersteinLoss
 
 __all__ = [
@@ -74,6 +77,11 @@ __all__ = [
     "compute_pde_residual",
     "create_shock_mask",
     "compute_acceleration",
+    # Latent diffusion losses
+    "VAEReconstructionLoss",
+    "FlowMatchingLoss",
+    # CVAE losses
+    "KLDivergenceLoss",
     # CharNO losses
     "WassersteinLoss",
     "ConservationLoss",

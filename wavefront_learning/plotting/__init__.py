@@ -63,6 +63,7 @@ from .charno_plots import (
     plot_selection_weights,
     plot_winning_segment,
 )
+from .cvae_plots import plot_cvae_samples, plot_cvae_uncertainty
 from .wavefront_plots import plot_wave_pattern
 
 __all__ = [
@@ -110,4 +111,7 @@ __all__ = [
     "plot_charno_decomposition",
     # WaveFrontModel plots
     "plot_wave_pattern",
+    # CVAE plots
+    "plot_cvae_samples",
+    "plot_cvae_uncertainty",
 ]

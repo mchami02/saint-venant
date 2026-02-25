@@ -14,9 +14,9 @@ from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
 from .biased_cross_attention import BiasedCrossDecoderLayer, compute_characteristic_bias
+from .blocks import ResidualBlock
 from .boundaries import compute_boundaries
 from .breakpoint_evolution import BreakpointEvolution
-from .blocks import ResidualBlock
 from .characteristic_features import (
     CharacteristicFeatureComputer,
     DiscontinuityPhysicsEncoder,
@@ -24,16 +24,23 @@ from .characteristic_features import (
     TimeConditioner,
 )
 from .cross_decoder import CrossDecoder
-from .decoders import DensityDecoderTransformer, TrajectoryDecoder, TrajectoryDecoderTransformer
+from .decoders import (
+    DensityDecoderTransformer,
+    TrajectoryDecoder,
+    TrajectoryDecoderTransformer,
+)
+from .deeponet_decoder import DeepONetDecoder
 from .feature_encoders import (
     DiscontinuityEncoder,
     FourierFeatures,
     SpaceTimeEncoder,
     TimeEncoder,
 )
+from .flow_matching import ConditionEncoder, FlowMatchingDenoiser, HeunODESolver
 from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
 from .regions import RegionTrunk, RegionTrunkSet
 from .transformer_encoder import Encoder
+from .vae_encoder import VAEEncoder
 
 __all__ = [
     # Base class
@@ -56,6 +63,12 @@ __all__ = [
     "DensityDecoderTransformer",
     # Blocks
     "ResidualBlock",
+    # Latent diffusion components
+    "VAEEncoder",
+    "DeepONetDecoder",
+    "ConditionEncoder",
+    "FlowMatchingDenoiser",
+    "HeunODESolver",
     # Regions
     "RegionTrunk",
     "RegionTrunkSet",

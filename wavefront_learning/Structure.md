@@ -7,7 +7,8 @@ wavefront_learning/
 ├── CHARNO_DESIGN.md              # CharNO design document with mathematical justifications
 ├── CLAUDE.md                     # Claude Code guidance for this module
 ├── Structure.md                  # This file
-├── train.py                      # Main training script
+├── train.py                      # Main training script (orchestration, CLI, model creation)
+├── training_loop.py              # Training loop primitives (step, epoch, validation, early stopping)
 ├── test.py                       # Testing/evaluation CLI entry point
 ├── eval.sh                       # Shell script for batch evaluation
 ├── data/
@@ -34,6 +35,7 @@ wavefront_learning/
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
 │   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
+│   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -50,7 +52,10 @@ wavefront_learning/
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
 │       ├── characteristic_features.py  # SegmentPhysicsEncoder, DiscontinuityPhysicsEncoder, CharacteristicFeatureComputer
 │       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias, compute_discontinuity_characteristic_bias
-│       └── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
+│       ├── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
+│       ├── vae_encoder.py             # VAEEncoder (2D conv encoder for latent diffusion)
+│       ├── deeponet_decoder.py        # DeepONetDecoder (resolution-invariant branch-trunk decoder)
+│       └── flow_matching.py           # ConditionEncoder, FlowMatchingDenoiser, HeunODESolver
 ├── losses/
 │   ├── __init__.py               # Re-exports all loss classes and flux utilities
 │   ├── base.py                   # BaseLoss abstract class
@@ -68,6 +73,9 @@ wavefront_learning/
 │   ├── regularize_traj.py        # RegularizeTrajLoss
 │   ├── wasserstein.py            # WassersteinLoss (W1 / Earth Mover's Distance)
 │   ├── conservation.py           # ConservationLoss (mass conservation regularizer)
+│   ├── selection_supervision.py  # SelectionSupervisionLoss
+│   ├── vae_reconstruction.py     # VAEReconstructionLoss (MSE + beta*KL with warmup)
+│   ├── flow_matching.py          # FlowMatchingLoss (velocity MSE for flow matching)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -93,8 +101,10 @@ wavefront_learning/
 
 ### Entry Points
 
-- **train.py** — Training loop with early stopping, LR scheduling, periodic plotting.
-  - `parse_args()`, `train_step()`, `detach_output()`
+- **train.py** — Entry point: CLI args, data loading, model creation, training strategy dispatch.
+  - `parse_args()`, `train_model()`, `train_model_two_phase()`, `main()`
+- **training_loop.py** — Training loop primitives extracted from train.py.
+  - `detach_output()`, `train_step()`, `train_epoch()`, `validate_epoch()`, `_run_training_loop()`
 - **test.py** — Loads a trained model and runs evaluation.
   - `parse_args()`, `main()`
 - **eval.sh** — Shell script for batch evaluation runs.
@@ -159,6 +169,8 @@ wavefront_learning/
   - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
   - `WaveFrontModel`, `build_wavefront_model()`
+- **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.
+  - `LatentDiffusionDeepONet`, `build_ld_deeponet()`
 
 ### Model Base Components (`models/base/`)
 
@@ -177,6 +189,9 @@ wavefront_learning/
 - **characteristic_features.py** — `SegmentPhysicsEncoder`, `DiscontinuityPhysicsEncoder`, `CharacteristicFeatureComputer`
 - **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
 - **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)
+- **vae_encoder.py** — `VAEEncoder` (2D conv encoder mapping solution grid to latent Gaussian)
+- **deeponet_decoder.py** — `DeepONetDecoder` (resolution-invariant branch-trunk decoder)
+- **flow_matching.py** — `ConditionEncoder`, `FlowMatchingDenoiser`, `HeunODESolver`
 
 ### Losses (`losses/`)
 
@@ -197,6 +212,9 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **regularize_traj.py** — `RegularizeTrajLoss` (penalize erratic trajectory jumps)
 - **wasserstein.py** — `WassersteinLoss` (W1 / Earth Mover's Distance for sharp shocks)
 - **conservation.py** — `ConservationLoss` (mass conservation regularizer)
+- **selection_supervision.py** — `SelectionSupervisionLoss`
+- **vae_reconstruction.py** — `VAEReconstructionLoss` (MSE + beta*KL with linear warmup)
+- **flow_matching.py** — `FlowMatchingLoss` (velocity MSE for OT flow matching)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)
