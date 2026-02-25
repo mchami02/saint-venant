@@ -5,17 +5,18 @@ from argparse import Namespace
 import torch
 import torch.nn as nn
 from models.charno import build_charno
+from models.ctt_seg import build_ctt_seg
 from models.deeponet import build_deeponet
 from models.encoder_decoder import build_encoder_decoder, build_encoder_decoder_cross
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
+from models.latent_diffusion_deeponet import build_ld_deeponet
 from models.shock_trajectory_net import build_shock_net
 from models.traj_deeponet import (
     build_classifier_traj_deeponet,
     build_no_traj_deeponet,
     build_traj_deeponet,
 )
-from models.ctt_seg import build_ctt_seg
 from models.traj_transformer import (
     build_biased_classifier_traj_transformer,
     build_classifier_all_traj_transformer,
@@ -26,6 +27,7 @@ from models.traj_transformer import (
     build_no_traj_transformer,
     build_traj_transformer,
 )
+from models.wavefront_model import build_wavefront_model
 from models.waveno import (
     build_waveno,
     build_waveno_cls,
@@ -33,7 +35,6 @@ from models.waveno import (
     build_waveno_indep_traj,
     build_waveno_local,
 )
-from models.wavefront_model import build_wavefront_model
 
 # Registry of available models
 MODELS = {
@@ -62,6 +63,7 @@ MODELS = {
     "CTTFiLM": build_ctt_film,
     "CTTSeg": build_ctt_seg,
     "WaveFrontModel": build_wavefront_model,
+    "LDDeepONet": build_ld_deeponet,
 }
 
 # Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
@@ -91,6 +93,7 @@ MODEL_TRANSFORM = {
     "CTTFiLM": None,
     "CTTSeg": None,
     "WaveFrontModel": None,
+    "LDDeepONet": "LDDeepONet",
 }
 
 

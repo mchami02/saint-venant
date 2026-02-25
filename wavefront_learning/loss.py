@@ -15,14 +15,16 @@ from losses.boundary import BoundaryLoss
 from losses.collision import CollisionLoss
 from losses.conservation import ConservationLoss
 from losses.existence_regularization import ICAnchoringLoss
+from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
 from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
+from losses.selection_supervision import SelectionSupervisionLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
-from losses.selection_supervision import SelectionSupervisionLoss
+from losses.vae_reconstruction import VAEReconstructionLoss
 from losses.wasserstein import WassersteinLoss
 
 # Registry of available loss functions
@@ -42,6 +44,8 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "wasserstein": WassersteinLoss,
     "conservation": ConservationLoss,
     "selection_supervision": SelectionSupervisionLoss,
+    "vae_reconstruction": VAEReconstructionLoss,
+    "flow_matching": FlowMatchingLoss,
 }
 
 # Presets for common configurations
@@ -133,6 +137,9 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
     ],
     "wavefront_model": [
+        ("mse", 1.0),
+    ],
+    "ld_deeponet": [
         ("mse", 1.0),
     ],
 }

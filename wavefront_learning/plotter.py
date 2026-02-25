@@ -213,6 +213,12 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",
         "mse_error",
     ],
+    "ld_deeponet": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
 }
 
 

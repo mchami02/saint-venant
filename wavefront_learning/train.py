@@ -8,23 +8,22 @@ Minimal arguments are required - sensible defaults are provided for all paramete
 
 import argparse
 
-import numpy as np
 import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
-from logger import WandbLogger, init_logger, log_values
+from logger import WandbLogger, init_logger
 from loss import LOSS_PRESETS, LOSSES, create_loss_from_args
-from metrics import compute_metrics, extract_grid_prediction
-from model import MODELS, get_model, load_model, save_model
-from plotter import PLOT_PRESETS, plot
+from losses.flow_matching import FlowMatchingLoss
+from losses.vae_reconstruction import VAEReconstructionLoss
+from model import MODELS, get_model, load_model
+from plotter import PLOT_PRESETS
 from testing import (
-    collect_samples,
     run_profiler,
     run_sanity_check,
     test_model,
 )
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+from training_loop import _run_training_loop
 
 device = torch.device(
     "cuda"
@@ -93,6 +92,38 @@ def parse_args() -> argparse.Namespace:
         help="Max resolution multiplier for high-res generalization test (default: 5)",
     )
 
+    # Latent Diffusion DeepONet parameters
+    parser.add_argument(
+        "--ld_latent_dim", type=int, default=32, help="Latent space dimension for LDDeepONet"
+    )
+    parser.add_argument(
+        "--ld_num_basis", type=int, default=64, help="Number of DeepONet basis functions"
+    )
+    parser.add_argument(
+        "--ld_beta", type=float, default=0.01, help="KL weight for VAE loss"
+    )
+    parser.add_argument(
+        "--ld_beta_warmup", type=int, default=10, help="Epochs for beta warmup"
+    )
+    parser.add_argument(
+        "--ld_phase1_epochs",
+        type=int,
+        default=None,
+        help="Phase 1 (VAE) epochs (default: 2/3 of --epochs)",
+    )
+    parser.add_argument(
+        "--ld_phase2_epochs",
+        type=int,
+        default=None,
+        help="Phase 2 (flow matching) epochs (default: 1/3 of --epochs)",
+    )
+    parser.add_argument(
+        "--ld_num_ode_steps", type=int, default=100, help="Heun ODE steps at inference"
+    )
+    parser.add_argument(
+        "--ld_condition_dim", type=int, default=64, help="Condition embedding dimension"
+    )
+
     # Model-specific parameters
     parser.add_argument(
         "--initial_damping_sharpness",
@@ -141,191 +172,13 @@ def parse_args() -> argparse.Namespace:
     if args.max_test_steps is None:
         args.max_test_steps = args.max_steps
 
+    # Default phase epoch splits for LDDeepONet
+    if args.ld_phase1_epochs is None:
+        args.ld_phase1_epochs = max(1, args.epochs * 2 // 3)
+    if args.ld_phase2_epochs is None:
+        args.ld_phase2_epochs = max(1, args.epochs - args.ld_phase1_epochs)
+
     return args
-
-
-def detach_output(pred):
-    """Detach model output (handles both tensor and dict)."""
-    if isinstance(pred, dict):
-        return {
-            k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in pred.items()
-        }
-    return pred.detach()
-
-
-def train_step(
-    model: nn.Module,
-    batch_input: dict | torch.Tensor,
-    batch_target: torch.Tensor,
-    loss_fn: nn.Module,
-    optimizer: torch.optim.Optimizer,
-) -> tuple[float, dict | torch.Tensor, dict[str, float]]:
-    """Execute a single training step.
-
-    Args:
-        model: Model to train.
-        batch_input: Input tensor or dict.
-        batch_target: Target tensor.
-        loss_fn: Loss function.
-        optimizer: Optimizer.
-
-    Returns:
-        Tuple of (loss_value, prediction, loss_components).
-    """
-    optimizer.zero_grad()
-
-    # Move to device
-    if isinstance(batch_input, dict):
-        batch_input = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
-            for k, v in batch_input.items()
-        }
-    else:
-        batch_input = batch_input.to(device)
-    batch_target = batch_target.to(device)
-
-    # Forward pass
-    pred = model(
-        batch_input,
-    )
-
-    # Compute loss (input_dict, output_dict, target)
-    loss, components = loss_fn(batch_input, pred, batch_target)
-
-    # Backward pass
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    optimizer.step()
-
-    return loss.item(), detach_output(pred), components
-
-
-def train_epoch(
-    model: nn.Module,
-    train_loader: DataLoader,
-    loss_fn: nn.Module,
-    optimizer: torch.optim.Optimizer,
-) -> tuple[float, dict[str, float], dict[str, float] | None, dict[str, np.ndarray]]:
-    """Train for one epoch.
-
-    Args:
-        model: Model to train.
-        train_loader: Training data loader.
-        loss_fn: Loss function.
-        optimizer: Optimizer.
-
-    Returns:
-        Tuple of (average_loss, loss_components, grid_metrics | None, samples).
-        grid_metrics is None for trajectory-only models (ShockNet).
-        samples is a dict with all model outputs, input context, and target.
-    """
-    model.train()
-    total_loss = 0.0
-    all_components = []
-    all_predictions = []
-    all_targets = []
-
-    for batch_input, batch_target in tqdm(train_loader, desc="Training", leave=False):
-        loss, pred, components = train_step(
-            model, batch_input, batch_target, loss_fn, optimizer
-        )
-        total_loss += loss
-        all_components.append(components)
-
-        # Collect grid predictions for metrics (if available)
-        grid_pred = extract_grid_prediction(pred)
-        if grid_pred is not None:
-            all_predictions.append(grid_pred.cpu())
-            all_targets.append(batch_target.cpu())
-
-    avg_loss = total_loss / len(train_loader)
-    # Average loss components
-    avg_loss_components = {
-        key: np.mean([c[key] for c in all_components])
-        for key in all_components[0].keys()
-    }
-
-    # Compute grid metrics if predictions available
-    grid_metrics = None
-    if all_predictions:
-        all_preds_tensor = torch.cat(all_predictions, dim=0)
-        all_targets_tensor = torch.cat(all_targets, dim=0)
-        grid_metrics = compute_metrics(all_preds_tensor, all_targets_tensor)
-
-    # Collect samples from last batch for plotting
-    samples = collect_samples(pred, batch_input, batch_target)
-
-    return avg_loss, avg_loss_components, grid_metrics, samples
-
-
-def validate_epoch(
-    model: nn.Module,
-    val_loader: DataLoader,
-    loss_fn: nn.Module,
-) -> tuple[float, dict[str, float], dict[str, float] | None, dict[str, np.ndarray]]:
-    """Validate for one epoch.
-
-    Args:
-        model: Model to validate.
-        val_loader: Validation data loader.
-        loss_fn: Loss function.
-
-    Returns:
-        Tuple of (average_loss, loss_components, grid_metrics | None, samples).
-        grid_metrics is None for trajectory-only models (ShockNet).
-        samples is a dict with all model outputs, input context, and target.
-    """
-    model.eval()
-    total_loss = 0.0
-    all_components = []
-    all_predictions = []
-    all_targets = []
-
-    with torch.no_grad():
-        for batch_input, batch_target in tqdm(
-            val_loader, desc="Validating", leave=False
-        ):
-            # Move to device
-            if isinstance(batch_input, dict):
-                batch_input = {
-                    k: v.to(device) if isinstance(v, torch.Tensor) else v
-                    for k, v in batch_input.items()
-                }
-            else:
-                batch_input = batch_input.to(device)
-            batch_target = batch_target.to(device)
-
-            # Forward pass
-            pred = model(batch_input)
-            # Compute loss (input_dict, output_dict, target)
-            loss, components = loss_fn(batch_input, pred, batch_target)
-
-            total_loss += loss.item()
-            all_components.append(components)
-
-            # Collect grid predictions for metrics (if available)
-            grid_pred = extract_grid_prediction(pred)
-            if grid_pred is not None:
-                all_predictions.append(grid_pred.cpu())
-                all_targets.append(batch_target.cpu())
-
-    avg_loss = total_loss / len(val_loader)
-    avg_loss_components = {
-        key: np.mean([c[key] for c in all_components])
-        for key in all_components[0].keys()
-    }
-
-    # Compute grid metrics if predictions available
-    grid_metrics = None
-    if all_predictions:
-        all_preds_tensor = torch.cat(all_predictions, dim=0)
-        all_targets_tensor = torch.cat(all_targets, dim=0)
-        grid_metrics = compute_metrics(all_preds_tensor, all_targets_tensor)
-
-    # Collect samples from last batch for plotting
-    samples = collect_samples(pred, batch_input, batch_target)
-
-    return avg_loss, avg_loss_components, grid_metrics, samples
 
 
 def train_model(
@@ -349,92 +202,115 @@ def train_model(
     Returns:
         Trained model (best checkpoint).
     """
-    # Build grid_config if not provided
     if grid_config is None:
         grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
-    # Configure loss function with additional parameters
+
     loss_fn = create_loss_from_args(args)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5
     )
 
-    best_val_loss = float("inf")
-    patience_counter = 0
-    patience = 15
+    best_val_loss = _run_training_loop(
+        model, train_loader, val_loader,
+        loss_fn, optimizer, scheduler,
+        args.epochs, args.save_path, vars(args),
+        logger, grid_config, args.plot,
+    )
 
-    progress_bar = tqdm(range(args.epochs), desc="Training")
-
-    for epoch in progress_bar:
-        # Train
-        train_loss, train_loss_components, train_metrics, train_samples = train_epoch(
-            model, train_loader, loss_fn, optimizer
-        )
-
-        # Validate
-        val_loss, val_loss_components, val_metrics, val_samples = validate_epoch(
-            model, val_loader, loss_fn
-        )
-
-        # Update scheduler
-        scheduler.step(val_loss)
-        current_lr = optimizer.param_groups[0]["lr"]
-
-        # Log metrics
-        ep = epoch + 1
-        logger.log_metrics({"train/lr": current_lr}, epoch=ep)
-        log_values(logger, train_loss_components, ep, "train", "loss")
-        log_values(logger, val_loss_components, ep, "val", "loss")
-        log_values(logger, train_metrics, ep, "train", "metrics")
-        log_values(logger, val_metrics, ep, "val", "metrics")
-
-        # Plot every 5 epochs
-        if (epoch + 1) % 5 == 0:
-            plot(
-                train_samples,
-                grid_config,
-                logger,
-                epoch + 1,
-                mode="train",
-                preset=args.plot,
-            )
-            plot(
-                val_samples,
-                grid_config,
-                logger,
-                epoch + 1,
-                mode="val",
-                preset=args.plot,
-            )
-
-        # Check for improvement
-        if val_loss < best_val_loss * 0.99:  # 1% improvement threshold
-            best_val_loss = val_loss
-            patience_counter = 0
-            # Save best model
-            save_model(model, args.save_path, vars(args), epoch + 1, logger=logger)
-        else:
-            patience_counter += 1
-
-        # Early stopping
-        if patience_counter >= patience:
-            print(f"\nEarly stopping at epoch {epoch + 1}")
-            break
-
-        # Update progress bar
-        progress_bar.set_postfix(
-            {
-                "train": f"{train_loss:.4f}",
-                "val": f"{val_loss:.4f}",
-                "best": f"{best_val_loss:.4f}",
-                "lr": f"{current_lr:.2e}",
-            }
-        )
-
-    # Load best model from local checkpoint (no logger to avoid W&B race condition)
     model = load_model(args.save_path, device, vars(args))
-
     print(f"\nTraining complete. Best val loss: {best_val_loss:.6f}")
+    return model
+
+
+def train_model_two_phase(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    args: argparse.Namespace,
+    logger: WandbLogger,
+    grid_config: dict | None = None,
+) -> nn.Module:
+    """Two-phase training for Latent Diffusion DeepONet.
+
+    Phase 1: VAE training (encoder + decoder) with VAEReconstructionLoss.
+    Phase 2: Flow matching (frozen encoder/decoder) with FlowMatchingLoss.
+
+    Args:
+        model: LatentDiffusionDeepONet instance.
+        train_loader: Training data loader.
+        val_loader: Validation data loader.
+        args: Training arguments.
+        logger: W&B logger.
+        grid_config: Dict with {nx, nt, dx, dt} for plotting.
+
+    Returns:
+        Trained model (best checkpoint from phase 2).
+    """
+    if grid_config is None:
+        grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+
+    phase1_save = args.save_path.replace(".pth", "_phase1.pth")
+    config = vars(args)
+
+    # ── Phase 1: VAE training ──
+    print(f"\n{'='*60}")
+    print(f"Phase 1: VAE training ({args.ld_phase1_epochs} epochs)")
+    print(f"{'='*60}")
+
+    model.set_phase(1)
+    vae_loss = VAEReconstructionLoss(
+        beta=args.ld_beta, beta_warmup_epochs=args.ld_beta_warmup
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
+    )
+
+    best = _run_training_loop(
+        model, train_loader, val_loader,
+        vae_loss, optimizer, scheduler,
+        args.ld_phase1_epochs, phase1_save, config,
+        logger, grid_config, args.plot,
+        description="Phase 1 (VAE)",
+        epoch_callback=vae_loss.set_epoch,
+        extra_log={"phase": 1},
+    )
+
+    model = load_model(phase1_save, device, config)
+    print(f"\nPhase 1 complete. Best VAE val loss: {best:.6f}")
+
+    # ── Phase 2: Flow matching training ──
+    print(f"\n{'='*60}")
+    print(f"Phase 2: Flow matching ({args.ld_phase2_epochs} epochs)")
+    print(f"{'='*60}")
+
+    model.train()
+    model.set_phase(2)
+    fm_loss = FlowMatchingLoss()
+
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr,
+        weight_decay=1e-4,
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5
+    )
+
+    best = _run_training_loop(
+        model, train_loader, val_loader,
+        fm_loss, optimizer, scheduler,
+        args.ld_phase2_epochs, args.save_path, config,
+        logger, grid_config, args.plot,
+        description="Phase 2 (Flow)",
+        epoch_offset=args.ld_phase1_epochs,
+        extra_log={"phase": 2},
+    )
+
+    model = load_model(args.save_path, device, config)
+    model.set_phase(0)
+    print(f"\nPhase 2 complete. Best flow matching val loss: {best:.6f}")
     return model
 
 
@@ -444,6 +320,13 @@ def main():
 
     # Create grid_config dict for plotting functions
     grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+
+    # Auto-set loss and plot presets for LDDeepONet
+    if args.model == "LDDeepONet":
+        if args.loss == "shock_net":  # still the default
+            args.loss = "ld_deeponet"
+        if args.plot is None:
+            args.plot = "ld_deeponet"
 
     print(f"Using device: {device}")
     print(f"Model: {args.model}")
@@ -518,7 +401,12 @@ def main():
 
     # Train
     if args.epochs > 0:
-        model = train_model(model, train_loader, val_loader, args, logger, grid_config)
+        if args.model == "LDDeepONet":
+            model = train_model_two_phase(
+                model, train_loader, val_loader, args, logger, grid_config
+            )
+        else:
+            model = train_model(model, train_loader, val_loader, args, logger, grid_config)
 
     # Final test (standard + high-res)
     print("\nRunning final evaluation on test set...")

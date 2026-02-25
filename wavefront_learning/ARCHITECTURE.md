@@ -14,6 +14,7 @@ This document describes the neural network architectures and loss functions used
    - [EncoderDecoder](#encoderdecoder)
    - [TrajTransformer](#trajtransformer)
    - [WaveNO](#waveno)
+   - [LatentDiffusionDeepONet](#latentdiffusiondeeponet)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -1043,6 +1044,90 @@ This ensures gradients flow through both branches regardless of the classifier o
 
 ---
 
+### LatentDiffusionDeepONet
+
+**Location**: `models/latent_diffusion_deeponet.py`
+
+Generative model for hyperbolic PDE solutions. Trains a VAE on coarse-grid solutions to learn a latent space, then trains a flow matching denoiser conditioned on the IC. The DeepONet decoder is resolution-invariant.
+
+#### Pseudocode
+
+```
+Phase 1 (VAE training):
+  target_grid (1, nt, nx) → VAEEncoder → (mean, logvar) → reparameterize → z (latent_dim,)
+  z → DeepONetDecoder(z, t_coords, x_coords) → output_grid (1, nt, nx)
+  Loss: MSE(output_grid, target) + beta * KL(mean, logvar)
+
+Phase 2 (Flow matching training, encoder/decoder frozen):
+  target_grid → VAEEncoder → z (mean only, no grad)
+  (xs, ks, pieces_mask) → ConditionEncoder → c (condition_dim,)
+  noise ~ N(0,I), t ~ U(0,1)
+  z_t = (1-t)*noise + t*z
+  (z_t, t, c) → FlowMatchingDenoiser → predicted_velocity (latent_dim,)
+  Loss: MSE(predicted_velocity, z - noise)
+
+Inference:
+  (xs, ks, pieces_mask) → ConditionEncoder → c
+  noise ~ N(0,I) → HeunODESolver(denoiser, noise, c, num_steps) → z
+  z → DeepONetDecoder(z, t_coords, x_coords) → output_grid (1, nt, nx)
+```
+
+#### Sub-Components
+
+**VAEEncoder** (`models/base/vae_encoder.py`):
+- 2D conv encoder: Conv2d [1→32→64→128], stride 2, GELU+BatchNorm
+- AdaptiveAvgPool2d(1) → flatten → two linear heads for mean and logvar
+- `reparameterize(mean, logvar)`: z = mean + exp(0.5 * logvar) * eps
+
+**DeepONetDecoder** (`models/base/deeponet_decoder.py`):
+- Branch net: MLP (latent_dim → hidden → num_basis) with GELU+LayerNorm
+- Trunk net: FourierFeatures for t and x, concatenate, MLP → (num_basis,)
+- Output: sum_p(branch_p * trunk_p) + bias, reshaped to (1, nt, nx)
+- Resolution-invariant: trunk evaluates at any (t, x) query points
+
+**ConditionEncoder** (`models/base/flow_matching.py`):
+- Input: concatenate (xs, ks, pieces_mask) → flat vector
+- MLP → condition vector (condition_dim,)
+
+**FlowMatchingDenoiser** (`models/base/flow_matching.py`):
+- Sinusoidal time embedding → MLP → time_embed
+- Input projection: concat(z_t, time_embed, condition) → hidden
+- ResidualBlock layers → output projection → predicted velocity
+
+**HeunODESolver** (`models/base/flow_matching.py`):
+- Heun's method (2nd order) from t=0 to t=1
+- At each step: Euler predictor + trapezoidal corrector
+
+#### Input/Output Format
+
+| Key | Phase 1 Output | Phase 2 Output | Inference Output |
+|-----|---------------|----------------|-----------------|
+| `output_grid` | (1, nt, nx) | (1, nt, nx) detached | (1, nt, nx) |
+| `z_mean` | (latent_dim,) | — | — |
+| `z_logvar` | (latent_dim,) | — | — |
+| `predicted_velocity` | — | (latent_dim,) | — |
+| `target_velocity` | — | (latent_dim,) | — |
+
+#### Default Configuration
+
+| Parameter | Default | CLI Flag |
+|-----------|---------|----------|
+| `latent_dim` | 32 | `--ld_latent_dim` |
+| `num_basis` | 64 | `--ld_num_basis` |
+| `condition_dim` | 64 | `--ld_condition_dim` |
+| `num_ode_steps` | 100 | `--ld_num_ode_steps` |
+| `beta` | 0.01 | `--ld_beta` |
+| `beta_warmup_epochs` | 10 | `--ld_beta_warmup` |
+| `phase1_epochs` | 2/3 of --epochs | `--ld_phase1_epochs` |
+| `phase2_epochs` | 1/3 of --epochs | `--ld_phase2_epochs` |
+
+#### Factory Functions
+
+- `build_ld_deeponet(args)`: Creates LatentDiffusionDeepONet from config dict
+- Two-phase training via `train_model_two_phase()` in `train.py`
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -1446,6 +1531,42 @@ where $e_{min}^{(b,d,t)} = \min(e^{(b,d,t)}, e^{(b,d,t+1)})$ if existence is ava
 
 ---
 
+#### VAEReconstructionLoss
+
+**Location**: `losses/vae_reconstruction.py`
+
+**Formula**:
+
+$$\mathcal{L}_{\text{VAE}} = \text{MSE}(\hat{u}, u) + \beta(e) \cdot D_{\text{KL}}(q(z|u) \| p(z))$$
+
+where $\beta(e) = \beta_{\max} \cdot \min(e / E_{\text{warmup}}, 1)$ (linear warmup over $E_{\text{warmup}}$ epochs).
+
+KL divergence: $D_{\text{KL}} = -\frac{1}{2} \sum (1 + \log\sigma^2 - \mu^2 - \sigma^2)$
+
+**Configuration**: `beta` (default 0.01), `beta_warmup_epochs` (default 10)
+
+**Required outputs**: `output_grid`, `z_mean`, `z_logvar`
+
+**Components returned**: `{"recon_mse": float, "kl": float, "effective_beta": float}`
+
+---
+
+#### FlowMatchingLoss
+
+**Location**: `losses/flow_matching.py`
+
+**Formula**:
+
+$$\mathcal{L}_{\text{FM}} = \text{MSE}(v_\theta(z_t, t, c), z - \epsilon)$$
+
+where $z_t = (1-t)\epsilon + tz$ is the OT interpolation and $v^* = z - \epsilon$ is the target velocity.
+
+**Required outputs**: `predicted_velocity`, `target_velocity`
+
+**Components returned**: `{"flow_matching_mse": float}`
+
+---
+
 ### CombinedLoss
 
 **Location**: `loss.py`
@@ -1708,6 +1829,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
 | WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
+| LDDeepONet | Piecewise IC (xs, ks) + target grid (training) | Full grid (generative) | VAE + flow matching with resolution-invariant DeepONet decoder |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
@@ -1725,6 +1847,8 @@ loss = get_loss("hybrid", loss_kwargs={
 | RegularizeTrajLoss | `losses/regularize_traj.py` | Smooth trajectories | Penalize erratic jumps |
 | WassersteinLoss | `losses/wasserstein.py` | $W_1$ distance (sharp shocks) | CharNO, discontinuous solutions |
 | ConservationLoss | `losses/conservation.py` | Mass conservation | CharNO, physics regularization |
+| VAEReconstructionLoss | `losses/vae_reconstruction.py` | MSE + KL with beta warmup | LDDeepONet phase 1 |
+| FlowMatchingLoss | `losses/flow_matching.py` | OT velocity matching | LDDeepONet phase 2 |
 
 ### Key Design Principles
 
