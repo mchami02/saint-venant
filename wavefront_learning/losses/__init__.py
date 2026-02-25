@@ -36,6 +36,7 @@ from .existence_regularization import ICAnchoringLoss
 from .flow_matching import FlowMatchingLoss
 from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_derivative
 from .ic import ICLoss
+from .kl_divergence import KLDivergenceLoss
 from .mse import MSELoss
 from .pde_residual import (
     PDEResidualLoss,
@@ -79,6 +80,8 @@ __all__ = [
     # Latent diffusion losses
     "VAEReconstructionLoss",
     "FlowMatchingLoss",
+    # CVAE losses
+    "KLDivergenceLoss",
     # CharNO losses
     "WassersteinLoss",
     "ConservationLoss",

@@ -103,6 +103,10 @@ def run_sanity_check(
         batch_input = batch_input.to(device)
     batch_target = batch_target.to(device)
 
+    # Inject target for CVAE models (inference network needs target during training)
+    if getattr(model, "needs_target_input", False) and isinstance(batch_input, dict):
+        batch_input["target_grid"] = batch_target
+
     try:
         pred = model(batch_input)
         if isinstance(pred, dict):
@@ -147,6 +151,9 @@ def run_sanity_check(
     print("\n[3/4] Testing loss computation...")
     model.train()
     try:
+        # Inject target for CVAE models
+        if getattr(model, "needs_target_input", False) and isinstance(batch_input, dict):
+            batch_input["target_grid"] = batch_target
         # Re-run forward pass for fresh computation graph
         pred = model(batch_input)
         # Use new signature: (input_dict, output_dict, target)

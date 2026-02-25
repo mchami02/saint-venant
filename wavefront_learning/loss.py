@@ -17,6 +17,7 @@ from losses.conservation import ConservationLoss
 from losses.existence_regularization import ICAnchoringLoss
 from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
+from losses.kl_divergence import KLDivergenceLoss
 from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
@@ -46,6 +47,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "selection_supervision": SelectionSupervisionLoss,
     "vae_reconstruction": VAEReconstructionLoss,
     "flow_matching": FlowMatchingLoss,
+    "kl_divergence": KLDivergenceLoss,
 }
 
 # Presets for common configurations
@@ -141,6 +143,10 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     ],
     "ld_deeponet": [
         ("mse", 1.0),
+    ],
+    "cvae_deeponet": [
+        ("mse", 1.0),
+        ("kl_divergence", 1.0, {"free_bits": 0.1}),
     ],
 }
 
@@ -274,6 +280,12 @@ class CombinedLoss(BaseLoss):
             losses[loss_name] = (LOSSES[loss_name](**kwargs), weight)
 
         return cls(losses)
+
+    def set_kl_beta(self, beta: float) -> None:
+        """Set KL beta on all sub-losses that support it (e.g. KLDivergenceLoss)."""
+        for loss_fn in self.losses:
+            if hasattr(loss_fn, "beta"):
+                loss_fn.beta = beta
 
     def forward(
         self,

@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 from plotting import (
     _log_figure,
     plot_charno_decomposition,
+    plot_cvae_samples,
+    plot_cvae_uncertainty,
     plot_existence,
     plot_grid_with_acceleration,
     plot_grid_with_trajectory_existence,
@@ -56,6 +58,8 @@ PLOTS: dict[str, callable] = {
     "selection_entropy": plot_selection_entropy,
     "local_densities": plot_local_densities,
     "wave_pattern": plot_wave_pattern,
+    "cvae_samples": plot_cvae_samples,
+    "cvae_uncertainty": plot_cvae_uncertainty,
 }
 
 # Presets for common configurations
@@ -218,6 +222,13 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",
         "mse_error",
         "pde_residual",
+    ],
+    "cvae_deeponet": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "cvae_uncertainty",
+        "cvae_samples",
     ],
 }
 

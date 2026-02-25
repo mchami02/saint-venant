@@ -14,15 +14,18 @@ from testing.test_results import (
     eval_steps,
     test_model,
 )
+from testing.cvae_testing import collect_cvae_samples, multi_sample_predict
 from testing.test_running import run_inference, run_profiler, run_sanity_check
 
 __all__ = [
+    "collect_cvae_samples",
     "collect_samples",
     "eval_high_res",
     "eval_inference_time",
     "eval_model",
     "eval_res",
     "eval_steps",
+    "multi_sample_predict",
     "run_inference",
     "run_profiler",
     "run_sanity_check",

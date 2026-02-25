@@ -124,6 +124,20 @@ def parse_args() -> argparse.Namespace:
         "--ld_condition_dim", type=int, default=64, help="Condition embedding dimension"
     )
 
+    # CVAE DeepONet parameters
+    parser.add_argument(
+        "--latent_dim", type=int, default=32, help="Latent space dimension for CVAEDeepONet"
+    )
+    parser.add_argument(
+        "--condition_dim", type=int, default=64, help="Condition embedding dimension for CVAEDeepONet"
+    )
+    parser.add_argument(
+        "--kl_beta", type=float, default=1.0, help="Target KL beta for CVAEDeepONet"
+    )
+    parser.add_argument(
+        "--n_cvae_samples", type=int, default=10, help="Number of z-samples for CVAE evaluation"
+    )
+
     # Model-specific parameters
     parser.add_argument(
         "--initial_damping_sharpness",
@@ -211,11 +225,22 @@ def train_model(
         optimizer, mode="min", factor=0.5, patience=5
     )
 
+    # KL annealing callback for CVAE models
+    epoch_callback = None
+    if hasattr(loss_fn, "set_kl_beta"):
+        kl_warmup_epochs = max(1, int(0.2 * args.epochs))
+        kl_beta_target = getattr(args, "kl_beta", 1.0)
+
+        def epoch_callback(epoch):
+            progress = min(1.0, (epoch + 1) / kl_warmup_epochs)
+            loss_fn.set_kl_beta(kl_beta_target * progress)
+
     best_val_loss = _run_training_loop(
         model, train_loader, val_loader,
         loss_fn, optimizer, scheduler,
         args.epochs, args.save_path, vars(args),
         logger, grid_config, args.plot,
+        epoch_callback=epoch_callback,
     )
 
     model = load_model(args.save_path, device, vars(args))
@@ -327,6 +352,13 @@ def main():
             args.loss = "ld_deeponet"
         if args.plot is None:
             args.plot = "ld_deeponet"
+
+    # Auto-set loss and plot presets for CVAEDeepONet
+    if args.model == "CVAEDeepONet":
+        if args.loss == "shock_net":  # still the default
+            args.loss = "cvae_deeponet"
+        if args.plot is None:
+            args.plot = "cvae_deeponet"
 
     print(f"Using device: {device}")
     print(f"Model: {args.model}")
