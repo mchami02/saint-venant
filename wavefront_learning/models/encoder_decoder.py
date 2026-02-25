@@ -3,9 +3,10 @@
 Transformer encoder processes masked IC conditions, decoder reconstructs
 full space-time solution via axial or cross-attention.
 
-Input: dict with "grid_input" key containing tensor of shape (B, 3, nt, nx)
-       from ToGridInputTransform. Channels are [ic_masked, t_coords, x_coords].
-Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
+Input: dict with "grid_input" key containing tensor of shape (B, C, nt, nx)
+       from ToGridInputTransform. Channels are [ic_masked..., t_coords, x_coords].
+       C = n_ic_channels + 2 (e.g. 3 for LWR, 4 for ARZ with rho+v).
+Output: dict {"output_grid": tensor of shape (B, output_dim, nt, nx)}
 """
 
 import torch
@@ -40,11 +41,14 @@ class EncoderDecoder(nn.Module):
         dt: float = None,
         dx: float = None,
         device=None,
+        output_dim: int = 1,
+        n_ic_channels: int = 1,
     ):
         super().__init__()
+        self.n_ic_channels = n_ic_channels
 
         self.encoder = Encoder(
-            input_dim=3, hidden_dim=hidden_dim, num_layers=layers_encoder
+            input_dim=n_ic_channels + 2, hidden_dim=hidden_dim, num_layers=layers_encoder
         )
 
         if decoder_type == "axial":
@@ -53,7 +57,9 @@ class EncoderDecoder(nn.Module):
             )
         elif decoder_type == "cross":
             self.decoder = CrossDecoder(
-                hidden_dim=hidden_dim, num_layers=layers_decoder
+                hidden_dim=hidden_dim,
+                num_layers=layers_decoder,
+                output_dim=output_dim,
             )
         else:
             raise ValueError(
@@ -131,11 +137,11 @@ class EncoderDecoder(nn.Module):
         """Forward pass.
 
         Args:
-            x: Input dict with "grid_input" tensor of shape (B, 3, nt, nx)
-               where channels are [ic_masked, t_coords, x_coords].
+            x: Input dict with "grid_input" tensor of shape (B, C, nt, nx)
+               where channels are [ic_masked..., t_coords, x_coords].
 
         Returns:
-            Dict with "output_grid" of shape (B, 1, nt, nx).
+            Dict with "output_grid" of shape (B, output_dim, nt, nx).
         """
         grid = x["grid_input"]
         B, C, T, N = grid.shape
@@ -149,8 +155,12 @@ class EncoderDecoder(nn.Module):
         max_length = int(counts.max().item())
 
         # Extract and pad conditions
-        conds = torch.full((B, max_length, C), 0.0, device=grid.device, dtype=grid.dtype)
-        key_padding_mask = torch.ones(B, max_length, device=grid.device, dtype=torch.bool)
+        conds = torch.full(
+            (B, max_length, C), 0.0, device=grid.device, dtype=grid.dtype
+        )
+        key_padding_mask = torch.ones(
+            B, max_length, device=grid.device, dtype=torch.bool
+        )
         for b in range(B):
             valid_elements = grid_permuted[b][mask[b]]
             conds[b, : counts[b]] = valid_elements
@@ -159,8 +169,8 @@ class EncoderDecoder(nn.Module):
         # Encode
         encoder_output = self.encoder(conds, key_padding_mask=key_padding_mask)
 
-        # Decode
-        all_coords = grid[:, 1:].permute(0, 2, 3, 1)  # (B, T, N, 2)
+        # Decode — coordinates are the last 2 channels (after IC channels)
+        all_coords = grid[:, self.n_ic_channels:].permute(0, 2, 3, 1)  # (B, T, N, 2)
         u = self.decoder(all_coords, encoder_output, key_padding_mask=key_padding_mask)
 
         # Shock correction
@@ -215,4 +225,29 @@ def build_encoder_decoder_cross(args: dict) -> EncoderDecoder:
         nx=args.get("nx"),
         dt=args.get("dt"),
         dx=args.get("dx"),
+    )
+
+
+def build_ecarz(args: dict) -> EncoderDecoder:
+    """Build EncoderDecoderCross with 2-channel output for ARZ equations.
+
+    Same architecture as EncoderDecoderCross but outputs (B, 2, nt, nx)
+    for the two ARZ components (rho, v). Uses n_ic_channels=2 to accept
+    both rho and v initial conditions.
+
+    Args:
+        args: Configuration dictionary. Same keys as build_encoder_decoder.
+    """
+    return EncoderDecoder(
+        hidden_dim=args.get("hidden_dim", 64),
+        layers_encoder=args.get("layers_encoder", 2),
+        decoder_type="cross",
+        layers_decoder=args.get("layers_decoder", 2),
+        layers_gnn=args.get("layers_gnn", 0),
+        nt=args.get("nt"),
+        nx=args.get("nx"),
+        dt=args.get("dt"),
+        dx=args.get("dx"),
+        output_dim=2,
+        n_ic_channels=2,
     )

@@ -8,22 +8,42 @@ This module handles:
 
 import numpy as np
 import torch
-from nfv.flows import Greenshield
-from nfv.initial_conditions import PiecewiseConstant
-from nfv.problem import Problem
-from nfv.solvers import LaxHopf
 
 from data.data_loading import download_grids, upload_grids
+from numerical_solvers.arz import generate_n as arz_generate_n
+from numerical_solvers.lwr import generate_n as lwr_generate_n
 
 
-class PiecewiseRandom(PiecewiseConstant):
-    """Piecewise constant IC with random breakpoint locations."""
+def _filter_arz_samples(grids, max_value=10.0, label=""):
+    """Remove broken ARZ samples (NaN/Inf, all-zeros, extreme values).
 
-    def __init__(self, ks, x_noise=False):
-        super().__init__(ks, x_noise)
-        self.xs = np.random.rand(len(ks) - 1)
-        self.xs = np.sort(self.xs)
-        self.xs = np.concatenate([[0], self.xs, [1]])
+    Args:
+        grids: Array of shape (n, 2, nt, nx).
+        max_value: Maximum allowed absolute value.
+        label: Label for log messages (e.g. "steps=3").
+
+    Returns:
+        Filtered array with bad samples removed.
+    """
+    n = len(grids)
+    # Reshape to (n, -1) for per-sample checks
+    flat = grids.reshape(n, -1)
+
+    nan_inf = ~np.isfinite(flat).all(axis=1)
+    all_zero = (flat == 0).all(axis=1)
+    extreme = (np.abs(flat) > max_value).any(axis=1)
+
+    bad = nan_inf | all_zero | extreme
+    n_bad = bad.sum()
+
+    if n_bad > 0:
+        print(
+            f"  {label}: removed {n_bad}/{n} ARZ samples "
+            f"(NaN/Inf: {nan_inf.sum()}, all-zero: {all_zero.sum()}, "
+            f"extreme (>{max_value}): {(extreme & ~nan_inf).sum()})"
+        )
+
+    return grids[~bad]
 
 
 def get_nfv_dataset(
@@ -49,21 +69,59 @@ def get_nfv_dataset(
     Returns:
         Grid data of shape (n_samples, nt, nx).
     """
-    ics = [
-        PiecewiseRandom(ks=[np.random.rand() for _ in range(max_steps)], x_noise=False)
-        for _ in range(n_samples)
-    ]
-    if only_shocks:
-        for ic in ics:
-            ic.ks.sort()
-
-    problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=ics, flow=Greenshield())
-    grids = (
-        problem.solve(LaxHopf, batch_size=4, dtype=torch.float64, progressbar=True)
-        .cpu()
-        .numpy()
+    result = lwr_generate_n(
+        n=n_samples,
+        k=max_steps,
+        nx=nx,
+        nt=nt,
+        dx=dx,
+        dt=dt,
+        only_shocks=only_shocks,
+        show_progress=True,
+        batch_size=4,
     )
-    return grids
+    return result["rho"].cpu().numpy()
+
+
+def get_arz_dataset(
+    n_samples: int,
+    nx: int,
+    nt: int,
+    dx: float,
+    dt: float,
+    max_steps: int = 3,
+    **kwargs,
+) -> np.ndarray:
+    """Generate grids using the ARZ solver.
+
+    Args:
+        n_samples: Number of samples to generate.
+        nx: Number of spatial grid points.
+        nt: Number of time steps.
+        dx: Spatial step size.
+        dt: Time step size.
+        max_steps: Number of pieces in piecewise constant IC.
+        **kwargs: Additional ARZ solver arguments (gamma, flux_type,
+            reconstruction, bc_type).
+
+    Returns:
+        Grid data of shape (n_samples, 2, nt, nx) with channels [rho, v].
+    """
+    # ARZ solver returns nt+1 timesteps; request nt-1 so output has nt total
+    result = arz_generate_n(
+        n=n_samples,
+        k=max_steps,
+        nx=nx,
+        nt=nt - 1,
+        dx=dx,
+        dt=dt,
+        show_progress=True,
+        **kwargs,
+    )
+    rho = result["rho"].cpu().numpy()  # (n, nt, nx)
+    v = result["v"].cpu().numpy()  # (n, nt, nx)
+
+    return np.stack([rho, v], axis=1)  # (n, 2, nt, nx)
 
 
 def _group_consecutive_diff_indices(
@@ -247,31 +305,39 @@ def preprocess_wavefront_data(
     dx: float,
     dt: float,
     max_discontinuities: int = 10,
+    equation: str = "LWR",
 ) -> list[tuple[dict, torch.Tensor]]:
     """Preprocess grids for wavefront learning.
 
-    Extracts discontinuities from the initial condition (grid[:, 0, :])
-    and creates input dictionaries with coordinate grids.
+    Extracts discontinuities from the initial condition and creates
+    input dictionaries with coordinate grids.
 
     Args:
-        grids: Grid data of shape (n_samples, nt, nx).
+        grids: Grid data of shape (n_samples, nt, nx) for LWR
+            or (n_samples, 2, nt, nx) for ARZ.
         nx, nt: Grid dimensions.
         dx, dt: Grid spacing.
         max_discontinuities: Maximum number of discontinuities to support.
+        equation: Equation system ("LWR" or "ARZ").
 
     Returns:
         List of tuples (input_data, target_grid) where:
             - input_data: dict containing 'discontinuities', 'mask', 't_coords', 'x_coords'
-            - target_grid: tensor of shape (1, nt, nx)
+            - target_grid: tensor of shape (1, nt, nx) for LWR or (2, nt, nx) for ARZ
     """
     processed = []
 
     for idx in range(len(grids)):
-        # Get target grid
-        target_grid = torch.from_numpy(grids[idx]).to(torch.float32).unsqueeze(0)
-
-        # Extract IC from first time step
-        ic_grid = grids[idx, 0, :].copy()
+        if equation == "ARZ":
+            # ARZ grids: (n, 2, nt, nx) — already has channel dim
+            target_grid = torch.from_numpy(grids[idx]).to(torch.float32)
+            # Extract IC from rho (channel 0) at t=0
+            ic_grid = grids[idx, 0, 0, :].copy()
+        else:
+            # LWR grids: (n, nt, nx) — add channel dim
+            target_grid = torch.from_numpy(grids[idx]).to(torch.float32).unsqueeze(0)
+            # Extract IC from first time step
+            ic_grid = grids[idx, 0, :].copy()
 
         # Extract discontinuity representation
         discontinuities, disc_mask = extract_discontinuities_from_grid(
@@ -303,6 +369,16 @@ def preprocess_wavefront_data(
             "dt": torch.tensor(dt, dtype=torch.float32),
         }
 
+        # For ARZ, also extract velocity IC (channel 1)
+        if equation == "ARZ":
+            ic_grid_v = grids[idx, 1, 0, :].copy()
+            xs_v, ks_v, pieces_mask_v = extract_ic_representation_from_grid(
+                ic_grid_v, dx, max_pieces=max_discontinuities
+            )
+            input_data["xs_v"] = xs_v
+            input_data["ks_v"] = ks_v
+            input_data["pieces_mask_v"] = pieces_mask_v
+
         processed.append((input_data, target_grid))
 
     return processed
@@ -320,6 +396,8 @@ def get_wavefront_data(
     random_seed: int = 42,
     max_discontinuities: int = 10,
     upload_to_hf: bool = True,
+    equation: str = "LWR",
+    equation_kwargs: dict | None = None,
 ) -> list[tuple[dict, torch.Tensor]]:
     """Get wavefront data, downloading from HuggingFace or generating locally.
 
@@ -341,11 +419,17 @@ def get_wavefront_data(
         random_seed: Random seed for reproducibility.
         max_discontinuities: Maximum number of discontinuities to support.
         upload_to_hf: If True, upload generated data to HuggingFace.
+        equation: Equation system ("LWR" or "ARZ").
+        equation_kwargs: Extra keyword arguments for the ARZ solver.
 
     Returns:
         List of tuples (input_data, target_grid).
     """
     np.random.seed(random_seed)
+
+    is_arz = equation == "ARZ"
+    solver = "ARZ" if is_arz else "LaxHopf"
+    arz_kw = equation_kwargs or {}
 
     # Distribute samples uniformly across step counts {min_steps, ..., max_steps}
     step_counts = list(range(min_steps, max_steps + 1))
@@ -358,29 +442,94 @@ def get_wavefront_data(
         if n == 0:
             continue
 
+        valid_grids = []
+        still_needed = n
+        need_upload = False
+
         # Try to download from HuggingFace (each step count cached independently)
-        grids = download_grids(nx, nt, dx, dt, n_steps, only_shocks)
+        cached = download_grids(
+            nx, nt, dx, dt, n_steps, only_shocks, solver=solver, equation=equation
+        )
 
-        if grids is not None and len(grids) >= n:
-            print(f"  steps={n_steps}: using {n} cached samples")
-            grids = grids[:n]
-        else:
-            print(f"  steps={n_steps}: generating {n} samples locally...")
-            grids = get_nfv_dataset(n, nx, nt, dx, dt, n_steps, only_shocks)
+        if cached is not None and len(cached) > 0:
+            if is_arz:
+                original_len = len(cached)
+                cached = _filter_arz_samples(
+                    cached, label=f"steps={n_steps} (cached)"
+                )
+                if len(cached) < original_len:
+                    need_upload = True  # cache was dirty
+            available = cached[:n]
+            if len(available) > 0:
+                valid_grids.append(available)
+                still_needed = n - len(available)
+            if still_needed <= 0:
+                print(f"  steps={n_steps}: using {n} cached samples")
 
-            if upload_to_hf:
-                try:
-                    upload_grids(grids, nx, nt, dx, dt, n_steps, only_shocks)
-                except Exception as e:
-                    print(f"  Failed to upload steps={n_steps}: {e}")
+        # Regeneration loop for missing samples
+        max_regen = 5
+        regen_round = 0
+        while still_needed > 0 and regen_round < max_regen:
+            regen_round += 1
+            batch_size = still_needed
+            print(
+                f"  steps={n_steps}: generating {batch_size} samples"
+                f" (round {regen_round})..."
+            )
+            if is_arz:
+                raw = get_arz_dataset(
+                    batch_size, nx, nt, dx, dt, n_steps, **arz_kw
+                )
+                raw = _filter_arz_samples(raw, label=f"steps={n_steps}")
+            else:
+                raw = get_nfv_dataset(
+                    batch_size, nx, nt, dx, dt, n_steps, only_shocks
+                )
+            if len(raw) > 0:
+                valid_grids.append(raw)
+                still_needed -= len(raw)
+            need_upload = True
+
+        if still_needed > 0:
+            print(
+                f"  WARNING steps={n_steps}: only got {n - still_needed}/{n}"
+                f" after {max_regen} regeneration rounds"
+            )
+
+        if len(valid_grids) == 0:
+            print(f"  WARNING: steps={n_steps}: no valid samples after filtering!")
+            continue
+
+        grids = np.concatenate(valid_grids, axis=0)
+
+        if need_upload and upload_to_hf:
+            try:
+                upload_grids(
+                    grids,
+                    nx,
+                    nt,
+                    dx,
+                    dt,
+                    n_steps,
+                    only_shocks,
+                    solver=solver,
+                    equation=equation,
+                )
+            except Exception as e:
+                print(f"  Failed to upload steps={n_steps}: {e}")
 
         all_grids.append(grids)
+
+    if len(all_grids) == 0:
+        raise RuntimeError("No valid samples remain after filtering!")
 
     grids = np.concatenate(all_grids, axis=0)
     np.random.shuffle(grids)
 
     # Preprocess
-    processed = preprocess_wavefront_data(grids, nx, nt, dx, dt, max_discontinuities)
+    processed = preprocess_wavefront_data(
+        grids, nx, nt, dx, dt, max_discontinuities, equation=equation
+    )
 
     return processed
 
@@ -389,7 +538,9 @@ if __name__ == "__main__":
     # --- Unit tests for mid-cell discontinuity extraction ---
 
     def _assert_close(actual, expected, tol, label):
-        assert abs(actual - expected) < tol, f"{label}: expected {expected}, got {actual}"
+        assert abs(actual - expected) < tol, (
+            f"{label}: expected {expected}, got {actual}"
+        )
 
     passed = 0
     total = 0

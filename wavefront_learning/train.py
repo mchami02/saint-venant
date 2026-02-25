@@ -50,6 +50,38 @@ def parse_args() -> argparse.Namespace:
         help="Model architecture",
     )
 
+    # Equation selection
+    parser.add_argument(
+        "--equation",
+        type=str,
+        default="LWR",
+        choices=["LWR", "ARZ"],
+        help="Equation system (LWR = scalar traffic, ARZ = 2-component density+velocity)",
+    )
+    parser.add_argument(
+        "--gamma", type=float, default=1.0, help="ARZ pressure exponent (default: 1.0)"
+    )
+    parser.add_argument(
+        "--flux_type",
+        type=str,
+        default="hll",
+        choices=["hll", "rusanov"],
+        help="ARZ numerical flux type (default: hll)",
+    )
+    parser.add_argument(
+        "--reconstruction",
+        type=str,
+        default="weno5",
+        choices=["constant", "weno5"],
+        help="ARZ reconstruction scheme (default: weno5)",
+    )
+    parser.add_argument(
+        "--bc_type",
+        type=str,
+        default="zero_gradient",
+        help="ARZ boundary condition type (default: zero_gradient)",
+    )
+
     # Loss selection
     parser.add_argument(
         "--loss",
@@ -71,7 +103,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
     parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
     parser.add_argument(
-        "--only_shocks", action="store_true", help="Generate only shock waves (no rarefactions)"
+        "--only_shocks",
+        action="store_true",
+        help="Generate only shock waves (no rarefactions)",
     )
     parser.add_argument(
         "--max_steps",
@@ -361,8 +395,24 @@ def main():
             args.plot = "cvae_deeponet"
 
     print(f"Using device: {device}")
+    print(f"Equation: {args.equation}")
     print(f"Model: {args.model}")
     print(f"Epochs: {args.epochs}, Batch size: {args.batch_size}, LR: {args.lr}")
+
+    # Warn about unsupported ARZ + only_shocks combination
+    if args.equation == "ARZ" and args.only_shocks:
+        print("Warning: --only_shocks is not supported for ARZ; ignoring.")
+        args.only_shocks = False
+
+    # Build equation-specific kwargs
+    equation_kwargs = None
+    if args.equation == "ARZ":
+        equation_kwargs = {
+            "gamma": args.gamma,
+            "flux_type": args.flux_type,
+            "reconstruction": args.reconstruction,
+            "bc_type": args.bc_type,
+        }
 
     # Check if model is available
     if args.model not in MODELS:
@@ -379,6 +429,8 @@ def main():
         model_name=args.model,
         only_shocks=args.only_shocks,
         max_steps=args.max_steps,
+        equation=args.equation,
+        equation_kwargs=equation_kwargs,
     )
 
     train_loader = DataLoader(
@@ -423,7 +475,8 @@ def main():
     run_sanity_check(model, train_loader, val_loader, args, device)
 
     # Initialize logger (no-ops when args.no_wandb is True)
-    logger = init_logger(args)
+    wandb_project = "arz_learning" if args.equation == "ARZ" else "wavefront-learning"
+    logger = init_logger(args, project=wandb_project)
     logger.log_metrics({"model/parameters": num_params})
     logger.watch_model(model)
 

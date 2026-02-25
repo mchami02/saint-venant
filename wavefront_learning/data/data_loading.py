@@ -24,8 +24,14 @@ DEFAULT_REPO = "mchami/grids"
 
 
 def _make_config_id(
-    solver: str, flux: str, nx: int, nt: int, dx: float, dt: float,
-    max_steps: int, only_shocks: bool,
+    solver: str,
+    flux: str,
+    nx: int,
+    nt: int,
+    dx: float,
+    dt: float,
+    max_steps: int,
+    only_shocks: bool,
 ) -> str:
     return (
         f"{solver}_{flux}_nx{nx}_nt{nt}_dx{dx}_dt{dt}"
@@ -44,11 +50,13 @@ def upload_grids(
     solver: str = DEFAULT_SOLVER,
     flux: str = DEFAULT_FLUX,
     repo_id: str = DEFAULT_REPO,
+    equation: str = "LWR",
 ) -> None:
     """Upload grids to the shared mchami/grids repository.
 
     Args:
-        grids: Grid data of shape (n_samples, nt, nx).
+        grids: Grid data of shape (n_samples, nt, nx) for LWR
+            or (n_samples, 2, nt, nx) for ARZ.
         nx: Number of spatial grid points.
         nt: Number of time steps.
         dx: Spatial step size.
@@ -58,12 +66,21 @@ def upload_grids(
         solver: Solver name (default: LaxHopf).
         flux: Flux name (default: Greenshields).
         repo_id: HuggingFace repo ID.
+        equation: Equation system ("LWR" or "ARZ").
     """
-    assert grids.shape[1:] == (nt, nx)
+    if equation == "ARZ":
+        assert grids.shape[1:] == (2, nt, nx), (
+            f"ARZ grids expected shape (n, 2, {nt}, {nx}), got {grids.shape}"
+        )
+    else:
+        assert grids.shape[1:] == (nt, nx), (
+            f"LWR grids expected shape (n, {nt}, {nx}), got {grids.shape}"
+        )
     n_samples = grids.shape[0]
 
     config_id = _make_config_id(solver, flux, nx, nt, dx, dt, max_steps, only_shocks)
-    data_path = f"lwr/{config_id}.npz"
+    path_prefix = "arz" if equation == "ARZ" else "lwr"
+    data_path = f"{path_prefix}/{config_id}.npz"
 
     # 1) Save grids locally
     np.savez_compressed("tmp_grids.npz", grids=grids)
@@ -81,28 +98,46 @@ def upload_grids(
         idx_path = hf_hub_download(repo_id, "index.parquet", repo_type="dataset")
         df = pd.read_parquet(idx_path)
     except Exception:
-        df = pd.DataFrame(columns=[
-            "config_id", "solver", "flux", "nx", "nt", "dx", "dt",
-            "max_steps", "only_shocks", "n_samples", "file"
-        ])
+        df = pd.DataFrame(
+            columns=[
+                "config_id",
+                "solver",
+                "flux",
+                "nx",
+                "nt",
+                "dx",
+                "dt",
+                "max_steps",
+                "only_shocks",
+                "n_samples",
+                "file",
+            ]
+        )
 
     df = df[df["config_id"] != config_id]
-    df = pd.concat([
-        df,
-        pd.DataFrame([{
-            "config_id": config_id,
-            "solver": solver,
-            "flux": flux,
-            "nx": nx,
-            "nt": nt,
-            "dx": dx,
-            "dt": dt,
-            "max_steps": max_steps,
-            "only_shocks": only_shocks,
-            "n_samples": n_samples,
-            "file": data_path,
-        }])
-    ], ignore_index=True)
+    df = pd.concat(
+        [
+            df,
+            pd.DataFrame(
+                [
+                    {
+                        "config_id": config_id,
+                        "solver": solver,
+                        "flux": flux,
+                        "nx": nx,
+                        "nt": nt,
+                        "dx": dx,
+                        "dt": dt,
+                        "max_steps": max_steps,
+                        "only_shocks": only_shocks,
+                        "n_samples": n_samples,
+                        "file": data_path,
+                    }
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
 
     df.to_parquet("index.parquet")
     api.upload_file(
@@ -127,6 +162,7 @@ def download_grids(
     solver: str = DEFAULT_SOLVER,
     flux: str = DEFAULT_FLUX,
     repo_id: str = DEFAULT_REPO,
+    equation: str = "LWR",
 ) -> np.ndarray | None:
     """Download grids from the shared mchami/grids repository.
 
@@ -140,9 +176,11 @@ def download_grids(
         solver: Solver name (default: LaxHopf).
         flux: Flux name (default: Greenshields).
         repo_id: HuggingFace repo ID.
+        equation: Equation system ("LWR" or "ARZ").
 
     Returns:
-        Grid data of shape (n_samples, nt, nx), or None if not found.
+        Grid data of shape (n_samples, nt, nx) for LWR or
+        (n_samples, 2, nt, nx) for ARZ, or None if not found.
     """
     config_id = _make_config_id(solver, flux, nx, nt, dx, dt, max_steps, only_shocks)
 
@@ -167,9 +205,7 @@ def download_grids(
 
 if __name__ == "__main__":
     print("Testing wavefront data loading from shared repo...")
-    downloaded = download_grids(
-        nx=50, nt=250, dx=0.25, dt=0.05, max_steps=3
-    )
+    downloaded = download_grids(nx=50, nt=250, dx=0.25, dt=0.05, max_steps=3)
     if downloaded is not None:
         print(f"Downloaded grids shape: {downloaded.shape}")
     else:

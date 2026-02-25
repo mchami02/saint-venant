@@ -72,13 +72,37 @@ class ToGridInputTransform:
         ic_masked = ic_expanded.clone()
         ic_masked[:, 1:, :] = -1
 
+        # If velocity IC is present (ARZ), reconstruct v channel
+        ic_channels = [ic_masked]
+        if "xs_v" in input_data:
+            xs_v = input_data["xs_v"]
+            ks_v = input_data["ks_v"]
+            mask_v = input_data["pieces_mask_v"]
+
+            ic_grid_v = torch.zeros(self.nx, dtype=torch.float32)
+            n_pieces_v = int(mask_v.sum().item())
+            for i in range(n_pieces_v):
+                x_left = xs_v[i]
+                x_right = xs_v[i + 1]
+                val = ks_v[i]
+                ic_grid_v[(x_positions >= x_left) & (x_positions < x_right)] = val
+            if n_pieces_v > 0:
+                ic_grid_v[x_positions >= xs_v[n_pieces_v - 1]] = ks_v[n_pieces_v - 1]
+
+            ic_expanded_v = (
+                ic_grid_v[None, :].expand(self.nt, self.nx).unsqueeze(0)
+            )
+            ic_masked_v = ic_expanded_v.clone()
+            ic_masked_v[:, 1:, :] = -1
+            ic_channels.append(ic_masked_v)
+
         # Stack channels
         if self.include_coords:
-            # [ic_masked, t_coords, x_coords] -> (3, nt, nx)
-            full_input = torch.cat([ic_masked, t_coords, x_coords], dim=0)
+            # [ic_channels..., t_coords, x_coords] -> (n_ic+2, nt, nx)
+            full_input = torch.cat(ic_channels + [t_coords, x_coords], dim=0)
         else:
-            # ic_masked only -> (1, nt, nx)
-            full_input = ic_masked
+            # ic_channels only -> (n_ic, nt, nx)
+            full_input = torch.cat(ic_channels, dim=0)
 
         # Return dict: grid tensor + passthrough of original keys
         result = dict(input_data)

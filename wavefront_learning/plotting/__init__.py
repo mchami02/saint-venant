@@ -24,7 +24,17 @@ from .base import (
     _plot_heatmap,
     save_figure,
 )
+from .charno_plots import (
+    plot_charno_decomposition,
+    plot_local_densities,
+    plot_selection_entropy,
+    plot_selection_weights,
+    plot_winning_segment,
+)
 from .grid_plots import (
+    plot_arz_ground_truth,
+    plot_arz_mse_error,
+    plot_arz_pred,
     plot_comparison,
     plot_error_map,
     plot_grid_comparison,
@@ -56,13 +66,6 @@ from .wandb_trajectory_plots import (
     plot_gt_traj,
     plot_trajectory_vs_analytical,
 )
-from .charno_plots import (
-    plot_charno_decomposition,
-    plot_local_densities,
-    plot_selection_entropy,
-    plot_selection_weights,
-    plot_winning_segment,
-)
 from .cvae_plots import plot_cvae_samples, plot_cvae_uncertainty
 from .wavefront_plots import plot_wave_pattern
 
@@ -82,6 +85,9 @@ __all__ = [
     "plot_ground_truth",
     "plot_pde_residual",
     "plot_pred",
+    "plot_arz_ground_truth",
+    "plot_arz_pred",
+    "plot_arz_mse_error",
     # Trajectory plots (core)
     "plot_shock_trajectories",
     "plot_existence_heatmap",

@@ -8,7 +8,11 @@ from models.charno import build_charno
 from models.cvae_deeponet import build_cvae_deeponet
 from models.ctt_seg import build_ctt_seg
 from models.deeponet import build_deeponet
-from models.encoder_decoder import build_encoder_decoder, build_encoder_decoder_cross
+from models.encoder_decoder import (
+    build_ecarz,
+    build_encoder_decoder,
+    build_encoder_decoder_cross,
+)
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
@@ -48,6 +52,7 @@ MODELS = {
     "DeepONet": build_deeponet,
     "EncoderDecoder": build_encoder_decoder,
     "EncoderDecoderCross": build_encoder_decoder_cross,
+    "ECARZ": build_ecarz,
     "TrajTransformer": build_traj_transformer,
     "ClassifierTrajTransformer": build_classifier_traj_transformer,
     "ClassifierAllTrajTransformer": build_classifier_all_traj_transformer,
@@ -79,6 +84,7 @@ MODEL_TRANSFORM = {
     "DeepONet": "ToGridInput",
     "EncoderDecoder": "ToGridInput",
     "EncoderDecoderCross": "ToGridInput",
+    "ECARZ": "ToGridInput",
     "TrajTransformer": None,
     "ClassifierTrajTransformer": None,
     "ClassifierAllTrajTransformer": None,

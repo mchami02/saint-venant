@@ -15,6 +15,9 @@ centrally by plot().
 import matplotlib.pyplot as plt
 from plotting import (
     _log_figure,
+    plot_arz_ground_truth,
+    plot_arz_mse_error,
+    plot_arz_pred,
     plot_charno_decomposition,
     plot_cvae_samples,
     plot_cvae_uncertainty,
@@ -60,6 +63,9 @@ PLOTS: dict[str, callable] = {
     "wave_pattern": plot_wave_pattern,
     "cvae_samples": plot_cvae_samples,
     "cvae_uncertainty": plot_cvae_uncertainty,
+    "arz_ground_truth": plot_arz_ground_truth,
+    "arz_pred": plot_arz_pred,
+    "arz_mse_error": plot_arz_mse_error,
 }
 
 # Presets for common configurations
@@ -229,6 +235,11 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "cvae_uncertainty",
         "cvae_samples",
+    ],
+    "ecarz": [
+        "arz_ground_truth",
+        "arz_pred",
+        "arz_mse_error",
     ],
 }
 

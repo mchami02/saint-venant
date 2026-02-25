@@ -118,7 +118,7 @@ wavefront_learning/
   - `upload_grids()`, `download_grids()`
 - **data_processing.py** — Grid generation and IC preprocessing.
   - `PiecewiseRandom` (IC class)
-  - `get_nfv_dataset()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
+  - `get_nfv_dataset()`, `clean_piecewise_constant_ic()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
 - **transforms.py** — Input representation transforms.
   - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`
   - `TRANSFORMS` registry

@@ -87,6 +87,9 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "mse": [
         ("mse", 1.0),
     ],
+    "ecarz": [
+        ("mse", 1.0),
+    ],
     "traj_transformer": [
         ("mse", 1.0),
         ("ic_anchoring", 0.1),
