@@ -7,6 +7,7 @@ q(z|a,u) towards the learned prior p(z|a). Supports:
 """
 
 import torch
+import torch.nn.functional as F
 
 from .base import BaseLoss
 
@@ -24,7 +25,7 @@ class KLDivergenceLoss(BaseLoss):
         free_bits: Minimum KL per latent dimension (prevents posterior collapse).
     """
 
-    def __init__(self, free_bits: float = 0.1):
+    def __init__(self, free_bits: float = 0.01):
         super().__init__()
         self.free_bits = free_bits
         self.beta = 1.0  # Mutable, set externally for KL annealing
@@ -70,9 +71,11 @@ class KLDivergenceLoss(BaseLoss):
         # Raw KL (for logging): mean over batch, sum over latent dims
         kl_raw = kl_per_dim.mean(dim=0).sum()
 
-        # Free bits: clamp per-dimension KL (averaged over batch) to minimum
-        kl_clamped = torch.clamp(kl_per_dim.mean(dim=0), min=self.free_bits)
-        kl_loss = kl_clamped.sum()
+        # Free bits: soft clamp per-dimension KL (averaged over batch)
+        # softplus(x - λ) + λ ≈ max(x, λ) but is differentiable everywhere
+        kl_mean = kl_per_dim.mean(dim=0)  # (latent_dim,)
+        kl_soft = F.softplus(kl_mean - self.free_bits) + self.free_bits
+        kl_loss = kl_soft.sum()
 
         # Apply beta weighting
         weighted_loss = self.beta * kl_loss

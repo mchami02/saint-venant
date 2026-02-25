@@ -146,7 +146,7 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     ],
     "cvae_deeponet": [
         ("mse", 1.0),
-        ("kl_divergence", 1.0, {"free_bits": 0.1}),
+        ("kl_divergence", 1.0, {"free_bits": 0.01}),
     ],
 }
 
