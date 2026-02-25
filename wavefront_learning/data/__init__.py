@@ -12,12 +12,14 @@ Submodules:
 - transforms: Input representation transforms and TRANSFORMS registry
 """
 
+import warnings
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
 from data.data_processing import get_wavefront_data
-from data.transforms import TRANSFORMS
+from data.transforms import TRANSFORMS, CellSamplingTransform
 
 
 class WavefrontDataset(Dataset):
@@ -107,6 +109,8 @@ def get_wavefront_datasets(
     only_shocks: bool = True,
     equation: str = "LWR",
     equation_kwargs: dict | None = None,
+    cell_sampling_k: int = 0,
+    transform_override: str | None = None,
 ) -> tuple[WavefrontDataset, WavefrontDataset, WavefrontDataset]:
     """Get train, val, and test datasets for wavefront learning.
 
@@ -128,6 +132,8 @@ def get_wavefront_datasets(
         equation: Equation system ("LWR" or "ARZ").
         equation_kwargs: Extra keyword arguments for the ARZ solver
             (gamma, flux_type, reconstruction, bc_type).
+        cell_sampling_k: Number of random query points per FV cell (0 = disabled).
+        transform_override: If provided, use this transform instead of MODEL_TRANSFORM.
 
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset).
@@ -157,16 +163,43 @@ def get_wavefront_datasets(
         equation_kwargs=equation_kwargs,
     )
 
-    # Resolve per-model transform
-    transform_name = MODEL_TRANSFORM.get(model_name)
-    transform = None
+    # Resolve transform: CLI override takes priority over per-model default
+    if transform_override is not None:
+        transform_name = transform_override
+    else:
+        transform_name = MODEL_TRANSFORM.get(model_name)
+    model_transform = None
     if transform_name is not None:
         if transform_name not in TRANSFORMS:
             raise ValueError(
                 f"Transform '{transform_name}' not found. "
                 f"Available: {list(TRANSFORMS.keys())}"
             )
-        transform = TRANSFORMS[transform_name](**grid_config)
+        model_transform = TRANSFORMS[transform_name](**grid_config)
+
+    # Compose CellSamplingTransform if requested
+    cell_sampling_transform = None
+    if cell_sampling_k > 0:
+        if transform_name in ("ToGridInput", "ToGridNoCoords"):
+            warnings.warn(
+                f"CellSamplingTransform is not meaningful with '{transform_name}' "
+                f"(grid-based models). Ignoring cell_sampling_k={cell_sampling_k}.",
+                stacklevel=2,
+            )
+        else:
+            cell_sampling_transform = CellSamplingTransform(k=cell_sampling_k)
+
+    # Build composed transform
+    if model_transform is not None and cell_sampling_transform is not None:
+
+        def transform(input_data, target_grid):
+            input_data, target_grid = model_transform(input_data, target_grid)
+            return cell_sampling_transform(input_data, target_grid)
+
+    elif cell_sampling_transform is not None:
+        transform = cell_sampling_transform
+    else:
+        transform = model_transform
 
     # Shuffle indices
     indices = np.arange(len(processed))

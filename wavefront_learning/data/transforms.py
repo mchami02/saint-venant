@@ -40,6 +40,7 @@ class ToGridInputTransform:
         self.nx = nx
         self.nt = nt
         self.include_coords = include_coords
+        self.dx = kwargs.get("dx", 1.0 / nx)
 
     def __call__(self, input_data: dict, target_grid: torch.Tensor):
         xs = input_data["xs"]
@@ -50,7 +51,7 @@ class ToGridInputTransform:
 
         # Reconstruct IC on grid from piecewise constant representation
         ic_grid = torch.zeros(self.nx, dtype=torch.float32)
-        x_positions = torch.linspace(0, 1, self.nx)
+        x_positions = (torch.arange(self.nx, dtype=torch.float32) + 0.5) * self.dx
 
         n_pieces = int(mask.sum().item())
         for i in range(n_pieces):
@@ -138,8 +139,8 @@ class DiscretizeICTransform:
         n_pieces = int(mask.sum().item())
         n_pts = self.discretization
 
-        # Evenly spaced positions in [0, 1]
-        x_positions = torch.linspace(0, 1, n_pts)
+        # Cell-center positions in [0, 1]
+        x_positions = (torch.arange(n_pts, dtype=torch.float32) + 0.5) / n_pts
 
         # Evaluate piecewise constant IC at each position
         ic_values = torch.zeros(n_pts, dtype=torch.float32)
@@ -187,6 +188,56 @@ class LDDeepONetTransform:
         return result, target_grid
 
 
+class CellSamplingTransform:
+    """Transform that samples k random query points per FV cell.
+
+    Replaces the single-point x_coords (1, nt, nx) with k uniformly
+    sampled points per cell, yielding (1, nt, nx*k). Expands t_coords
+    to match. Stores metadata for downstream cell-averaging.
+
+    Because sampling is stochastic (fresh offsets every call), this acts
+    like data augmentation when used inside __getitem__.
+
+    Args:
+        k: Number of random query points per cell.
+        **kwargs: Absorbs grid_config keys (nx, nt, dx, dt).
+    """
+
+    def __init__(self, k: int = 10, **kwargs):
+        self.k = k
+
+    def __call__(self, input_data: dict, target_grid: torch.Tensor):
+        x_coords = input_data["x_coords"]  # (1, nt, nx)
+        t_coords = input_data["t_coords"]  # (1, nt, nx)
+        dx = input_data["dx"]  # scalar tensor
+
+        _, nt, nx = x_coords.shape
+        dx_val = dx.item()
+
+        # Cell left edges: (nx,)
+        cell_starts = torch.arange(nx, dtype=torch.float32) * dx_val
+
+        # Random offsets within each cell: (nt, nx, k) in [0, dx)
+        offsets = torch.rand(nt, nx, self.k) * dx_val
+
+        # New x coordinates: (nt, nx, k) → (1, nt, nx*k)
+        new_x = (cell_starts[None, :, None] + offsets).reshape(nt, nx * self.k)
+        new_x = new_x.unsqueeze(0)  # (1, nt, nx*k)
+
+        # Expand t_coords: repeat each time row nx*k times
+        # t_coords[:, t, :] is constant across spatial dim, so just take
+        # the time values and expand to nx*k columns
+        t_values = t_coords[:, :, 0:1]  # (1, nt, 1)
+        new_t = t_values.expand(1, nt, nx * self.k)  # (1, nt, nx*k)
+
+        result = dict(input_data)
+        result["x_coords"] = new_x
+        result["t_coords"] = new_t
+        result["cell_sampling_k"] = torch.tensor(self.k, dtype=torch.long)
+        result["original_nx"] = torch.tensor(nx, dtype=torch.long)
+        return result, target_grid
+
+
 # Registry of available transforms (string name -> class)
 TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
@@ -194,4 +245,5 @@ TRANSFORMS = {
     "ToGridNoCoords": ToGridNoCoords,
     "DiscretizeIC": DiscretizeICTransform,
     "LDDeepONet": LDDeepONetTransform,
+    "CellSampling": CellSamplingTransform,
 }

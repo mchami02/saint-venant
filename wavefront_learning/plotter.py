@@ -71,17 +71,6 @@ PLOTS: dict[str, callable] = {
 # Presets for common configurations
 # Each preset lists which plots to generate
 PLOT_PRESETS: dict[str, list[str]] = {
-    "shock_net": [
-        "grid_with_trajectory_existence",  # Uses ground truth grid as background
-        "grid_with_acceleration",  # Shows acceleration magnitude (shock locations)
-    ],
-    "hybrid": [
-        "pred",  # Predicted grid heatmap
-        "prediction_with_trajectory_existence",  # Uses predicted grid as background
-        "mse_error",
-        "existence",
-        "region_weights",
-    ],
     "traj_net": [
         "ground_truth",
         "gt_traj",
@@ -89,13 +78,6 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",  # Predicted grid heatmap
         "mse_error",
         "pde_residual",
-    ],
-    "classifier_traj_net": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
     ],
     "grid_only": [
         "ground_truth",
@@ -216,6 +198,11 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",
         "mse_error",
         "existence",
+    ],
+    "transformer_seg": [
+        "ground_truth",
+        "pred",
+        "mse_error",
     ],
     "wavefront_model": [
         "ground_truth",

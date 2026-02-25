@@ -1567,6 +1567,29 @@ where $z_t = (1-t)\epsilon + tz$ is the OT interpolation and $v^* = z - \epsilon
 
 ---
 
+#### CellAverageMSELoss
+
+**Location**: `losses/cell_avg_mse.py`
+
+Cell-average MSE loss for finite-volume-consistent training. When used with `CellSamplingTransform`, the model predicts density at $k$ random query points per FV cell. This loss reshapes and averages those predictions back to cell level before computing MSE against the cell-averaged ground truth from the FV solver.
+
+**Formula**:
+
+Given model output $\hat{\rho}(t, x_{i,j})$ at $k$ query points $x_{i,j} \sim \mathcal{U}[i \cdot \Delta x, (i+1) \cdot \Delta x)$ within cell $i$:
+
+$$\bar{\rho}_{pred}(t, i) = \frac{1}{k} \sum_{j=1}^{k} \hat{\rho}(t, x_{i,j})$$
+
+$$\mathcal{L}_{cell\_avg\_mse} = \frac{1}{n_t \cdot n_x} \sum_{t,i} \left( \bar{\rho}_{pred}(t, i) - \rho_{FV}(t, i) \right)^2$$
+
+Falls back to standard MSE when `cell_sampling_k` is not present in `input_dict`.
+
+**Required inputs** (optional): `cell_sampling_k`, `original_nx` (set by `CellSamplingTransform`)
+**Required outputs**: `output_grid`
+
+**Components returned**: `{"cell_avg_mse": float}`
+
+---
+
 ### CombinedLoss
 
 **Location**: `loss.py`
@@ -1828,6 +1851,7 @@ loss = get_loss("hybrid", loss_kwargs={
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
+| TransformerSeg | IC segments (xs, ks) + coordinates | Full grid | Segment-based encoding + cross-attention density decoder, no trajectory prediction |
 | WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
 | LDDeepONet | Piecewise IC (xs, ks) + target grid (training) | Full grid (generative) | VAE + flow matching with resolution-invariant DeepONet decoder |
 
@@ -1914,3 +1938,18 @@ positions, x_coords, effective_mask → compute_boundaries → x_left, x_right: 
 ```
 
 **Key difference from CTT**: Encodes K piecewise-constant segments (center, width, density, characteristic speed, flux, cumulative mass) instead of D discontinuity points (x, rho_L, rho_R). Trajectories are derived from adjacent segment pairs via `BreakpointEvolution` rather than from `TimeEncoder` + `TrajectoryDecoderTransformer`. The density decoder cross-attends to segment embeddings (K tokens) with `pieces_mask`.
+
+#### TransformerSeg Architecture
+
+Combines CTTSeg's segment-based input encoding with NoTrajTransformer's grid-only output. No trajectory prediction, no classifier, no boundary conditioning.
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
+
+(t, x) → FourierEncode → CoordMLP → coord_emb: (nt*nx, H)
+(coord_emb as Q, seg_emb as K/V) → CrossDecoderLayer × L → DensityHead → (nt, nx)
+→ output_grid: (1, nt, nx)
+```
+
+**Key difference from CTTSeg**: Removes BreakpointEvolution (trajectory prediction), classifier head, and boundary conditioning. The density decoder uses `with_boundaries=False`, encoding only `(t, x)` coordinates instead of `(t, x, x_left, x_right)`.

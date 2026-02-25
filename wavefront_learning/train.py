@@ -11,12 +11,14 @@ import argparse
 import torch
 import torch.nn as nn
 from data import collate_wavefront_batch, get_wavefront_datasets
-from logger import WandbLogger, init_logger
+from data.transforms import TRANSFORMS
+from logger import WandbLogger, init_logger, log_values
 from loss import LOSS_PRESETS, LOSSES, create_loss_from_args
 from losses.flow_matching import FlowMatchingLoss
 from losses.vae_reconstruction import VAEReconstructionLoss
-from model import MODELS, get_model, load_model
-from plotter import PLOT_PRESETS
+from metrics import cell_average_prediction, compute_metrics, extract_grid_prediction
+from model import MODELS, get_model, load_model, save_model
+from plotter import PLOT_PRESETS, plot
 from testing import (
     run_profiler,
     run_sanity_check,
@@ -184,6 +186,23 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.05,
         help="Dropout probability for WaveNO (default: 0.05)",
+    )
+
+    # Cell sampling
+    parser.add_argument(
+        "--cell_sampling_k",
+        type=int,
+        default=0,
+        help="Number of random query points per FV cell (0 = disabled)",
+    )
+
+    # Transform override
+    parser.add_argument(
+        "--transform",
+        type=str,
+        default=None,
+        choices=list(TRANSFORMS.keys()),
+        help="Override the model's default transform (default: use MODEL_TRANSFORM)",
     )
 
     # Resume training
@@ -431,6 +450,8 @@ def main():
         max_steps=args.max_steps,
         equation=args.equation,
         equation_kwargs=equation_kwargs,
+        cell_sampling_k=args.cell_sampling_k,
+        transform_override=args.transform,
     )
 
     train_loader = DataLoader(

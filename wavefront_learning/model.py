@@ -7,6 +7,7 @@ import torch.nn as nn
 from models.charno import build_charno
 from models.cvae_deeponet import build_cvae_deeponet
 from models.ctt_seg import build_ctt_seg
+from models.transformer_seg import build_transformer_seg
 from models.deeponet import build_deeponet
 from models.encoder_decoder import (
     build_ecarz,
@@ -68,18 +69,15 @@ MODELS = {
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
     "CTTSeg": build_ctt_seg,
+    "TransformerSeg": build_transformer_seg,
     "WaveFrontModel": build_wavefront_model,
     "LDDeepONet": build_ld_deeponet,
     "CVAEDeepONet": build_cvae_deeponet,
 }
 
-# Registry of per-model transforms (None or a string key into TRANSFORMS in data.py)
+# Registry of per-model transforms (string key into TRANSFORMS in data.py).
+# Models not listed here default to None (no transform).
 MODEL_TRANSFORM = {
-    "ShockNet": None,
-    "HybridDeepONet": None,
-    "TrajDeepONet": None,
-    "ClassifierTrajDeepONet": None,
-    "NoTrajDeepONet": None,
     "FNO": "ToGridNoCoords",
     "DeepONet": "ToGridInput",
     "EncoderDecoder": "ToGridInput",
@@ -100,6 +98,7 @@ MODEL_TRANSFORM = {
     "CTTSegPhysics": None,
     "CTTFiLM": None,
     "CTTSeg": None,
+    "TransformerSeg": None,
     "WaveFrontModel": None,
     "LDDeepONet": "LDDeepONet",
     "CVAEDeepONet": "ToGridInput",

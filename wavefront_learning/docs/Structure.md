@@ -29,6 +29,7 @@ wavefront_learning/
 │   ├── traj_deeponet.py          # TrajDeepONet, ClassifierTrajDeepONet, NoTrajDeepONet
 │   ├── traj_transformer.py       # TrajTransformer, ClassifierTrajTransformer, ClassifierAllTrajTransformer (disc-based variants)
 │   ├── ctt_seg.py               # CTTSeg: standalone segment-based ClassifierTrajTransformer
+│   ├── transformer_seg.py       # TransformerSeg: segment-based transformer without trajectory prediction
 │   ├── deeponet.py               # Classic DeepONet baseline
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
@@ -76,6 +77,7 @@ wavefront_learning/
 │   ├── selection_supervision.py  # SelectionSupervisionLoss
 │   ├── vae_reconstruction.py     # VAEReconstructionLoss (MSE + beta*KL with warmup)
 │   ├── flow_matching.py          # FlowMatchingLoss (velocity MSE for flow matching)
+│   ├── cell_avg_mse.py           # CellAverageMSELoss (FV-consistent cell-average MSE)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -120,7 +122,7 @@ wavefront_learning/
   - `PiecewiseRandom` (IC class)
   - `get_nfv_dataset()`, `clean_piecewise_constant_ic()`, `extract_discontinuities_from_grid()`, `extract_ic_representation_from_grid()`, `preprocess_wavefront_data()`, `get_wavefront_data()`
 - **transforms.py** — Input representation transforms.
-  - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`
+  - `FlattenDiscontinuitiesTransform`, `ToGridInputTransform`, `DiscretizeICTransform`, `CellSamplingTransform`
   - `TRANSFORMS` registry
 
 ### Factories & Registries
@@ -157,6 +159,8 @@ wavefront_learning/
   - `build_traj_transformer()`, `build_classifier_traj_transformer()`, `build_classifier_all_traj_transformer()`, `build_no_traj_transformer()`, `build_biased_classifier_traj_transformer()`, `build_ctt_biased()`, `build_ctt_seg_physics()`, `build_ctt_film()`
 - **ctt_seg.py** — Standalone segment-based ClassifierTrajTransformer.
   - `CTTSeg`, `build_ctt_seg()`
+- **transformer_seg.py** — Segment-based transformer without trajectory prediction.
+  - `TransformerSeg`, `build_transformer_seg()`
 - **deeponet.py** — Classic DeepONet baseline.
   - `DeepONet`, `build_deeponet()`
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.
@@ -215,6 +219,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **selection_supervision.py** — `SelectionSupervisionLoss`
 - **vae_reconstruction.py** — `VAEReconstructionLoss` (MSE + beta*KL with linear warmup)
 - **flow_matching.py** — `FlowMatchingLoss` (velocity MSE for OT flow matching)
+- **cell_avg_mse.py** — `CellAverageMSELoss` (cell-average MSE for FV-consistent training with `CellSamplingTransform`)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)

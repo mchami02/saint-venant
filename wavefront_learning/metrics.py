@@ -38,6 +38,29 @@ def compute_metrics(
     }
 
 
+def cell_average_prediction(
+    prediction: torch.Tensor,
+    k: int,
+    original_nx: int,
+) -> torch.Tensor:
+    """Average k per-cell query predictions back to cell-level values.
+
+    Reshapes prediction from (..., nt, nx*k) to (..., nt, nx, k) and
+    averages over the k dimension.
+
+    Args:
+        prediction: Tensor with last dim = nx*k.
+        k: Number of query points per cell.
+        original_nx: Original number of cells.
+
+    Returns:
+        Tensor with last dim = nx (cell-averaged).
+    """
+    shape = prediction.shape
+    *leading, nt, nxk = shape
+    return prediction.reshape(*leading, nt, original_nx, k).mean(dim=-1)
+
+
 def extract_grid_prediction(model_output: dict | torch.Tensor) -> torch.Tensor | None:
     """Extract grid prediction from model output.
 

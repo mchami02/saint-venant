@@ -113,6 +113,7 @@ Use `--no_wandb` flag to disable logging.
 | **CTTSegPhysics** | CTT + physics features in disc encoder | `{positions, existence, output_grid}` |
 | **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |
 | **CTTSeg** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
+| **TransformerSeg** | Segment-based encoding + cross-attention density decoder, no trajectories | `{output_grid}` |
 
 ## Available Losses
 
@@ -148,6 +149,7 @@ Presets (in `loss.py`):
 | `mse` | Any grid model | mse only |
 | `ecarz` | ECARZ | mse only |
 | `ctt_seg` | CTTSeg | mse + ic_anchoring + boundary + regularize_traj + acceleration |
+| `transformer_seg` | TransformerSeg | mse |
 
 ## Adding a New Loss
 
