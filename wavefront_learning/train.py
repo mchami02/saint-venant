@@ -222,7 +222,7 @@ def train_model(
     loss_fn = create_loss_from_args(args)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+        optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
     )
 
     # KL annealing callback for CVAE models
@@ -289,7 +289,7 @@ def train_model_two_phase(
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+        optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
     )
 
     best = _run_training_loop(
@@ -320,7 +320,7 @@ def train_model_two_phase(
         weight_decay=1e-4,
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5
+        optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
     )
 
     best = _run_training_loop(
