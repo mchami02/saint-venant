@@ -581,6 +581,7 @@ When enabled, the classifier filters `compute_boundaries` to only use discontinu
 - `build_classifier_traj_transformer(args)`: With classifier (`classifier=True`)
 - `build_no_traj_transformer(args)`: Without trajectory prediction (`with_traj=False`)
 - `build_classifier_all_traj_transformer(args)`: Classifier + all-boundaries density decoding (`classifier=True`, `all_boundaries=True`)
+- `build_biased_classifier_traj_transformer(args)`: Classifier + characteristic attention bias (`classifier=True`, `characteristic_bias=True`)
 
 #### All-Boundaries Mode (`all_boundaries=True`) — DynamicDensityDecoder
 
@@ -592,6 +593,48 @@ When `all_boundaries=True`, the density decoder uses `DynamicDensityDecoder` wit
 4. **Density head**: Output projection maps enriched queries to density values
 
 This design is fully differentiable (no `compute_boundaries` or hard thresholds), enabling end-to-end gradient flow from density loss through existence predictions to the classifier. The attention mechanism naturally learns spatial locality — queries attend primarily to nearby boundary tokens.
+
+#### Characteristic Bias Mode (`characteristic_bias=True`) — BiasedClassifierTrajTransformer
+
+When `characteristic_bias=True`, the density decoder uses `BiasedCrossDecoderLayer` (from `biased_cross_attention.py`) instead of `CrossDecoderLayer`, adding a physics-informed attention bias based on backward characteristic propagation from each discontinuity.
+
+##### Discontinuity Characteristic Bias
+
+For each query $(t, x)$ and discontinuity $d$ at position $x_d$ with states $(\rho_L, \rho_R)$:
+
+1. **Characteristic speeds**: $\lambda_L = f'(\rho_L)$, $\lambda_R = f'(\rho_R)$
+2. **Influence zone**: $[x_d + v_{min} \cdot t,\ x_d + v_{max} \cdot t]$ where $v_{min} = \min(\lambda_L, \lambda_R)$, $v_{max} = \max(\lambda_L, \lambda_R)$
+3. **Distance outside zone**: $d_{outside} = \text{ReLU}(z_{left} - x) + \text{ReLU}(x - z_{right})$
+4. **Bias**: $\text{bias}(t, x, d) = -|\alpha| \cdot d_{outside}^2$
+
+where $\alpha$ is a learnable scale parameter (initialized at 5.0).
+
+- **bias = 0** when query $(t, x)$ falls inside discontinuity $d$'s influence zone (full attention)
+- **bias << 0** when query is far outside (suppressed attention)
+- The model can **override** the bias via learned $Q \cdot K^T$ scores when physics alone is insufficient
+
+##### Collision-Time Damping
+
+The bias fades per-discontinuity after its influence zone collides with adjacent discontinuities' zones:
+
+**Right collision time** (disc $d$ with disc $d+1$):
+$$t_{coll,R} = \frac{x_{d+1} - x_d}{(v_{max,d} - v_{min,d+1})^+}$$
+
+**Left collision time** (disc $d-1$ with disc $d$):
+$$t_{coll,L} = \frac{x_d - x_{d-1}}{(v_{max,d-1} - v_{min,d})^+}$$
+
+$$t_{coll,d} = \min(t_{coll,L}, t_{coll,R})$$
+
+**Damping factor**:
+$$\gamma(t, d) = \sigma\left(|\beta| \cdot (t_{coll,d} - t)\right)$$
+
+**Final bias**: $\text{bias}(t, x, d) = \text{bias}_{raw}(t, x, d) \cdot \gamma(t, d)$
+
+##### Why This Improves Resolution Generalization
+
+At training resolution, standard cross-attention learns which discontinuity embeddings to attend to for each coordinate region. At higher resolutions, the query grid becomes denser with interpolated coordinate values. Without physics bias, the attention patterns must generalize purely from learned Fourier features. With characteristic bias, the backward characteristic foot correctly identifies relevant discontinuities at **any** resolution, providing a resolution-invariant inductive bias.
+
+Uses only `flux.derivative()` — works for any flux function.
 
 ---
 
@@ -633,7 +676,7 @@ Encodes IC segments with physics-augmented features. For each constant piece $k$
 | $\lambda_k$ | $f'(\rho_k)$ | Characteristic speed |
 | $f_k$ | $f(\rho_k)$ | Flux value |
 
-Spatial features are Fourier-encoded. All features concatenated and projected via MLP → $(B, K, H)$.
+Content features (width, density, characteristic speed, flux, cumulative mass) are projected to $H$ via a linear layer, then **rotary positional embedding (RoPE)** injects $x_{center}$ as position by rotating consecutive dimension pairs. A post-RoPE MLP refines the position-aware representation → $(B, K, H)$.
 
 ##### CharacteristicFeatureComputer
 
@@ -825,7 +868,7 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 
 ##### Reused from CharNO
 
-- **SegmentPhysicsEncoder**: Physics-augmented segment encoding (x_center, width, $\rho$, $\lambda$, $f$, $N_k$)
+- **SegmentPhysicsEncoder**: Physics-augmented segment encoding with RoPE (x_center via rotation; width, $\rho$, $\lambda$, $f$, $N_k$ as content)
 - **TimeConditioner**: FiLM-based time modulation of segment embeddings
 - **CrossSegmentAttention**: Lightweight self-attention over K segments per timestep
 - **EncoderLayer**: Standard transformer self-attention for initial segment interaction
@@ -868,6 +911,135 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 #### Factory Functions
 
 - `build_waveno(args)`: Creates WaveNO with configuration from args dict
+
+---
+
+### WaveFrontModel
+
+**Location**: `models/wavefront_model.py`
+
+A learned Riemann solver that explicitly constructs solutions by predicting wave characteristics (shock vs rarefaction, speeds) for each discontinuity, handling wave interactions iteratively, and reconstructing the full density grid from the resulting wave pattern. No attention mechanisms — each discontinuity is processed independently by a shared encoder + 3 heads.
+
+#### Pseudocode
+
+```
+discontinuities: (D, 3)  →  DiscontinuityEncoder(Fourier + MLP)  →  emb: (D, H)
+emb  →  ClassifierHead(MLP → Sigmoid)    →  is_shock: (D,)
+emb  →  ShockHead(MLP)                   →  shock_speed: (D,)
+emb  →  RarefactionHead(MLP)             →  [speed1, delta]: (D, 2)
+
+Per disc d:
+  shock branch:  1 wave at shock_speed, jump = (rho_R - rho_L) * is_shock
+  rarefaction branch: N sub-waves, speeds linspace(speed1, speed1 + softplus(delta)),
+                      each jump = (rho_R - rho_L) * (1 - is_shock) / N
+
+→ Wave buffer: (W_max,) containing [origin_x, origin_t, speed, jump, active, type]
+
+Collision loop (max_interaction_rounds times):
+  Sort active waves by position → find earliest pairwise collision
+  At collision: create new disc (x_coll, rho_L_outer, rho_R_outer)
+  Re-encode with same encoder+heads → spawn new waves in buffer
+  Soft-deactivate colliding waves
+
+Grid reconstruction (fully vectorized over B, W, nt, nx):
+  density(t, x) = ks[0] + Σ_w jump_w · σ((x - pos_w(t)) / σ) · active_w
+  where pos_w(t) = origin_x_w + speed_w · (t - origin_t_w)
+→ output_grid: (1, nt, nx)
+```
+
+#### Sub-Components
+
+##### DiscontinuityEncoder (shared)
+
+Reuses `models/base/feature_encoders.py:DiscontinuityEncoder`. Fourier features on x coordinate + MLP. Each discontinuity processed independently. Same encoder used for both initial and spawned discontinuities (weight sharing).
+
+##### Classifier Head
+
+$$P(\text{shock})_d = \sigma(W_2 \cdot \text{ReLU}(W_1 \cdot h_d + b_1) + b_2) \cdot m_d$$
+
+Binary per-discontinuity: shock (1) vs rarefaction (0).
+
+##### Shock Head
+
+$$s_d = W_2 \cdot \text{GELU}(W_1 \cdot h_d + b_1) + b_2$$
+
+Predicts shock speed (dx/dt) per discontinuity. Unbounded output.
+
+##### Rarefaction Head
+
+$$[\text{speed}_1, \delta]_d = W_2 \cdot \text{GELU}(W_1 \cdot h_d + b_1) + b_2$$
+
+Speed range: $[\text{speed}_1, \text{speed}_1 + \text{softplus}(\delta)]$. $N$ sub-waves evenly spaced within this range.
+
+##### Wave Buffer
+
+Pre-allocated tensor of size $W_{max} = D \cdot (N + 1) + R \cdot (N + 1)$ where $R$ = `max_interaction_rounds`.
+
+Each wave stores: `(origin_x, origin_t, speed, jump, active, type)`.
+
+##### Collision Processing
+
+For each round:
+1. Sort active waves by spatial position at $t_{ref} = T/2$
+2. Compute pairwise collision time for adjacent converging waves:
+   $$t_{coll} = \frac{x_j - x_i + s_i \cdot t_{o,i} - s_j \cdot t_{o,j}}{s_i - s_j}$$
+3. Find earliest valid collision (both active, converging, within domain)
+4. At collision: spawn new wave(s) by re-encoding $(x_{coll}, \rho_{L,outer}, \rho_{R,outer})$
+5. Soft-deactivate colliding waves: $\text{active}_w \leftarrow \text{active}_w \cdot (1 - \mathbb{1}_{colliding})$
+
+##### Grid Reconstruction (Jump-based)
+
+$$\rho(t, x) = \rho_0 + \sum_{w} j_w \cdot \sigma\left(\frac{x - p_w(t)}{\sigma}\right) \cdot a_w$$
+
+where:
+- $\rho_0 = \text{ks}[0]$ is the leftmost piece value (base density)
+- $j_w$ is the density jump at wave $w$
+- $p_w(t) = x_{o,w} + s_w \cdot (t - t_{o,w})$ is the wave position at time $t$
+- $a_w$ is the soft activity of wave $w$
+- $\sigma$ is the sigmoid sharpness parameter
+
+Fully vectorized: no loops over spatial or temporal dimensions.
+
+#### Soft Blending for Differentiability
+
+During training, both shock and rarefaction waves are active for each discontinuity, weighted by classifier probability:
+- Shock wave jump: $(\\rho_R - \\rho_L) \cdot P(\text{shock})$
+- Rarefaction sub-wave jumps: $(\\rho_R - \\rho_L) \cdot (1 - P(\text{shock})) / N$
+
+This ensures gradients flow through both branches regardless of the classifier output.
+
+#### Input/Output Format
+
+**Input** (dictionary):
+- `discontinuities`: $(D, 3)$ — $[x_0, \\rho_L, \\rho_R]$ per discontinuity
+- `disc_mask`: $(D,)$ — validity mask
+- `t_coords`: $(1, n_t, n_x)$ — time coordinates
+- `x_coords`: $(1, n_t, n_x)$ — space coordinates
+- `ks`: $(K,)$ — piece values (used for base density $\\rho_0 = ks[0]$)
+
+**Output** (dictionary):
+- `output_grid`: $(1, n_t, n_x)$ — predicted density grid
+- `wave_origins_x`: $(W,)$ — wave origin x-positions (for plotting)
+- `wave_origins_t`: $(W,)$ — wave origin times (for plotting)
+- `wave_speeds`: $(W,)$ — wave speeds (for plotting)
+- `wave_active`: $(W,)$ — wave activity masks (for plotting)
+- `wave_types`: $(W,)$ — 0=shock, 1=rarefaction, 2=spawned (for plotting)
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 64 | Encoder and head hidden dimension |
+| `num_disc_frequencies` | 8 | Fourier features for position encoding |
+| `num_disc_layers` | 2 | MLP depth in discontinuity encoder |
+| `rarefaction_angles` | 5 | N sub-waves per rarefaction fan |
+| `max_interaction_rounds` | 5 | Bounded collision processing iterations |
+| `sigma` | 0.01 | Sigmoid sharpness for reconstruction |
+| `dropout` | 0.05 | Dropout rate in encoder |
+
+#### Factory Functions
+
+- `build_wavefront_model(args)`: Creates WaveFrontModel with configuration from args dict
 
 ---
 
@@ -1413,6 +1585,20 @@ For ClassifierAllTrajTransformer. Same losses as `classifier_traj_transformer`.
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
 
+#### biased_classifier_traj_transformer Preset
+
+For BiasedClassifierTrajTransformer. Same losses as `classifier_traj_transformer` (the bias is an architectural change, not a loss change).
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
 #### pde_shocks Preset
 
 For models supervised with PDE shock residual.
@@ -1451,6 +1637,20 @@ For WaveNO (wavefront neural operator). Combines grid losses with trajectory los
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons} + 5.0 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
 
+#### ctt_seg Preset
+
+For CTTSeg (CTT with segment tokens). Same losses as `classifier_traj_transformer`.
+
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `ic_anchoring` | 0.1 | — |
+| `boundary` | 1.0 | — |
+| `regularize_traj` | 0.1 | — |
+| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
+
 #### mse Preset
 
 Simple grid MSE only.
@@ -1458,6 +1658,16 @@ Simple grid MSE only.
 | Loss | Weight |
 |------|--------|
 | `mse` | 1.0 |
+
+#### wavefront_model Preset
+
+For WaveFrontModel (learned Riemann solver). Simple MSE supervision only — wave structure emerges from the architecture.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE}$$
 
 #### Using Presets
 
@@ -1488,12 +1698,16 @@ loss = get_loss("hybrid", loss_kwargs={
 | TrajTransformer | Discontinuities + coordinates | Positions + Full grid | Cross-attention variant of TrajDeepONet |
 | ClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | TrajTransformer with shock/rarefaction classifier |
 | ClassifierAllTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with dynamic boundary tokens (time-varying cross-attention) |
+| BiasedClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with characteristic attention bias for resolution generalization |
 | DeepONet | Grid tensor $(3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
 | FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
+| WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
+| CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
+| WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|
@@ -1530,3 +1744,49 @@ loss = get_loss("hybrid", loss_kwargs={
 6. **Independent Discontinuity Encoding**: Each discontinuity is encoded independently via Fourier + MLP, with optional cross-discontinuity self-attention for interaction
 
 7. **Modular Loss Design**: One file per loss enables easy composition and testing
+
+---
+
+## Ablation Models
+
+Six ablation models isolate which architectural component drives the performance gap between WaveNO and ClassifierTrajTransformer.
+
+### WaveNO Ablations (fixing step-generalization weakness)
+
+| Model | Flag | Change |
+|-------|------|--------|
+| `WaveNOCls` | `with_classifier=True` | Adds classifier head on breakpoint embeddings to filter breakpoints in `compute_boundaries` |
+| `WaveNOLocal` | `local_features=False` | Removes cumulative mass $N_k$ from `SegmentPhysicsEncoder` (3 scalar features instead of 4) |
+| `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
+| `WaveNODisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
+
+### CTT Ablations (fixing resolution weakness)
+
+| Model | Flag | Change |
+|-------|------|--------|
+| `CTTBiased` | `characteristic_bias=True` | Adds characteristic attention bias to density cross-attention (alias for `BiasedClassifierTrajTransformer`) |
+| `CTTSegPhysics` | `segment_physics=True` | Enriches disc encoder input with $\lambda_L$, $\lambda_R$, $s$ (6 features instead of 3) |
+| `CTTFiLM` | `film_time=True` | Applies FiLM time conditioning to disc embeddings, producing per-timestep keys for density decoding |
+| `CTTSeg` | `use_segments=True` | Replaces discontinuity tokens with segment tokens (SegmentPhysicsEncoder + BreakpointEvolution), like WaveNO's representation |
+
+#### CTTSeg Architecture
+
+Replaces the discontinuity-based input representation with WaveNO's segment-based representation while keeping the CTT architecture for trajectory decoding and density prediction.
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
+
+seg_emb, disc_mask, t_unique → BreakpointEvolution(return_embeddings=True)
+  → positions: (D, nt), bp_emb: (D, H)
+
+bp_emb → ClassifierHead(MLP → Sigmoid) → existence: (D,)
+
+positions, x_coords, effective_mask → compute_boundaries → x_left, x_right: (nt, nx)
+
+(t, x, x_left, x_right) → FourierEncode → CoordMLP → coord_emb: (nt*nx, H)
+(coord_emb as Q, seg_emb as K/V) → CrossDecoderLayer × L → DensityHead → (nt, nx)
+→ output_grid: (1, nt, nx)
+```
+
+**Key difference from CTT**: Encodes K piecewise-constant segments (center, width, density, characteristic speed, flux, cumulative mass) instead of D discontinuity points (x, rho_L, rho_R). Trajectories are derived from adjacent segment pairs via `BreakpointEvolution` rather than from `TimeEncoder` + `TrajectoryDecoderTransformer`. The density decoder cross-attends to segment embeddings (K tokens) with `pieces_mask`.

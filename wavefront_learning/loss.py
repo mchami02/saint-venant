@@ -76,6 +76,7 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "pde_shocks": [
         ("mse", 1.0),
         ("pde_shock_residual", 1.0),
+        ("rh_residual", 1.0, {"mode": "gt"}),
     ],
     "mse": [
         ("mse", 1.0),
@@ -103,6 +104,13 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("regularize_traj", 0.1),
         ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
     ],
+    "biased_classifier_traj_transformer": [
+        ("mse", 1.0),
+        ("ic_anchoring", 0.1),
+        ("boundary", 1.0),
+        ("regularize_traj", 0.1),
+        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
+    ],
     "charno": [
         ("mse", 1.0),
         ("wasserstein", 0.5),
@@ -116,6 +124,16 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("ic_anchoring", 5.0),
         ("boundary", 1.0),
         ("regularize_traj", 0.1),
+    ],
+    "ctt_seg": [
+        ("mse", 1.0),
+        ("ic_anchoring", 0.1),
+        ("boundary", 1.0),
+        ("regularize_traj", 0.1),
+        ("acceleration", 1.0, {"missed_shock_weight": 1.0}),
+    ],
+    "wavefront_model": [
+        ("mse", 1.0),
     ],
 }
 

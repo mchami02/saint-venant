@@ -63,6 +63,7 @@ from .charno_plots import (
     plot_selection_weights,
     plot_winning_segment,
 )
+from .wavefront_plots import plot_wave_pattern
 
 __all__ = [
     # Base utilities
@@ -107,4 +108,6 @@ __all__ = [
     "plot_selection_entropy",
     "plot_local_densities",
     "plot_charno_decomposition",
+    # WaveFrontModel plots
+    "plot_wave_pattern",
 ]

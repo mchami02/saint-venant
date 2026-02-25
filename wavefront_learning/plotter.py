@@ -31,6 +31,7 @@ from plotting import (
     plot_selection_entropy,
     plot_selection_weights,
     plot_trajectory_vs_analytical,
+    plot_wave_pattern,
     plot_winning_segment,
 )
 
@@ -54,6 +55,7 @@ PLOTS: dict[str, callable] = {
     "winning_segment": plot_winning_segment,
     "selection_entropy": plot_selection_entropy,
     "local_densities": plot_local_densities,
+    "wave_pattern": plot_wave_pattern,
 }
 
 # Presets for common configurations
@@ -119,6 +121,13 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "existence",
     ],
+    "biased_classifier_traj_transformer": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
     "charno": [
         "ground_truth",
         "pred",
@@ -137,6 +146,72 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "pred",
         "mse_error",
         "pde_residual",
+    ],
+    "waveno_cls": [
+        "ground_truth",
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
+    "waveno_local": [
+        "ground_truth",
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
+    "waveno_indep_traj": [
+        "ground_truth",
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
+    "waveno_disc": [
+        "ground_truth",
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
+    "ctt_biased": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
+    "ctt_seg_physics": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
+    "ctt_film": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
+    "ctt_seg": [
+        "gt_traj",
+        "pred_traj",
+        "pred",
+        "mse_error",
+        "existence",
+    ],
+    "wavefront_model": [
+        "ground_truth",
+        "wave_pattern",
+        "pred",
+        "mse_error",
     ],
 }
 

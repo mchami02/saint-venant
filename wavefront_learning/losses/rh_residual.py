@@ -299,7 +299,6 @@ class RHResidualLoss(BaseLoss):
             Tuple of (loss tensor, components dict with 'rh_residual' key).
         """
         positions = output_dict["positions"]
-        existence = output_dict.get("existence")
         x_coords = input_dict["x_coords"]
         disc_mask = input_dict["disc_mask"]
 
@@ -347,14 +346,8 @@ class RHResidualLoss(BaseLoss):
         # Apply discontinuity mask: (B, max_d) -> (B, max_d, 1)
         mask_d = disc_mask[:, :max_d].unsqueeze(-1)
 
-        # Weight by existence probability if available: (B, max_d, T)
-        if existence is not None:
-            exist = existence[:, :max_d, :]
-            weighted_residual = exist * residual**2 * mask_d
-            n_valid = (exist * mask_d).sum().clamp(min=1)
-        else:
-            weighted_residual = residual**2 * mask_d
-            n_valid = mask_d.sum().clamp(min=1) * T
+        weighted_residual = residual**2 * mask_d
+        n_valid = mask_d.sum().clamp(min=1) * T
 
         # Sum and normalize
         total_residual = weighted_residual.sum()

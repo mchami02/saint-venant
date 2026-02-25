@@ -6,9 +6,9 @@ embeddings serve as queries.
 
 Architecture:
     Branch: DiscontinuityEncoder (Fourier features + MLP) + self-attention
-    Trajectory: TimeEncoder → CrossAttention with disc embeddings → positions
+    Trajectory: TimeEncoder -> CrossAttention with disc embeddings -> positions
     Classifier: Simple MLP (no attention) for shock vs rarefaction
-    Density: SpaceTime Fourier encoding → CrossAttention with disc embeddings → density
+    Density: SpaceTime Fourier encoding -> CrossAttention with disc embeddings -> density
 """
 
 import torch
@@ -19,214 +19,15 @@ from .base import (
     FourierFeatures,
     TimeEncoder,
 )
+from .base.biased_cross_attention import (
+    compute_discontinuity_characteristic_bias,
+)
+from .base.boundaries import compute_boundaries
+from .base.characteristic_features import TimeConditioner
 from .base.cross_decoder import CrossDecoderLayer
+from .base.decoders import DensityDecoderTransformer, TrajectoryDecoderTransformer
+from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
-from .traj_deeponet import compute_boundaries
-
-
-class TrajectoryDecoderTransformer(nn.Module):
-    """Decodes trajectory positions using cross-attention.
-
-    Time embeddings (queries) attend to discontinuity embeddings (keys/values),
-    then the enriched time features are combined with each discontinuity
-    embedding to produce per-discontinuity positions.
-
-    Args:
-        hidden_dim: Dimension of embeddings.
-        num_cross_layers: Number of cross-attention layers.
-        num_attention_heads: Number of attention heads.
-        dropout: Dropout rate.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        num_cross_layers: int = 2,
-        num_attention_heads: int = 4,
-        dropout: float = 0.1,
-    ):
-        super().__init__()
-
-        self.cross_layers = nn.ModuleList(
-            [
-                CrossDecoderLayer(hidden_dim, num_heads=num_attention_heads)
-                for _ in range(num_cross_layers)
-            ]
-        )
-
-        self.final_norm = nn.LayerNorm(hidden_dim)
-        self.combine_norm = nn.LayerNorm(hidden_dim)
-
-        self.position_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-        )
-
-    def forward(
-        self,
-        disc_emb: torch.Tensor,
-        time_emb: torch.Tensor,
-        disc_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Decode trajectory positions via cross-attention.
-
-        Args:
-            disc_emb: Discontinuity embeddings (B, D, H).
-            time_emb: Time embeddings (B, T, H).
-            disc_mask: Validity mask (B, D).
-
-        Returns:
-            Predicted positions (B, D, T) clamped to [0, 1].
-        """
-        B, D, H = disc_emb.shape
-        T = time_emb.shape[1]
-
-        # Cross-attention: time queries attend to disc keys/values
-        key_padding_mask = ~disc_mask.bool()  # (B, D), True = ignore
-        all_masked = key_padding_mask.all(dim=1)
-        if all_masked.any():
-            key_padding_mask = key_padding_mask.clone()
-            key_padding_mask[all_masked] = False
-        x = time_emb  # (B, T, H)
-        for layer in self.cross_layers:
-            x = layer(x, disc_emb, key_padding_mask=key_padding_mask)
-        time_enriched = self.final_norm(x)  # (B, T, H)
-
-        # Combine each disc embedding with enriched time embeddings
-        disc_exp = disc_emb.unsqueeze(2).expand(-1, -1, T, -1)  # (B, D, T, H)
-        time_exp = time_enriched.unsqueeze(1).expand(-1, D, -1, -1)  # (B, D, T, H)
-        combined = self.combine_norm(disc_exp + time_exp)  # (B, D, T, H)
-
-        # Position head
-        positions = self.position_head(combined).squeeze(-1)  # (B, D, T)
-        positions = torch.clamp(positions, 0.0, 1.0)
-        positions = positions * disc_mask.unsqueeze(-1)
-
-        return positions
-
-
-class DensityDecoderTransformer(nn.Module):
-    """Decodes density using cross-attention over discontinuity embeddings.
-
-    Encodes spacetime coordinates (with optional boundary positions) using
-    Fourier features, then uses cross-attention to fuse with per-discontinuity
-    embeddings.
-
-    Args:
-        hidden_dim: Hidden dimension.
-        num_frequencies_t: Fourier frequencies for time.
-        num_frequencies_x: Fourier frequencies for spatial coords.
-        num_coord_layers: MLP layers for coordinate encoding.
-        num_cross_layers: Number of cross-attention layers.
-        num_attention_heads: Number of attention heads.
-        dropout: Dropout rate.
-        with_boundaries: Whether to include boundary positions in encoding.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        num_frequencies_t: int = 8,
-        num_frequencies_x: int = 8,
-        num_coord_layers: int = 2,
-        num_cross_layers: int = 2,
-        num_attention_heads: int = 4,
-        dropout: float = 0.1,
-        with_boundaries: bool = True,
-    ):
-        super().__init__()
-        self.with_boundaries = with_boundaries
-
-        self.fourier_t = FourierFeatures(num_frequencies=num_frequencies_t)
-        self.fourier_x = FourierFeatures(num_frequencies=num_frequencies_x)
-
-        # Input: fourier(t) + fourier(x) [+ fourier(x_left) + fourier(x_right)]
-        num_spatial = 3 if with_boundaries else 1
-        input_dim = self.fourier_t.output_dim + num_spatial * self.fourier_x.output_dim
-
-        layers = []
-        in_dim = input_dim
-        for i in range(num_coord_layers):
-            out_dim = hidden_dim
-            layers.append(nn.Linear(in_dim, out_dim))
-            if i < num_coord_layers - 1:
-                layers.append(nn.ReLU())
-                layers.append(nn.LayerNorm(out_dim))
-            in_dim = out_dim
-        self.coord_mlp = nn.Sequential(*layers)
-
-        self.cross_layers = nn.ModuleList(
-            [
-                CrossDecoderLayer(hidden_dim, num_heads=num_attention_heads)
-                for _ in range(num_cross_layers)
-            ]
-        )
-
-        self.final_norm = nn.LayerNorm(hidden_dim)
-
-        self.density_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-        )
-
-    def forward(
-        self,
-        disc_emb: torch.Tensor,
-        t_coords: torch.Tensor,
-        x_coords: torch.Tensor,
-        left_bound: torch.Tensor | None,
-        right_bound: torch.Tensor | None,
-        disc_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Predict density via cross-attention with discontinuity embeddings.
-
-        Args:
-            disc_emb: Discontinuity embeddings (B, D, H).
-            t_coords: Time coordinates (B, nt, nx).
-            x_coords: Space coordinates (B, nt, nx).
-            left_bound: Left boundary positions (B, nt, nx) or None.
-            right_bound: Right boundary positions (B, nt, nx) or None.
-            disc_mask: Validity mask (B, D).
-
-        Returns:
-            Predicted density (B, nt, nx) in [0, 1].
-        """
-        B, nt, nx = t_coords.shape
-
-        # Fourier encode coordinates
-        t_flat = t_coords.reshape(-1)
-        x_flat = x_coords.reshape(-1)
-
-        t_enc = self.fourier_t(t_flat)
-        x_enc = self.fourier_x(x_flat)
-
-        if self.with_boundaries:
-            left_enc = self.fourier_x(left_bound.reshape(-1))
-            right_enc = self.fourier_x(right_bound.reshape(-1))
-            coord_features = torch.cat([t_enc, x_enc, left_enc, right_enc], dim=-1)
-        else:
-            coord_features = torch.cat([t_enc, x_enc], dim=-1)
-
-        coord_emb = self.coord_mlp(coord_features)  # (B*nt*nx, H)
-        coord_emb = coord_emb.reshape(B, nt * nx, -1)  # (B, Q, H)
-
-        # Cross-attention: coord queries attend to disc keys/values
-        key_padding_mask = ~disc_mask.bool()  # (B, D)
-        all_masked = key_padding_mask.all(dim=1)
-        if all_masked.any():
-            key_padding_mask = key_padding_mask.clone()
-            key_padding_mask[all_masked] = False
-        x = coord_emb
-        for layer in self.cross_layers:
-            x = layer(x, disc_emb, key_padding_mask=key_padding_mask)
-        x = self.final_norm(x)
-
-        # Density head
-        density = self.density_head(x).squeeze(-1)  # (B, Q)
-        density = torch.clamp(density, 0.0, 1.0)
-        return density.reshape(B, nt, nx)
 
 
 class DynamicDensityDecoder(nn.Module):
@@ -413,10 +214,17 @@ class TrajTransformer(nn.Module):
         with_traj: bool = True,
         classifier: bool = False,
         all_boundaries: bool = False,
+        characteristic_bias: bool = False,
+        segment_physics: bool = False,
+        film_time: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.all_boundaries = all_boundaries
+        self.characteristic_bias = characteristic_bias
+        self.segment_physics = segment_physics
+        self.film_time = film_time
+        self.num_attention_heads = num_attention_heads
 
         # all_boundaries requires classifier and trajectory prediction
         if all_boundaries:
@@ -426,9 +234,18 @@ class TrajTransformer(nn.Module):
         self.with_traj = with_traj
         self.has_classifier = classifier
 
+        # Characteristic bias: physics-informed attention in density decoder
+        if characteristic_bias or segment_physics:
+            self.flux = DEFAULT_FLUX()
+        if characteristic_bias:
+            self.bias_scale = nn.Parameter(torch.tensor(5.0))
+            self.damping_sharpness = nn.Parameter(torch.tensor(5.0))
+
         # Branch: encode discontinuities
+        # With segment_physics: input is [x, rho_L, rho_R, lambda_L, lambda_R, shock_speed]
+        disc_input_dim = 6 if segment_physics else 3
         self.branch = DiscontinuityEncoder(
-            input_dim=3,
+            input_dim=disc_input_dim,
             hidden_dim=hidden_dim,
             output_dim=hidden_dim,
             num_frequencies=num_disc_frequencies,
@@ -436,7 +253,7 @@ class TrajTransformer(nn.Module):
             dropout=dropout,
         )
 
-        # Cross-discontinuity self-attention
+        # Cross-token self-attention
         self.disc_interaction = nn.ModuleList(
             [
                 EncoderLayer(hidden_dim, num_heads=num_attention_heads)
@@ -492,7 +309,15 @@ class TrajTransformer(nn.Module):
                 num_cross_layers=num_density_cross_layers,
                 num_attention_heads=num_attention_heads,
                 dropout=dropout,
-                with_boundaries=with_traj,
+                with_boundaries=with_traj and not film_time,
+                biased=characteristic_bias,
+            )
+
+        # FiLM time conditioning: modulate disc embeddings per timestep
+        if film_time:
+            self.time_conditioner = TimeConditioner(
+                hidden_dim=hidden_dim,
+                num_time_frequencies=num_frequencies_t,
             )
 
     def forward(
@@ -520,8 +345,38 @@ class TrajTransformer(nn.Module):
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
+        # === CHARACTERISTIC BIAS (optional) ===
+        attn_bias = None
+        if self.characteristic_bias:
+            attn_bias = compute_discontinuity_characteristic_bias(
+                t_coords,
+                x_coords,
+                discontinuities[:, :, 0],  # disc positions
+                discontinuities[:, :, 1],  # rho_L
+                discontinuities[:, :, 2],  # rho_R
+                disc_mask,
+                self.flux,
+                self.bias_scale,
+                damping_sharpness=self.damping_sharpness,
+            )  # (B, nt, nx, D)
+
         # === BRANCH ===
-        branch_emb = self.branch(discontinuities, disc_mask)  # (B, D, H)
+        if self.segment_physics:
+            # Enrich discontinuities with physics features
+            rho_L = discontinuities[:, :, 1]  # (B, D)
+            rho_R = discontinuities[:, :, 2]  # (B, D)
+            lambda_L = self.flux.derivative(rho_L)  # (B, D)
+            lambda_R = self.flux.derivative(rho_R)  # (B, D)
+            s = self.flux.shock_speed(rho_L, rho_R)  # (B, D)
+            enriched = torch.cat([
+                discontinuities,  # [x, rho_L, rho_R]
+                lambda_L.unsqueeze(-1),
+                lambda_R.unsqueeze(-1),
+                s.unsqueeze(-1),
+            ], dim=-1)  # (B, D, 6)
+            branch_emb = self.branch(enriched, disc_mask)  # (B, D, H)
+        else:
+            branch_emb = self.branch(discontinuities, disc_mask)  # (B, D, H)
 
         # === CROSS-DISCONTINUITY INTERACTION ===
         key_padding_mask = ~disc_mask.bool()
@@ -548,7 +403,7 @@ class TrajTransformer(nn.Module):
             if self.all_boundaries:
                 # === ALL BOUNDARIES PATH ===
                 # Dynamic density decoder with soft existence weighting
-                # (no hard threshold — fully differentiable)
+                # (no hard threshold -- fully differentiable)
                 density = self.density_decoder(
                     branch_emb,
                     positions,
@@ -570,19 +425,45 @@ class TrajTransformer(nn.Module):
                 effective_mask = disc_mask * (existence > 0.5).float()
             else:
                 effective_mask = disc_mask
-            left_bound, right_bound = compute_boundaries(
-                positions, x_coords, effective_mask
-            )
 
-            # === DENSITY ===
-            density = self.density_decoder(
-                branch_emb,
-                t_coords,
-                x_coords,
-                left_bound,
-                right_bound,
-                disc_mask,
-            )  # (B, nt, nx)
+            if self.film_time:
+                # === FiLM TIME DENSITY PATH ===
+                # Time-condition disc embeddings -> per-timestep keys
+                query_times = t_coords[:, :, 0]  # (B, nt)
+                branch_emb_t = self.time_conditioner(
+                    branch_emb, query_times
+                )  # (B, nt, D, H)
+
+                # Per-timestep batched density decoding (no boundary features)
+                B_size, nt, nx = t_coords.shape
+                D = disc_mask.shape[1]
+                H = self.hidden_dim
+
+                # Reshape: treat each (batch, timestep) as a separate batch entry
+                density = self.density_decoder(
+                    branch_emb_t.reshape(B_size * nt, D, H),
+                    t_coords.reshape(B_size * nt, 1, nx),
+                    x_coords.reshape(B_size * nt, 1, nx),
+                    None,
+                    None,
+                    disc_mask.unsqueeze(1).expand(-1, nt, -1).reshape(B_size * nt, D),
+                )  # (B*nt, 1, nx)
+                density = density.reshape(B_size, nt, nx)
+            else:
+                left_bound, right_bound = compute_boundaries(
+                    positions, x_coords, effective_mask
+                )
+
+                # === DENSITY ===
+                density = self.density_decoder(
+                    branch_emb,
+                    t_coords,
+                    x_coords,
+                    left_bound,
+                    right_bound,
+                    disc_mask,
+                    attn_bias=attn_bias,
+                )  # (B, nt, nx)
 
             output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
 
@@ -596,7 +477,8 @@ class TrajTransformer(nn.Module):
 
         # === DENSITY (no trajectory conditioning) ===
         density = self.density_decoder(
-            branch_emb, t_coords, x_coords, None, None, disc_mask
+            branch_emb, t_coords, x_coords, None, None, disc_mask,
+            attn_bias=attn_bias,
         )
         output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)
         return {"output_grid": output_grid}
@@ -708,7 +590,7 @@ def build_classifier_all_traj_transformer(args: dict) -> TrajTransformer:
 
     Uses DynamicDensityDecoder: for each time step, spatial queries cross-attend
     to boundary tokens enriched with predicted trajectory positions and soft
-    existence weighting. Fully differentiable — no hard threshold or
+    existence weighting. Fully differentiable -- no hard threshold or
     compute_boundaries.
 
     Args:
@@ -734,3 +616,57 @@ def build_classifier_all_traj_transformer(args: dict) -> TrajTransformer:
         classifier=True,
         all_boundaries=True,
     )
+
+
+def build_biased_classifier_traj_transformer(args: dict) -> TrajTransformer:
+    """Build ClassifierTrajTransformer with characteristic attention bias.
+
+    Adds physics-informed attention bias to the density decoder's
+    cross-attention, based on backward characteristic propagation from
+    each discontinuity's influence zone. Improves resolution generalization.
+
+    Args:
+        args: Configuration dictionary (same keys as build_traj_transformer).
+
+    Returns:
+        Configured TrajTransformer with classifier=True and
+        characteristic_bias=True.
+    """
+    return _build_ctt_base(args, characteristic_bias=True)
+
+
+def _build_ctt_base(args: dict, **overrides) -> TrajTransformer:
+    """Shared builder for ClassifierTrajTransformer variants."""
+    kwargs = dict(
+        hidden_dim=args.get("hidden_dim", 32),
+        num_frequencies_t=args.get("num_frequencies_t", 8),
+        num_frequencies_x=args.get("num_frequencies_x", 8),
+        num_disc_frequencies=args.get("num_disc_frequencies", 8),
+        num_disc_layers=args.get("num_disc_layers", 2),
+        num_time_layers=args.get("num_time_layers", 2),
+        num_coord_layers=args.get("num_coord_layers", 2),
+        num_interaction_layers=args.get("num_interaction_layers", 2),
+        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
+        num_density_cross_layers=args.get("num_density_cross_layers", 2),
+        num_attention_heads=args.get("num_attention_heads", 4),
+        dropout=args.get("dropout", 0.0),
+        with_traj=True,
+        classifier=True,
+    )
+    kwargs.update(overrides)
+    return TrajTransformer(**kwargs)
+
+
+def build_ctt_biased(args: dict) -> TrajTransformer:
+    """CTT + characteristic attention bias (ablation alias)."""
+    return _build_ctt_base(args, characteristic_bias=True)
+
+
+def build_ctt_seg_physics(args: dict) -> TrajTransformer:
+    """CTT + physics features (lambda_L, lambda_R, shock_speed) in disc encoder."""
+    return _build_ctt_base(args, segment_physics=True)
+
+
+def build_ctt_film(args: dict) -> TrajTransformer:
+    """CTT + FiLM time conditioning on disc embeddings for density decoding."""
+    return _build_ctt_base(args, film_time=True)

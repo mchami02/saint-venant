@@ -14,15 +14,17 @@ from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
 from .biased_cross_attention import BiasedCrossDecoderLayer, compute_characteristic_bias
+from .boundaries import compute_boundaries
 from .breakpoint_evolution import BreakpointEvolution
 from .blocks import ResidualBlock
 from .characteristic_features import (
     CharacteristicFeatureComputer,
+    DiscontinuityPhysicsEncoder,
     SegmentPhysicsEncoder,
     TimeConditioner,
 )
 from .cross_decoder import CrossDecoder
-from .decoders import TrajectoryDecoder
+from .decoders import DensityDecoderTransformer, TrajectoryDecoder, TrajectoryDecoderTransformer
 from .feature_encoders import (
     DiscontinuityEncoder,
     FourierFeatures,
@@ -39,6 +41,8 @@ __all__ = [
     # Biased cross-attention
     "BiasedCrossDecoderLayer",
     "compute_characteristic_bias",
+    # Boundaries
+    "compute_boundaries",
     # Breakpoint evolution
     "BreakpointEvolution",
     # Encoders
@@ -48,6 +52,8 @@ __all__ = [
     "SpaceTimeEncoder",
     # Decoders
     "TrajectoryDecoder",
+    "TrajectoryDecoderTransformer",
+    "DensityDecoderTransformer",
     # Blocks
     "ResidualBlock",
     # Regions
@@ -65,6 +71,7 @@ __all__ = [
     "TriangularFlux",
     "DEFAULT_FLUX",
     "SegmentPhysicsEncoder",
+    "DiscontinuityPhysicsEncoder",
     "CharacteristicFeatureComputer",
     "TimeConditioner",
 ]

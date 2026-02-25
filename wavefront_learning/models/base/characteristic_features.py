@@ -40,16 +40,22 @@ class SegmentPhysicsEncoder(nn.Module):
         num_frequencies: int = 8,
         num_layers: int = 2,
         flux: Flux | None = None,
+        include_cumulative_mass: bool = True,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
+        self.include_cumulative_mass = include_cumulative_mass
 
         self.fourier_x = FourierFeatures(
             num_frequencies=num_frequencies, include_input=True
         )
 
-        # Input: fourier(x_center) + fourier(width) + [rho, lambda, flux_val, N_k_normalized]
-        input_dim = 2 * self.fourier_x.output_dim + 4
+        # Input: fourier(x_center) + fourier(width) + scalar features
+        # With cumulative mass: [rho, lambda, flux_val, N_k_normalized] = 4
+        # Without: [rho, lambda, flux_val] = 3
+        num_scalars = 4 if include_cumulative_mass else 3
+        input_dim = 2 * self.fourier_x.output_dim + num_scalars
 
         layers = []
         in_dim = input_dim
@@ -58,6 +64,7 @@ class SegmentPhysicsEncoder(nn.Module):
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
                 layers.append(nn.LayerNorm(out_dim))
             in_dim = out_dim
 
@@ -88,12 +95,6 @@ class SegmentPhysicsEncoder(nn.Module):
         lambda_k = self.flux.derivative(ks)  # (B, K)
         flux_k = self.flux(ks)  # (B, K)
 
-        # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
-        rho_width = ks * width  # (B, K)
-        N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
-        total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
-        N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
-
         # Fourier encode spatial features
         x_center_enc = self.fourier_x(
             x_center.reshape(-1)
@@ -103,18 +104,124 @@ class SegmentPhysicsEncoder(nn.Module):
         ).reshape(B, K, -1)  # (B, K, F)
 
         # Concatenate all features
-        scalar_features = torch.stack(
-            [ks, lambda_k, flux_k, N_k_normalized], dim=-1
-        )  # (B, K, 4)
+        if self.include_cumulative_mass:
+            # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
+            rho_width = ks * width  # (B, K)
+            N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
+            total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+            N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
+            scalar_features = torch.stack(
+                [ks, lambda_k, flux_k, N_k_normalized], dim=-1
+            )  # (B, K, 4)
+        else:
+            scalar_features = torch.stack(
+                [ks, lambda_k, flux_k], dim=-1
+            )  # (B, K, 3)
         features = torch.cat(
             [x_center_enc, width_enc, scalar_features], dim=-1
-        )  # (B, K, 2F+3)
+        )  # (B, K, 2F+3/4)
 
         # MLP projection
         output = self.mlp(features)  # (B, K, H)
 
         # Zero out padded positions
         output = output * pieces_mask.unsqueeze(-1)
+
+        return output
+
+
+class DiscontinuityPhysicsEncoder(nn.Module):
+    """Encodes IC discontinuities with physics-augmented features.
+
+    For each discontinuity d at (x_d, rho_L, rho_R):
+      - x_d: discontinuity position (Fourier-encoded)
+      - rho_L, rho_R: left and right density values
+      - lambda_L = flux.derivative(rho_L): left characteristic speed
+      - lambda_R = flux.derivative(rho_R): right characteristic speed
+      - s_d = flux.shock_speed(rho_L, rho_R): Rankine-Hugoniot shock speed
+
+    Spatial position is Fourier-encoded; physics scalars are concatenated raw.
+    All features are projected via MLP.
+
+    Args:
+        hidden_dim: Output embedding dimension.
+        num_frequencies: Fourier frequency bands for position encoding.
+        num_layers: MLP depth.
+        flux: Flux function instance.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 64,
+        num_frequencies: int = 8,
+        num_layers: int = 2,
+        flux: Flux | None = None,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.flux = flux or DEFAULT_FLUX()
+
+        self.fourier_x = FourierFeatures(
+            num_frequencies=num_frequencies, include_input=True
+        )
+
+        # Input: fourier(x_d) + 5 scalar features
+        # [rho_L, rho_R, lambda_L, lambda_R, s_d]
+        input_dim = self.fourier_x.output_dim + 5
+
+        layers = []
+        in_dim = input_dim
+        for i in range(num_layers):
+            out_dim = hidden_dim
+            layers.append(nn.Linear(in_dim, out_dim))
+            if i < num_layers - 1:
+                layers.append(nn.GELU())
+                layers.append(nn.Dropout(dropout))
+                layers.append(nn.LayerNorm(out_dim))
+            in_dim = out_dim
+
+        self.mlp = nn.Sequential(*layers)
+        self.output_dim = hidden_dim
+
+    def forward(
+        self,
+        discontinuities: torch.Tensor,
+        disc_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Encode IC discontinuities.
+
+        Args:
+            discontinuities: Discontinuity features (B, D, 3) with [x_d, rho_L, rho_R].
+            disc_mask: Validity mask (B, D), 1 = valid.
+
+        Returns:
+            Discontinuity embeddings (B, D, hidden_dim).
+        """
+        B, D, _ = discontinuities.shape
+
+        x_d = discontinuities[:, :, 0]  # (B, D)
+        rho_L = discontinuities[:, :, 1]  # (B, D)
+        rho_R = discontinuities[:, :, 2]  # (B, D)
+
+        # Compute physics features
+        lambda_L = self.flux.derivative(rho_L)  # (B, D)
+        lambda_R = self.flux.derivative(rho_R)  # (B, D)
+        s_d = self.flux.shock_speed(rho_L, rho_R)  # (B, D)
+
+        # Fourier encode position
+        x_enc = self.fourier_x(x_d.reshape(-1)).reshape(B, D, -1)  # (B, D, F)
+
+        # Stack scalar physics features
+        scalars = torch.stack(
+            [rho_L, rho_R, lambda_L, lambda_R, s_d], dim=-1
+        )  # (B, D, 5)
+
+        # Concatenate and project
+        features = torch.cat([x_enc, scalars], dim=-1)  # (B, D, F+5)
+        output = self.mlp(features)  # (B, D, H)
+
+        # Zero out padded positions
+        output = output * disc_mask.unsqueeze(-1)
 
         return output
 
@@ -317,6 +424,7 @@ class TimeConditioner(nn.Module):
         self,
         hidden_dim: int = 64,
         num_time_frequencies: int = 8,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.fourier_t = FourierFeatures(
@@ -327,6 +435,7 @@ class TimeConditioner(nn.Module):
         self.film_net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, 2 * hidden_dim),
         )
         # Initialize near identity: gamma ~ 1, beta ~ 0
