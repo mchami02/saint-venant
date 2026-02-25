@@ -656,7 +656,7 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
     if not isinstance(args, dict):
         args = vars(args)
     kwargs = dict(
-        hidden_dim=args.get("hidden_dim", 256),
+        hidden_dim=args.get("hidden_dim", 64),
         num_freq_t=args.get("num_freq_t", 8),
         num_freq_x=args.get("num_freq_x", 8),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
@@ -664,7 +664,7 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
-        num_cross_segment_layers=args.get("num_cross_segment_layers", 2),
+        num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
         initial_bias_scale=args.get("initial_bias_scale", 5.0),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
