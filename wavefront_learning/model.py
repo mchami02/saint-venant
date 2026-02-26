@@ -14,6 +14,10 @@ from models.encoder_decoder import (
     build_encoder_decoder,
     build_encoder_decoder_cross,
 )
+from models.autoregressive_fno import (
+    build_autoregressive_fno,
+    build_autoregressive_real_fno,
+)
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
@@ -50,6 +54,8 @@ MODELS = {
     "ClassifierTrajDeepONet": build_classifier_traj_deeponet,
     "NoTrajDeepONet": build_no_traj_deeponet,
     "FNO": build_fno,
+    "AutoregressiveFNO": build_autoregressive_fno,
+    "AutoregressiveRealFNO": build_autoregressive_real_fno,
     "DeepONet": build_deeponet,
     "EncoderDecoder": build_encoder_decoder,
     "EncoderDecoderCross": build_encoder_decoder_cross,
@@ -79,6 +85,8 @@ MODELS = {
 # Models not listed here default to None (no transform).
 MODEL_TRANSFORM = {
     "FNO": "ToGridNoCoords",
+    "AutoregressiveFNO": "ToGridNoCoords",
+    "AutoregressiveRealFNO": "ToGridNoCoords",
     "DeepONet": "ToGridInput",
     "EncoderDecoder": "ToGridInput",
     "EncoderDecoderCross": "ToGridInput",
