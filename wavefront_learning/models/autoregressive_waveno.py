@@ -217,7 +217,7 @@ class AutoregressiveWaveNO(nn.Module):
             fno_in = torch.cat(
                 [state, dt_channel, left_bound, right_bound], dim=1
             )  # (B, 4, nx)
-            state = state + self.fno(fno_in)  # (B, 1, nx)
+            state = (state + self.fno(fno_in)).clamp(0.0, 1.0)  # (B, 1, nx)
 
             # c. Trajectory step: predict position delta
             pos_enc = self.fourier_pos(
@@ -225,7 +225,7 @@ class AutoregressiveWaveNO(nn.Module):
             ).reshape(B, D, -1)  # (B, D, F)
             dt_exp = dt.view(B, 1, 1).expand(B, D, 1)  # (B, D, 1)
             traj_in = torch.cat([bp_emb, pos_enc, dt_exp], dim=-1)  # (B, D, H+F+1)
-            delta_pos = self.traj_mlp(traj_in).squeeze(-1)  # (B, D)
+            delta_pos = self.traj_mlp(traj_in).squeeze(-1).clamp(-0.1, 0.1)  # (B, D)
             positions = (positions + delta_pos).clamp(0.0, 1.0) * disc_mask  # (B, D)
 
             # d. Store
