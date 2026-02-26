@@ -18,6 +18,7 @@ from models.autoregressive_fno import (
     build_autoregressive_fno,
     build_autoregressive_real_fno,
 )
+from models.autoregressive_waveno import build_autoregressive_waveno
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
@@ -58,6 +59,7 @@ MODELS = {
     "FNO": build_fno,
     "AutoregressiveFNO": build_autoregressive_fno,
     "AutoregressiveRealFNO": build_autoregressive_real_fno,
+    "AutoregressiveWaveNO": build_autoregressive_waveno,
     "DeepONet": build_deeponet,
     "EncoderDecoder": build_encoder_decoder,
     "EncoderDecoderCross": build_encoder_decoder_cross,
@@ -91,6 +93,7 @@ MODEL_TRANSFORM = {
     "FNO": "ToGridNoCoords",
     "AutoregressiveFNO": "ToGridNoCoords",
     "AutoregressiveRealFNO": "ToGridNoCoords",
+    "AutoregressiveWaveNO": "ToGridNoCoords",
     "DeepONet": "ToGridInput",
     "EncoderDecoder": "ToGridInput",
     "EncoderDecoderCross": "ToGridInput",

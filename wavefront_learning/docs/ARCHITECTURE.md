@@ -444,6 +444,73 @@ SpectralConv1d:
 
 ---
 
+### AutoregressiveWaveNO
+
+**Location**: `models/autoregressive_waveno.py`
+
+Combines WaveNO's segment encoding and trajectory prediction with autoregressive time-stepping. Both the spatial state and shock positions evolve step-by-step. The FNO receives boundary channels indicating where discontinuities are, and a trajectory MLP predicts position deltas from static breakpoint embeddings.
+
+Key design choices:
+- **Boundary channels in FNO** (4 input channels): `[state, dt, left_bound, right_bound]` — boundary positions tell the FNO where discontinuities are.
+- **Static breakpoint embeddings**: Computed once from IC segments via concat of adjacent segment embeddings. Time-evolution is handled by the trajectory MLP learning position deltas.
+- **Gradient flow**: Boundaries use hard comparisons (`pos <= x`), so grid MSE gradients don't flow to trajectories. Trajectory learning is driven by `traj_regularized` losses (ic_anchoring, boundary, regularize_traj).
+
+#### Pseudocode
+
+```
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → seg_emb: (K, H)
+
+cat[seg_emb[d], seg_emb[d+1]] → bp_encoder(MLP) → bp_emb: (D, H)
+
+state = grid_input[:, 0, :]         # (1, nx) — IC
+positions = discontinuities[:, 0]   # (D,) — initial positions
+x_grid = x_coords[0, 0, :]         # (nx,)
+
+for t in 0..nt-2:
+    pos → compute_boundaries → left, right: (1, nx)
+    fno_in = cat[state, dt, left, right]           # (4, nx)
+    state = state + RealFNO1d(fno_in)              # (1, nx)
+
+    traj_in = cat[bp_emb, fourier(pos), dt]        # (D, H+F+1)
+    positions = clamp(positions + traj_mlp(traj_in), 0, 1) * disc_mask
+
+stack(states) → output_grid: (1, nt, nx)
+stack(positions) → positions: (D, nt)
+```
+
+#### Input/Output Format
+
+**Input** (via `ToGridNoCoords` transform): dict with:
+- `grid_input`: $(1, n_t, n_x)$ — masked IC (only first row used)
+- `xs`, `ks`, `pieces\_mask` — IC segments for SegmentPhysicsEncoder
+- `discontinuities`: $(D, 3)$ — `[x, \rho_L, \rho_R]` initial positions
+- `disc\_mask`: $(D,)$ — validity mask
+- `x\_coords`: $(1, n_t, n_x)$ — spatial grid
+- `dt`: scalar — time step
+
+**Output** (dictionary):
+- `output_grid`: $(1, n_t, n_x)$ — predicted density
+- `positions`: $(D, n_t)$ — breakpoint trajectories
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_dim` | 64 | Segment/breakpoint embedding dimension |
+| `num_seg_frequencies` | 8 | Fourier bands for segment encoder |
+| `num_seg_mlp_layers` | 2 | MLP depth in segment encoder |
+| `num_self_attn_layers` | 2 | Self-attention layers over segments |
+| `num_heads` | 4 | Attention heads |
+| `num_freq_pos` | 8 | Fourier bands for position encoding in trajectory MLP |
+| `fno_hidden` | 32 | FNO hidden channels |
+| `fno_modes` | 16 | FNO Fourier modes |
+| `fno_layers` | 2 | FNO spectral conv layers |
+| `fno_padding` | 0.2 | Domain padding for non-periodic BCs |
+| `dropout` | 0.05 | Dropout rate |
+
+---
+
 ### EncoderDecoder
 
 **Location**: `models/encoder_decoder.py`
