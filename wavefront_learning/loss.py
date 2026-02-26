@@ -15,6 +15,7 @@ from losses.boundary import BoundaryLoss
 from losses.cell_avg_mse import CellAverageMSELoss
 from losses.collision import CollisionLoss
 from losses.conservation import ConservationLoss
+from losses.entropy import EntropyConditionLoss
 from losses.existence_regularization import ICAnchoringLoss
 from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
@@ -37,6 +38,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "rh_residual": RHResidualLoss,
     "pde_residual": PDEResidualLoss,
     "pde_shock_residual": PDEShockResidualLoss,
+    "entropy": EntropyConditionLoss,
     "boundary": BoundaryLoss,
     "collision": CollisionLoss,
     "ic_anchoring": ICAnchoringLoss,
@@ -322,6 +324,9 @@ def create_loss_from_args(args) -> nn.Module:
             "dx": args.dx,
         }
         loss_kwargs["conservation"] = {
+            "dx": args.dx,
+        }
+        loss_kwargs["entropy"] = {
             "dx": args.dx,
         }
 

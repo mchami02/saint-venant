@@ -132,6 +132,7 @@ Individual losses (in `losses/`):
 | `rh_residual` | RH residual from region densities |
 | `acceleration` | Shock detection via high acceleration + missed shock term |
 | `regularize_traj` | Penalize erratic trajectory jumps between timesteps |
+| `entropy` | Lax entropy condition on GT: penalizes missed shocks and false positives |
 
 Presets (in `loss.py`):
 | Preset | Description |
