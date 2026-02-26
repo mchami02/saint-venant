@@ -81,7 +81,8 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
         ("kl_divergence", 1.0, {"free_bits": 0.01}),
     ],
     "shock_proximity": [
-        ("shock_proximity", 1.0),
+        ("mse", 1.0),
+        ("shock_proximity", 0.1),
     ],
 }
 
@@ -337,12 +338,6 @@ def create_loss_from_args(args) -> nn.Module:
         }
         loss_kwargs["entropy"] = {
             "dx": args.dx,
-        }
-
-    # Wire proximity_weight for shock_proximity loss
-    if hasattr(args, "proximity_weight"):
-        loss_kwargs["shock_proximity"] = {
-            "proximity_weight": args.proximity_weight,
         }
 
     return get_loss(args.loss, loss_kwargs=loss_kwargs)

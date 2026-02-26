@@ -1920,18 +1920,17 @@ Uses `ToGridInput` transform. Resolution invariant via SpaceTimeEncoder + adapti
 
 #### ShockProximityLoss
 
-Combined loss for ShockAwareDeepONet: solution MSE plus weighted proximity MSE.
+MSE on the shock proximity field:
 
-$$\mathcal{L} = \text{MSE}(\hat{u}, u) + \lambda_{\text{prox}} \cdot \text{MSE}(\hat{p}, p)$$
+$$\mathcal{L}_{\text{prox}} = \text{MSE}(\hat{p}, p)$$
 
 where:
-- $\hat{u}$ = predicted solution grid (`output_grid`)
-- $u$ = ground truth solution grid (`target`)
-- $\hat{p}$ = predicted shock proximity (`shock_proximity`)
+- $\hat{p}$ = predicted shock proximity (`output_dict["shock_proximity"]`)
 - $p$ = ground truth shock proximity (`input_dict["shock_proximity"]`)
-- $\lambda_{\text{prox}}$ = `proximity_weight` (default: 0.1)
 
 Ground truth proximity is precomputed from the Lax entropy condition:
 1. Detect shocks at each cell interface via $\lambda_L > s > \lambda_R$ where $\lambda = 1 - 2\rho$ and $s = 1 - \rho_L - \rho_R$
 2. For each cell, compute minimum distance to any shock interface
 3. $p = \exp(-d_{\min} / \sigma)$ where $\sigma$ = `proximity_sigma` (default: 0.05)
+
+Used via the `shock_proximity` preset: `mse` (weight 1.0) + `shock_proximity` (weight 0.1).

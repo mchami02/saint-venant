@@ -1,6 +1,6 @@
-"""Shock proximity loss for ShockAwareDeepONet.
+"""Shock proximity MSE loss.
 
-Combines solution MSE with proximity field MSE, weighted by proximity_weight.
+Computes MSE between predicted and ground truth shock proximity fields.
 """
 
 import torch
@@ -10,15 +10,14 @@ from .base import BaseLoss
 
 
 class ShockProximityLoss(BaseLoss):
-    """Combined loss: solution MSE + weighted proximity MSE.
+    """MSE loss on the shock proximity field.
 
-    Args:
-        proximity_weight: Weight for the proximity MSE term (default: 0.1).
+    Compares the model's predicted shock proximity with the ground truth
+    proximity precomputed from the Lax entropy condition.
     """
 
-    def __init__(self, proximity_weight: float = 0.1):
+    def __init__(self):
         super().__init__()
-        self.proximity_weight = proximity_weight
 
     def forward(
         self,
@@ -26,26 +25,18 @@ class ShockProximityLoss(BaseLoss):
         output_dict: dict[str, torch.Tensor],
         target: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Compute combined loss.
+        """Compute proximity MSE.
 
         Args:
-            input_dict: Must contain "shock_proximity" ground truth (B, 1, nt, nx).
-            output_dict: Must contain "output_grid" and "shock_proximity" predictions.
-            target: Ground truth solution grid (B, 1, nt, nx).
+            input_dict: Must contain "shock_proximity" GT (B, 1, nt, nx).
+            output_dict: Must contain "shock_proximity" prediction (B, 1, nt, nx).
+            target: Unused (ground truth solution grid).
 
         Returns:
-            Tuple of (total loss, components dict).
+            Tuple of (loss, components dict).
         """
-        solution_mse = F.mse_loss(output_dict["output_grid"], target)
-
         prox_pred = output_dict["shock_proximity"]
         prox_gt = input_dict["shock_proximity"]
-        proximity_mse = F.mse_loss(prox_pred, prox_gt)
+        loss = F.mse_loss(prox_pred, prox_gt)
 
-        total = solution_mse + self.proximity_weight * proximity_mse
-
-        return total, {
-            "solution_mse": solution_mse.item(),
-            "proximity_mse": proximity_mse.item(),
-            "total": total.item(),
-        }
+        return loss, {"proximity_mse": loss.item()}

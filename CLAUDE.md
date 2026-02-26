@@ -40,6 +40,7 @@ Unless explicitly stated otherwise, all learning-related tasks are implemented i
 - Keep all experiment outputs and checkpoints in the designated output folder.
 - Do not modify files outside the current task's scope.
 - Never merge or push directly to `main` under any circumstances.
+- **Keep code modular.** Each class or function should do one thing. In particular, loss classes must compute a single loss term — use presets in `loss.py` to compose multiple losses with weights. Never bundle unrelated computations into one class.
 
 ## File Maintenance
 

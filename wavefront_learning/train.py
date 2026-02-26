@@ -190,12 +190,6 @@ def parse_args() -> argparse.Namespace:
 
     # ShockAwareDeepONet parameters
     parser.add_argument(
-        "--proximity_weight",
-        type=float,
-        default=0.1,
-        help="Weight for shock proximity MSE in ShockProximityLoss (default: 0.1)",
-    )
-    parser.add_argument(
         "--proximity_sigma",
         type=float,
         default=0.05,
