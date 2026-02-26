@@ -116,6 +116,7 @@ Use `--no_wandb` flag to disable logging.
 | **TransformerSeg** | Segment-based encoding + cross-attention density decoder, no trajectories | `{output_grid}` |
 | **ShockAwareDeepONet** | Dual-head DeepONet: shared trunk, solution + shock proximity heads | `{output_grid, shock_proximity}` |
 | **ShockAwareWaveNO** | WaveNO with shock proximity head on cross-attention features | `{positions, output_grid, shock_proximity}` |
+| **NeuralFVSolver** | Learned FV time-marching with stencil features + shock proximity | `{output_grid}` |
 
 ## Available Losses
 
@@ -146,6 +147,7 @@ Presets (in `loss.py`):
 | `traj_regularized` | mse + ic_anchoring + boundary + regularize_traj |
 | `cvae` | mse + kl_divergence |
 | `shock_proximity` | shock_proximity (solution MSE + proximity MSE) |
+| `mse_wasserstein` | mse + wasserstein (sharp shocks via W1 distance) |
 
 Model-to-loss mapping is in `train.py` `MODEL_LOSS_PRESET` dict. When `--loss mse` (default), the preset is auto-selected per model.
 

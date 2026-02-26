@@ -15,6 +15,7 @@ This document describes the neural network architectures and loss functions used
    - [TrajTransformer](#trajtransformer)
    - [WaveNO](#waveno)
    - [LatentDiffusionDeepONet](#latentdiffusiondeeponet)
+   - [NeuralFVSolver](#neuralfvsolver)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -1251,6 +1252,79 @@ Inference:
 
 ---
 
+### NeuralFVSolver
+
+**Location**: `models/neural_fv_solver.py`
+
+A learned finite volume time-marching scheme for scalar conservation laws. Instead of predicting the full $(T, X)$ solution at once, it learns a single-step update operator (a learned Riemann solver) and rolls it forward in time. Each step gathers local stencil features, passes them through a shared flux MLP, and performs an Euler update. This respects the causal, local, finite-speed-of-propagation structure of hyperbolic PDEs by design.
+
+#### Components
+
+**DifferentiableShockProximity**: Detects shocks at cell interfaces via the Lax entropy condition ($\lambda_L > s > \lambda_R$) and computes an exponential proximity field $p_i = \exp(-d_{\min,i} / \sigma)$ where $d_{\min,i}$ is the distance from cell $i$ to the nearest shock interface. Output is detached (no gradient flow).
+
+**FluxNetwork**: Pointwise MLP implemented as `Conv1d(kernel_size=1)` layers. Shared across all cells (translation invariant). Final layer initialized to zero for small initial updates.
+
+```
+features: (3*(2k+1)+1, nx) → Conv1d(in, H, 1) → [GELU → Dropout → Conv1d(H, H, 1)] × (L-1) → GELU → Conv1d(H, 1, 1) → update: (1, nx)
+```
+
+**NeuralFVSolver**: Main model with autoregressive rollout.
+
+```
+grid_input: (1, nt, nx), dt: scalar, dx: scalar
+
+state = grid_input[:, 0, :]                              # (1, nx) — IC
+
+For t = 0..rollout_steps-1:
+  padded = replicate_pad(state, k)                        # (1, nx+2k)
+  stencil = unfold(padded, 2k+1)                          # (2k+1, nx)
+  char_speeds = flux.derivative(stencil)                  # (2k+1, nx)
+  prox = DifferentiableShockProximity(state, dx)           # (1, nx), detached
+  stencil_prox = replicate_pad+unfold(prox)               # (2k+1, nx)
+  features = cat[stencil, char_speeds, stencil_prox, dt]  # (3*(2k+1)+1, nx)
+  update = FluxNetwork(features)                          # (1, nx)
+  state = clamp(state + (dt/dx) * update, 0, 1)
+
+  # Training only:
+  state += N(0, noise_std)                                # pushforward noise
+  state = teacher_force(state, GT[t+1])                   # stochastic replacement
+
+# Pad remaining steps with detached last state (curriculum)
+→ output_grid: (1, nt, nx)
+```
+
+#### Input Features (per cell)
+
+| Feature | Count | Description |
+|---------|-------|-------------|
+| Stencil values | $2k+1$ | Cell values in local neighborhood |
+| Characteristic speeds | $2k+1$ | $f'(\rho)$ at each stencil position |
+| Shock proximity | $2k+1$ | Proximity field at stencil positions (detached) |
+| Time step | $1$ | $\Delta t$ broadcast |
+| **Total** | $3(2k+1)+1$ | Default $k=3$: 22 features |
+
+#### Training Schedule
+
+- **Curriculum**: Rollout steps ramp linearly from 1 to $n_t - 1$ over `curriculum_fraction` of training
+- **Pushforward noise**: $\mathcal{N}(0, \sigma)$ added after each step, $\sigma$ decays linearly to 0 over `noise_decay_fraction` of training
+- **Teacher forcing**: Optional stochastic replacement of predicted state with GT
+
+#### Default Hyperparameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stencil_k` | 3 | Stencil half-width ($2k+1 = 7$ cells) |
+| `flux_hidden_dim` | 64 | FluxNetwork hidden channels |
+| `flux_n_layers` | 3 | FluxNetwork depth |
+| `proximity_sigma` | 0.05 | Shock proximity decay scale |
+| `curriculum_fraction` | 0.5 | Epochs to reach full rollout |
+| `initial_noise_std` | 0.01 | Initial pushforward noise |
+| `noise_decay_fraction` | 0.75 | Epochs for noise decay |
+
+Uses `ToGridNoCoords` transform, `mse_wasserstein` loss preset, `grid_residual` plot preset.
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -1810,6 +1884,17 @@ For CVAEDeepONet. Auto-selected via `MODEL_LOSS_PRESET`.
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{KL}$$
 
+#### mse_wasserstein Preset
+
+For NeuralFVSolver. Combines grid MSE with Wasserstein distance for sharper shocks. Auto-selected via `MODEL_LOSS_PRESET`.
+
+| Loss | Weight |
+|------|--------|
+| `mse` | 1.0 |
+| `wasserstein` | 0.1 |
+
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{W_1}$$
+
 #### Using Presets
 
 ```python
@@ -1851,6 +1936,7 @@ loss = get_loss("pde_shocks", loss_kwargs={
 | TransformerSeg | IC segments (xs, ks) + coordinates | Full grid | Segment-based encoding + cross-attention density decoder, no trajectory prediction |
 | WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
 | LDDeepONet | Piecewise IC (xs, ks) + target grid (training) | Full grid (generative) | VAE + flow matching with resolution-invariant DeepONet decoder |
+| NeuralFVSolver | Grid IC $(1, n_t, n_x)$ | Full grid | Learned FV time-marching with stencil features + shock proximity |
 
 | **Loss** | **Location** | **Key Physics** | **Use Case** |
 |----------|--------------|-----------------|--------------|

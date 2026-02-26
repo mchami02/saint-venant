@@ -40,6 +40,7 @@ wavefront_learning/
 │   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
 │   ├── shock_aware_deeponet.py      # ShockAwareDeepONet: dual-head DeepONet (solution + shock proximity)
+│   ├── neural_fv_solver.py          # NeuralFVSolver: learned FV time-marching with stencil features + shock proximity
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -189,6 +190,8 @@ wavefront_learning/
   - `LatentDiffusionDeepONet`, `build_ld_deeponet()`
 - **shock_aware_deeponet.py** — Dual-head DeepONet: solution + shock proximity prediction.
   - `ShockAwareDeepONet`, `build_shock_aware_deeponet()`
+- **neural_fv_solver.py** — Learned finite volume time-marching with stencil features, characteristic speeds, and shock proximity.
+  - `DifferentiableShockProximity`, `FluxNetwork`, `NeuralFVSolver`, `build_neural_fv_solver()`
 
 ### Model Base Components (`models/base/`)
 
