@@ -9,9 +9,10 @@ Follow this workflow for every task, without exception:
 1. **Clarify first.** Before doing anything, identify any ambiguities in the task and ask for clarification. Only proceed once the task is clear.
 2. **Create a branch from main.** Always create a new branch from `main` (never from the current branch). Name it descriptively based on the task.
 3. **Implement the change.**
-4. **Run a targeted sanity check.** Design a lightweight command that actually exercises the feature or fix you just implemented. Do NOT blindly run the same default command every time. Think about what flags, arguments, or configuration will verify your change is working. Examples:
-   - Added a new loss? → Use `--loss` to select it and confirm it computes without errors.
-   - Added a new model? → Use `--model` to select it and confirm forward/backward passes work.
+4. **Run a targeted sanity check.** Design a lightweight command that actually exercises the feature or fix you just implemented. Do NOT blindly run the same default command every time. Think about what flags, arguments, or configuration will verify your change is working. **Explicitly pass every relevant flag** — never rely on auto-selection or defaults for the thing you're testing. Examples:
+   - Added a new loss? → Use `--loss` to select it explicitly.
+   - Added a new model? → Use `--model` to select it. If the model has an associated loss, **also pass `--loss`** explicitly to confirm the loss works too.
+   - Added a new model + loss together? → Pass **both** `--model` and `--loss` explicitly.
    - Fixed a bug in high-res evaluation? → Include `--max_high_res` to trigger that code path.
    - Changed data loading? → Use a small `--n_samples` run that hits the new loading logic.
 
@@ -20,7 +21,7 @@ Follow this workflow for every task, without exception:
    cd wavefront_learning
    uv run python train.py --n_samples 50 --epochs 1 --model WaveNO --max_steps 4 --max_test_steps 5 --max_high_res 2 --no_wandb
    ```
-   Always add or change flags so the sanity check covers the code you touched. If the default command doesn't exercise your change at all, it is not a valid sanity check.
+   Always add or change flags so the sanity check covers the code you touched. If the default command doesn't exercise your change at all, it is not a valid sanity check. **Do not rely on auto-selected presets** (`MODEL_LOSS_PRESET`, `MODEL_PLOT_PRESET`) — always pass the flags explicitly so the sanity check proves the feature works end-to-end.
 5. **Analyze the result:**
    - **Pass** → push the branch. Before creating the pull request, check for merge conflicts with `main` by running `git merge --no-commit --no-ff main`. If there are conflicts, resolve them locally, commit the merge, and push. Then create a pull request with a clear description of what was done, and stop.
    - **Fail** → diagnose, fix, and re-run. Repeat at most 3 times.
