@@ -15,6 +15,7 @@ from losses.boundary import BoundaryLoss
 from losses.cell_avg_mse import CellAverageMSELoss
 from losses.collision import CollisionLoss
 from losses.conservation import ConservationLoss
+from losses.entropy import EntropyConditionLoss
 from losses.existence_regularization import ICAnchoringLoss
 from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
@@ -37,6 +38,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "rh_residual": RHResidualLoss,
     "pde_residual": PDEResidualLoss,
     "pde_shock_residual": PDEShockResidualLoss,
+    "entropy": EntropyConditionLoss,
     "boundary": BoundaryLoss,
     "collision": CollisionLoss,
     "ic_anchoring": ICAnchoringLoss,
@@ -285,6 +287,10 @@ def get_loss(loss_name: str, **kwargs) -> nn.Module:
 
     # Check if it's an individual loss
     if loss_name in LOSSES:
+        # Extract per-loss kwargs if loss_kwargs dict was passed
+        loss_kwargs = kwargs.pop("loss_kwargs", None)
+        if loss_kwargs and loss_name in loss_kwargs:
+            kwargs.update(loss_kwargs[loss_name])
         return LOSSES[loss_name](**kwargs)
 
     raise ValueError(
@@ -322,6 +328,9 @@ def create_loss_from_args(args) -> nn.Module:
             "dx": args.dx,
         }
         loss_kwargs["conservation"] = {
+            "dx": args.dx,
+        }
+        loss_kwargs["entropy"] = {
             "dx": args.dx,
         }
 

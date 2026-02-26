@@ -22,6 +22,7 @@ Physics Losses:
 - PDEResidualLoss: PDE conservation in smooth regions
 - PDEShockResidualLoss: PDE residual on GT, penalizing unpredicted shocks
 - RHResidualLoss: Rankine-Hugoniot residual from sampled densities
+- EntropyConditionLoss: Lax entropy condition on GT for shock detection
 
 Utilities:
 - flux: Centralized flux functions (greenshields_flux, compute_shock_speed)
@@ -33,6 +34,7 @@ from .cell_avg_mse import CellAverageMSELoss
 from .boundary import BoundaryLoss
 from .collision import CollisionLoss
 from .conservation import ConservationLoss
+from .entropy import EntropyConditionLoss
 from .existence_regularization import ICAnchoringLoss
 from .flow_matching import FlowMatchingLoss
 from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_derivative
@@ -72,6 +74,7 @@ __all__ = [
     "PDEResidualLoss",
     "PDEShockResidualLoss",
     "RHResidualLoss",
+    "EntropyConditionLoss",
     # Utilities
     "greenshields_flux",
     "greenshields_flux_derivative",

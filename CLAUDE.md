@@ -9,13 +9,20 @@ Follow this workflow for every task, without exception:
 1. **Clarify first.** Before doing anything, identify any ambiguities in the task and ask for clarification. Only proceed once the task is clear.
 2. **Create a branch from main.** Always create a new branch from `main` (never from the current branch). Name it descriptively based on the task.
 3. **Implement the change.**
-4. **Run the sanity check.** From the `wavefront_learning/` directory, execute:
+4. **Run a targeted sanity check.** Design a lightweight command that actually exercises the feature or fix you just implemented. Do NOT blindly run the same default command every time. Think about what flags, arguments, or configuration will verify your change is working. Examples:
+   - Added a new loss? → Use `--loss` to select it and confirm it computes without errors.
+   - Added a new model? → Use `--model` to select it and confirm forward/backward passes work.
+   - Fixed a bug in high-res evaluation? → Include `--max_high_res` to trigger that code path.
+   - Changed data loading? → Use a small `--n_samples` run that hits the new loading logic.
+
+   The base template (adjust as needed):
    ```bash
+   cd wavefront_learning
    uv run python train.py --n_samples 50 --epochs 1 --model WaveNO --max_steps 4 --max_test_steps 5 --max_high_res 2 --no_wandb
    ```
-   This is a cheap check on a small synthetic case, not a full experiment.
+   Always add or change flags so the sanity check covers the code you touched. If the default command doesn't exercise your change at all, it is not a valid sanity check.
 5. **Analyze the result:**
-   - **Pass** → push the branch, create a pull request with a clear description of what was done, then stop.
+   - **Pass** → push the branch. Before creating the pull request, check for merge conflicts with `main` by running `git merge --no-commit --no-ff main`. If there are conflicts, resolve them locally, commit the merge, and push. Then create a pull request with a clear description of what was done, and stop.
    - **Fail** → diagnose, fix, and re-run. Repeat at most 3 times.
    - **Still failing after 3 attempts** → stop. Write a clear summary of what was tried and what the suspected remaining issue is. Leave the branch as-is without pushing.
 6. **Post-PR fixes.** If review comments or CI checks flag issues, fix them on the same branch and push. Repeat until the PR is clean.

@@ -79,6 +79,7 @@ wavefront_learning/
 │   ├── vae_reconstruction.py     # VAEReconstructionLoss (MSE + beta*KL with warmup)
 │   ├── flow_matching.py          # FlowMatchingLoss (velocity MSE for flow matching)
 │   ├── cell_avg_mse.py           # CellAverageMSELoss (FV-consistent cell-average MSE)
+│   ├── entropy.py                # EntropyConditionLoss (Lax entropy condition shock detector)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -224,6 +225,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **vae_reconstruction.py** — `VAEReconstructionLoss` (MSE + beta*KL with linear warmup)
 - **flow_matching.py** — `FlowMatchingLoss` (velocity MSE for OT flow matching)
 - **cell_avg_mse.py** — `CellAverageMSELoss` (cell-average MSE for FV-consistent training with `CellSamplingTransform`)
+- **entropy.py** — `EntropyConditionLoss` (Lax entropy condition on GT grid: miss + false-positive penalty for predicted trajectories)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)
