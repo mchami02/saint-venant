@@ -51,6 +51,9 @@ def upload_grids(
     flux: str = DEFAULT_FLUX,
     repo_id: str = DEFAULT_REPO,
     equation: str = "LWR",
+    ic_xs: np.ndarray | None = None,
+    ic_ks: np.ndarray | None = None,
+    ic_v_ks: np.ndarray | None = None,
 ) -> None:
     """Upload grids to the shared mchami/grids repository.
 
@@ -67,6 +70,9 @@ def upload_grids(
         flux: Flux name (default: Greenshields).
         repo_id: HuggingFace repo ID.
         equation: Equation system ("LWR" or "ARZ").
+        ic_xs: IC breakpoint positions, shape (n_samples, k+1).
+        ic_ks: IC piece values, shape (n_samples, k).
+        ic_v_ks: IC velocity piece values for ARZ, shape (n_samples, k).
     """
     if equation == "ARZ":
         assert grids.shape[1:] == (2, nt, nx), (
@@ -82,8 +88,15 @@ def upload_grids(
     path_prefix = "arz" if equation == "ARZ" else "lwr"
     data_path = f"{path_prefix}/{config_id}.npz"
 
-    # 1) Save grids locally
-    np.savez_compressed("tmp_grids.npz", grids=grids)
+    # 1) Save grids and optional IC params locally
+    save_dict = {"grids": grids}
+    if ic_xs is not None:
+        save_dict["ic_xs"] = ic_xs
+    if ic_ks is not None:
+        save_dict["ic_ks"] = ic_ks
+    if ic_v_ks is not None:
+        save_dict["ic_v_ks"] = ic_v_ks
+    np.savez_compressed("tmp_grids.npz", **save_dict)
 
     # 2) Upload/overwrite only this file
     api.upload_file(
@@ -163,7 +176,7 @@ def download_grids(
     flux: str = DEFAULT_FLUX,
     repo_id: str = DEFAULT_REPO,
     equation: str = "LWR",
-) -> np.ndarray | None:
+) -> dict | None:
     """Download grids from the shared mchami/grids repository.
 
     Args:
@@ -179,8 +192,8 @@ def download_grids(
         equation: Equation system ("LWR" or "ARZ").
 
     Returns:
-        Grid data of shape (n_samples, nt, nx) for LWR or
-        (n_samples, 2, nt, nx) for ARZ, or None if not found.
+        Dict with keys "grids", "ic_xs", "ic_ks", "ic_v_ks" (last three
+        may be None for old cached data), or None if not found.
     """
     config_id = _make_config_id(solver, flux, nx, nt, dx, dt, max_steps, only_shocks)
 
@@ -196,17 +209,26 @@ def download_grids(
 
     file_path = row.iloc[0]["file"]
     npz_local = hf_hub_download(repo_id, file_path, repo_type="dataset")
-    grids = np.load(npz_local)["grids"]
+    data = np.load(npz_local)
 
+    grids = data["grids"]
     if grids is None:
         raise ValueError(f"No grids found for config {config_id}")
-    return grids
+
+    return {
+        "grids": grids,
+        "ic_xs": data["ic_xs"] if "ic_xs" in data else None,
+        "ic_ks": data["ic_ks"] if "ic_ks" in data else None,
+        "ic_v_ks": data["ic_v_ks"] if "ic_v_ks" in data else None,
+    }
 
 
 if __name__ == "__main__":
     print("Testing wavefront data loading from shared repo...")
     downloaded = download_grids(nx=50, nt=250, dx=0.25, dt=0.05, max_steps=3)
     if downloaded is not None:
-        print(f"Downloaded grids shape: {downloaded.shape}")
+        print(f"Downloaded grids shape: {downloaded['grids'].shape}")
+        has_ic = downloaded["ic_xs"] is not None
+        print(f"IC params available: {has_ic}")
     else:
         print("No grids found for this config")
