@@ -43,6 +43,7 @@ class AutoregressiveFNO(nn.Module):
     def __init__(self, **fno_kwargs):
         super().__init__()
         self.fno = FNO(**fno_kwargs)
+        self.teacher_forcing_ratio = 0.0
 
     def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         grid_input = x["grid_input"]  # (B, 1, nt, nx)
@@ -52,11 +53,17 @@ class AutoregressiveFNO(nn.Module):
         state = grid_input[:, :, 0, :]  # (B, 1, nx) — initial condition
         dt_channel = dt.view(B, 1, 1).expand(B, 1, nx)
 
+        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        target_grid = x.get("target_grid") if tf_ratio > 0 else None
+
         outputs = [state]
-        for _ in range(nt - 1):
+        for t in range(nt - 1):
             fno_input = torch.cat([state, dt_channel], dim=1)  # (B, 2, nx)
             state = state + self.fno(fno_input)  # (B, 1, nx)
             outputs.append(state)
+            # Replace input to NEXT step with GT stochastically
+            if target_grid is not None and torch.rand(1).item() < tf_ratio:
+                state = target_grid[:, :, t + 1, :]
 
         return {"output_grid": torch.stack(outputs, dim=2)}  # (B, 1, nt, nx)
 
@@ -198,6 +205,7 @@ class AutoregressiveRealFNO(nn.Module):
     def __init__(self, **fno_kwargs):
         super().__init__()
         self.fno = RealFNO1d(**fno_kwargs)
+        self.teacher_forcing_ratio = 0.0
 
     def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         grid_input = x["grid_input"]  # (B, 1, nt, nx)
@@ -207,11 +215,17 @@ class AutoregressiveRealFNO(nn.Module):
         state = grid_input[:, :, 0, :]  # (B, 1, nx) — initial condition
         dt_channel = dt.view(B, 1, 1).expand(B, 1, nx)
 
+        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        target_grid = x.get("target_grid") if tf_ratio > 0 else None
+
         outputs = [state]
-        for _ in range(nt - 1):
+        for t in range(nt - 1):
             fno_input = torch.cat([state, dt_channel], dim=1)  # (B, 2, nx)
             state = state + self.fno(fno_input)  # (B, 1, nx)
             outputs.append(state)
+            # Replace input to NEXT step with GT stochastically
+            if target_grid is not None and torch.rand(1).item() < tf_ratio:
+                state = target_grid[:, :, t + 1, :]
 
         return {"output_grid": torch.stack(outputs, dim=2)}  # (B, 1, nt, nx)
 

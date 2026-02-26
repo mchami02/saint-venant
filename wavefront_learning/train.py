@@ -188,6 +188,20 @@ def parse_args() -> argparse.Namespace:
         help="Dropout probability for WaveNO (default: 0.05)",
     )
 
+    # Teacher forcing for autoregressive models
+    parser.add_argument(
+        "--teacher_forcing",
+        type=float,
+        default=0.0,
+        help="Initial teacher forcing ratio for autoregressive models (default: 0.0)",
+    )
+    parser.add_argument(
+        "--tf_decay_fraction",
+        type=float,
+        default=0.25,
+        help="Fraction of total epochs over which teacher forcing decays to 0 (default: 0.25)",
+    )
+
     # ShockAwareDeepONet parameters
     parser.add_argument(
         "--proximity_sigma",
@@ -286,15 +300,39 @@ def train_model(
         optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
     )
 
+    # Build list of per-epoch callbacks
+    callbacks = []
+
     # KL annealing callback for CVAE models
-    epoch_callback = None
     if hasattr(loss_fn, "set_kl_beta"):
         kl_warmup_epochs = max(1, int(0.2 * args.epochs))
         kl_beta_target = getattr(args, "kl_beta", 1.0)
 
-        def epoch_callback(epoch):
+        def _kl_callback(epoch):
             progress = min(1.0, (epoch + 1) / kl_warmup_epochs)
             loss_fn.set_kl_beta(kl_beta_target * progress)
+
+        callbacks.append(_kl_callback)
+
+    # Teacher forcing decay for autoregressive models
+    tf_initial = getattr(args, "teacher_forcing", 0.0)
+    if tf_initial > 0 and hasattr(model, "teacher_forcing_ratio"):
+        decay_epochs = max(1, int(args.tf_decay_fraction * args.epochs))
+
+        def _tf_callback(epoch):
+            ratio = tf_initial * max(0.0, 1.0 - epoch / decay_epochs)
+            model.teacher_forcing_ratio = ratio
+            logger.log_metrics({"train/teacher_forcing_ratio": ratio})
+
+        callbacks.append(_tf_callback)
+
+    # Compose callbacks into a single function
+    epoch_callback = None
+    if callbacks:
+
+        def epoch_callback(epoch):
+            for cb in callbacks:
+                cb(epoch)
 
     best_val_loss = _run_training_loop(
         model, train_loader, val_loader,
