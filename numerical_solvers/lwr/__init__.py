@@ -120,6 +120,10 @@ def generate_n(
         for ic in ics:
             ic.ks.sort()
 
+    # Capture IC params after sorting (so ks reflect the actual IC used)
+    ic_xs = np.array([ic.xs.tolist() for ic in ics])  # (n, k+1)
+    ic_ks = np.array([ic.ks.tolist() for ic in ics])  # (n, k)
+
     problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=ics, flow=Greenshield())
     rho = problem.solve(
         LaxHopf,
@@ -131,7 +135,16 @@ def generate_n(
     x = torch.arange(nx, dtype=torch.float64) * dx
     t = torch.arange(nt, dtype=torch.float64) * dt
 
-    return {"rho": rho, "x": x, "t": t, "dx": dx, "dt": dt, "nt": nt}
+    return {
+        "rho": rho,
+        "x": x,
+        "t": t,
+        "dx": dx,
+        "dt": dt,
+        "nt": nt,
+        "ic_xs": ic_xs,
+        "ic_ks": ic_ks,
+    }
 
 
 __all__ = [

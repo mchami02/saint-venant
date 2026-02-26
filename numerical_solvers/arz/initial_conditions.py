@@ -82,7 +82,7 @@ def random_piecewise(
     rng: torch.Generator,
     rho_range: tuple[float, float] = (0.1, 1.0),
     v_range: tuple[float, float] = (0.0, 1.0),
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, dict]:
     """Generate a random k-piecewise-constant (rho0, v0).
 
     Parameters
@@ -91,8 +91,15 @@ def random_piecewise(
     k : number of constant pieces.
     rng : PyTorch random generator for reproducibility.
     rho_range, v_range : (min, max) for sampled values.
+
+    Returns
+    -------
+    rho0 : 1-D tensor — initial density.
+    v0 : 1-D tensor — initial velocity.
+    ic_params : dict with keys "xs", "rho_ks", "v_ks".
     """
     x_min, x_max = x.min().item(), x.max().item()
+    dx = (x[1] - x[0]).item() if len(x) > 1 else 0.0
     L = x_max - x_min
 
     # Random breakpoints (sorted, within domain)
@@ -110,4 +117,13 @@ def random_piecewise(
     rho_steps = [(b, rv.item()) for b, rv in zip(breaks, rho_vals, strict=False)]
     v_steps = [(b, vv.item()) for b, vv in zip(breaks, v_vals, strict=False)]
 
-    return from_steps(x, rho_steps=rho_steps, v_steps=v_steps)
+    # Build IC params: actual domain boundaries (not sentinel)
+    domain_right = x_max + dx
+    ic_params = {
+        "xs": [x_min] + breaks[:-1] + [domain_right],  # k+1 values
+        "rho_ks": rho_vals.tolist(),  # k values
+        "v_ks": v_vals.tolist(),  # k values
+    }
+
+    rho0, v0 = from_steps(x, rho_steps=rho_steps, v_steps=v_steps)
+    return rho0, v0, ic_params
