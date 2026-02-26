@@ -71,21 +71,7 @@ PLOTS: dict[str, callable] = {
 # Presets for common configurations
 # Each preset lists which plots to generate
 PLOT_PRESETS: dict[str, list[str]] = {
-    "traj_net": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",  # Predicted grid heatmap
-        "mse_error",
-        "pde_residual",
-    ],
-    "grid_only": [
-        "ground_truth",
-        "pred",  # Predicted grid heatmap
-        "mse_error",
-        "pde_residual",
-    ],
-    "traj_transformer": [
+    "traj_residual": [
         "ground_truth",
         "gt_traj",
         "pred_traj",
@@ -93,32 +79,24 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "mse_error",
         "pde_residual",
     ],
-    "classifier_traj_transformer": [
+    "grid_residual": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "pde_residual",
+    ],
+    "traj_existence": [
+        "ground_truth",
         "gt_traj",
         "pred_traj",
         "pred",
         "mse_error",
         "existence",
     ],
-    "no_traj_transformer": [
+    "grid_minimal": [
         "ground_truth",
         "pred",
         "mse_error",
-        "pde_residual",
-    ],
-    "classifier_all_traj_transformer": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "biased_classifier_traj_transformer": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
     ],
     "charno": [
         "ground_truth",
@@ -131,92 +109,13 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "selection_entropy",
         "local_densities",
     ],
-    "waveno": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "waveno_cls": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "waveno_local": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "waveno_indep_traj": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "waveno_disc": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "ctt_biased": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "ctt_seg_physics": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "ctt_film": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "ctt_seg": [
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "transformer_seg": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-    ],
-    "wavefront_model": [
+    "wavefront": [
         "ground_truth",
         "wave_pattern",
         "pred",
         "mse_error",
     ],
-    "ld_deeponet": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "cvae_deeponet": [
+    "cvae": [
         "ground_truth",
         "pred",
         "mse_error",
@@ -250,14 +149,14 @@ def plot(
         logger: WandbLogger instance.
         epoch: Current epoch.
         mode: "train" or "val".
-        preset: Preset name (shock_net, hybrid) or None for auto-detect.
+        preset: Preset name (e.g. grid_residual, traj_residual) or None for auto-detect.
     """
     if logger is None:
         return
 
     # Auto-detect preset if not specified
     if preset is None:
-        preset = "hybrid" if traj_data.get("is_hybrid", False) else "shock_net"
+        preset = "grid_residual"
 
     if preset not in PLOT_PRESETS:
         raise ValueError(
