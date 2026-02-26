@@ -138,15 +138,16 @@ class SpectralConv1d(nn.Module):
 
 
 class FNO1dBlock(nn.Module):
-    """Single FNO layer: spectral conv + linear skip + GELU."""
+    """Single FNO layer: spectral conv + linear skip + GroupNorm + GELU."""
 
     def __init__(self, channels: int, n_modes: int):
         super().__init__()
         self.spectral = SpectralConv1d(channels, channels, n_modes)
         self.linear = nn.Conv1d(channels, channels, kernel_size=1)
+        self.norm = nn.GroupNorm(1, channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.gelu(self.spectral(x) + self.linear(x))
+        return torch.nn.functional.gelu(self.norm(self.spectral(x) + self.linear(x)))
 
 
 class RealFNO1d(nn.Module):

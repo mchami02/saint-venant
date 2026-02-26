@@ -80,8 +80,11 @@ def train_step(
 
     # Guard against NaN/Inf loss — skip batch to prevent corrupting weights
     if torch.isnan(loss) or torch.isinf(loss):
+        import warnings
+
+        warnings.warn("NaN/Inf loss detected, skipping batch", stacklevel=2)
         optimizer.zero_grad()
-        return loss.item(), detach_output(pred), components
+        return 0.0, detach_output(pred), components
 
     # Backward pass
     loss.backward()
