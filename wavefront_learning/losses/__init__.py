@@ -50,6 +50,7 @@ from .pde_residual import (
 from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .selection_supervision import SelectionSupervisionLoss
+from .shock_proximity import ShockProximityLoss
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
 from .vae_reconstruction import VAEReconstructionLoss
@@ -91,4 +92,6 @@ __all__ = [
     "WassersteinLoss",
     "ConservationLoss",
     "SelectionSupervisionLoss",
+    # Shock proximity loss
+    "ShockProximityLoss",
 ]

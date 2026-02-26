@@ -134,6 +134,60 @@ def get_arz_dataset(
     return grids, result["ic_xs"], result["ic_rho_ks"], result["ic_v_ks"]
 
 
+def compute_shock_proximity(
+    gt_grid: np.ndarray,
+    dx: float,
+    sigma: float,
+) -> torch.Tensor:
+    """Compute shock proximity field from a ground truth density grid.
+
+    For each cell, computes the distance to the nearest entropy-violating
+    shock interface, then maps to a proximity value via exp(-dist / sigma).
+
+    Args:
+        gt_grid: Ground truth density grid of shape (nt, nx).
+        dx: Spatial step size.
+        sigma: Length scale for the exponential proximity decay.
+
+    Returns:
+        Proximity field of shape (1, nt, nx) with values in [0, 1].
+    """
+    nt, nx = gt_grid.shape
+
+    # Detect shocks via Lax entropy condition at each interface
+    rho_L = gt_grid[:, :-1]  # (nt, nx-1)
+    rho_R = gt_grid[:, 1:]  # (nt, nx-1)
+
+    # Greenshields: characteristic speed = 1 - 2*rho
+    char_L = 1.0 - 2.0 * rho_L
+    char_R = 1.0 - 2.0 * rho_R
+    # Rankine-Hugoniot shock speed = 1 - rho_L - rho_R
+    s = 1.0 - rho_L - rho_R
+
+    # Lax entropy condition: char_L > s > char_R
+    is_shock = (char_L > s) & (s > char_R)  # (nt, nx-1)
+
+    # Interface midpoints: interface j is between cell j and j+1
+    x_interfaces = np.arange(1, nx) * dx  # (nx-1,)
+
+    # Cell centers
+    x_cells = (np.arange(nx) + 0.5) * dx  # (nx,)
+
+    proximity = np.zeros((nt, nx), dtype=np.float32)
+
+    for t in range(nt):
+        shock_mask = is_shock[t]  # (nx-1,)
+        if not shock_mask.any():
+            continue
+        shock_positions = x_interfaces[shock_mask]  # (n_shocks,)
+        # Min distance from each cell center to any shock interface
+        dists = np.abs(x_cells[:, None] - shock_positions[None, :])  # (nx, n_shocks)
+        min_dist = dists.min(axis=1)  # (nx,)
+        proximity[t] = np.exp(-min_dist / sigma)
+
+    return torch.from_numpy(proximity).unsqueeze(0)  # (1, nt, nx)
+
+
 def _group_consecutive_diff_indices(
     ic_grid: np.ndarray,
     dx: float,
@@ -362,6 +416,7 @@ def preprocess_wavefront_data(
     ic_ks_all: np.ndarray | None = None,
     ic_n_pieces_all: np.ndarray | None = None,
     ic_v_ks_all: np.ndarray | None = None,
+    proximity_sigma: float | None = None,
 ) -> list[tuple[dict, torch.Tensor]]:
     """Preprocess grids for wavefront learning.
 
@@ -442,6 +497,12 @@ def preprocess_wavefront_data(
             "dt": torch.tensor(dt, dtype=torch.float32),
         }
 
+        # Compute shock proximity ground truth if requested
+        if proximity_sigma is not None and equation == "LWR":
+            input_data["shock_proximity"] = compute_shock_proximity(
+                grids[idx], dx, proximity_sigma
+            )
+
         # For ARZ, also handle velocity IC
         if equation == "ARZ":
             if has_ic_params and ic_v_ks_all is not None:
@@ -481,6 +542,7 @@ def get_wavefront_data(
     upload_to_hf: bool = True,
     equation: str = "LWR",
     equation_kwargs: dict | None = None,
+    proximity_sigma: float | None = None,
 ) -> list[tuple[dict, torch.Tensor]]:
     """Get wavefront data, downloading from HuggingFace or generating locally.
 
@@ -718,6 +780,7 @@ def get_wavefront_data(
         ic_ks_all=ic_ks_all,
         ic_n_pieces_all=n_pieces_all,
         ic_v_ks_all=ic_v_ks_all,
+        proximity_sigma=proximity_sigma,
     )
 
     return processed

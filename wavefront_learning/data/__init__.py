@@ -111,6 +111,7 @@ def get_wavefront_datasets(
     equation_kwargs: dict | None = None,
     cell_sampling_k: int = 0,
     transform_override: str | None = None,
+    proximity_sigma: float | None = None,
 ) -> tuple[WavefrontDataset, WavefrontDataset, WavefrontDataset]:
     """Get train, val, and test datasets for wavefront learning.
 
@@ -161,6 +162,7 @@ def get_wavefront_datasets(
         max_discontinuities=max_discontinuities,
         equation=equation,
         equation_kwargs=equation_kwargs,
+        proximity_sigma=proximity_sigma,
     )
 
     # Resolve transform: CLI override takes priority over per-model default

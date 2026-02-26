@@ -21,6 +21,7 @@ from models.autoregressive_fno import (
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
+from models.shock_aware_deeponet import build_shock_aware_deeponet
 from models.shock_trajectory_net import build_shock_net
 from models.traj_deeponet import (
     build_classifier_traj_deeponet,
@@ -79,6 +80,7 @@ MODELS = {
     "WaveFrontModel": build_wavefront_model,
     "LDDeepONet": build_ld_deeponet,
     "CVAEDeepONet": build_cvae_deeponet,
+    "ShockAwareDeepONet": build_shock_aware_deeponet,
 }
 
 # Registry of per-model transforms (string key into TRANSFORMS in data.py).
@@ -110,6 +112,7 @@ MODEL_TRANSFORM = {
     "WaveFrontModel": None,
     "LDDeepONet": "LDDeepONet",
     "CVAEDeepONet": "ToGridInput",
+    "ShockAwareDeepONet": "ToGridInput",
 }
 
 

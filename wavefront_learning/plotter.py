@@ -36,6 +36,7 @@ from plotting import (
     plot_selection_entropy,
     plot_selection_weights,
     plot_trajectory_vs_analytical,
+    plot_shock_proximity,
     plot_wave_pattern,
     plot_winning_segment,
 )
@@ -66,6 +67,7 @@ PLOTS: dict[str, callable] = {
     "arz_ground_truth": plot_arz_ground_truth,
     "arz_pred": plot_arz_pred,
     "arz_mse_error": plot_arz_mse_error,
+    "shock_proximity": plot_shock_proximity,
 }
 
 # Presets for common configurations
@@ -126,6 +128,12 @@ PLOT_PRESETS: dict[str, list[str]] = {
         "arz_ground_truth",
         "arz_pred",
         "arz_mse_error",
+    ],
+    "shock_proximity": [
+        "ground_truth",
+        "pred",
+        "mse_error",
+        "shock_proximity",
     ],
 }
 

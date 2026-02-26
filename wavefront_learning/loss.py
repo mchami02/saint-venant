@@ -20,6 +20,7 @@ from losses.existence_regularization import ICAnchoringLoss
 from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
 from losses.kl_divergence import KLDivergenceLoss
+from losses.shock_proximity import ShockProximityLoss
 from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
@@ -52,6 +53,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "vae_reconstruction": VAEReconstructionLoss,
     "flow_matching": FlowMatchingLoss,
     "kl_divergence": KLDivergenceLoss,
+    "shock_proximity": ShockProximityLoss,
 }
 
 # Presets for common configurations
@@ -77,6 +79,9 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "cvae": [
         ("mse", 1.0),
         ("kl_divergence", 1.0, {"free_bits": 0.01}),
+    ],
+    "shock_proximity": [
+        ("shock_proximity", 1.0),
     ],
 }
 
@@ -332,6 +337,12 @@ def create_loss_from_args(args) -> nn.Module:
         }
         loss_kwargs["entropy"] = {
             "dx": args.dx,
+        }
+
+    # Wire proximity_weight for shock_proximity loss
+    if hasattr(args, "proximity_weight"):
+        loss_kwargs["shock_proximity"] = {
+            "proximity_weight": args.proximity_weight,
         }
 
     return get_loss(args.loss, loss_kwargs=loss_kwargs)

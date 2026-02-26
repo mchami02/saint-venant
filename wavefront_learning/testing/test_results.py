@@ -93,6 +93,11 @@ def collect_samples(
         for key in ("xs", "ks", "pieces_mask"):
             if key in batch_input:
                 samples[key] = batch_input[key][:num_samples].detach().cpu().numpy()
+        if "shock_proximity" in batch_input:
+            prox_gt = batch_input["shock_proximity"][:num_samples].detach().cpu().numpy()
+            if prox_gt.ndim == 4 and prox_gt.shape[1] == 1:
+                prox_gt = prox_gt.squeeze(1)
+            samples["shock_proximity_gt"] = prox_gt
 
     # Add target (ground truth grid)
     grids = batch_target[:num_samples].detach().cpu().numpy()
@@ -246,6 +251,7 @@ def eval_res(
         equation=getattr(args, "equation", "LWR"),
         equation_kwargs=_get_equation_kwargs(args),
         cell_sampling_k=cell_sampling_k,
+        proximity_sigma=getattr(args, "proximity_sigma", None),
     )
 
     high_res_loader = DataLoader(
@@ -355,6 +361,7 @@ def eval_steps(
             equation=getattr(args, "equation", "LWR"),
             equation_kwargs=_get_equation_kwargs(args),
             cell_sampling_k=cell_sampling_k,
+            proximity_sigma=getattr(args, "proximity_sigma", None),
         )
 
         step_loader = DataLoader(
