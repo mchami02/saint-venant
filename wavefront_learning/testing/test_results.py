@@ -252,6 +252,7 @@ def eval_res(
         equation_kwargs=_get_equation_kwargs(args),
         cell_sampling_k=cell_sampling_k,
         proximity_sigma=getattr(args, "proximity_sigma", None),
+        min_component_size=getattr(args, "min_component_size", 5),
     )
 
     high_res_loader = DataLoader(
@@ -362,6 +363,7 @@ def eval_steps(
             equation_kwargs=_get_equation_kwargs(args),
             cell_sampling_k=cell_sampling_k,
             proximity_sigma=getattr(args, "proximity_sigma", None),
+            min_component_size=getattr(args, "min_component_size", 5),
         )
 
         step_loader = DataLoader(

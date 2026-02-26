@@ -26,6 +26,7 @@ Physics Losses:
 
 Utilities:
 - flux: Centralized flux functions (greenshields_flux, compute_shock_speed)
+- shock_utils: Connected component filtering for shock masks
 """
 
 from .acceleration import AccelerationLoss, compute_acceleration
@@ -51,6 +52,7 @@ from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .selection_supervision import SelectionSupervisionLoss
 from .shock_proximity import ShockProximityLoss
+from .shock_utils import filter_small_components
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
 from .vae_reconstruction import VAEReconstructionLoss
@@ -94,4 +96,6 @@ __all__ = [
     "SelectionSupervisionLoss",
     # Shock proximity loss
     "ShockProximityLoss",
+    # Shock utils
+    "filter_small_components",
 ]

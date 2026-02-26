@@ -209,6 +209,12 @@ def parse_args() -> argparse.Namespace:
         default=0.05,
         help="Length scale for shock proximity decay (default: 0.05)",
     )
+    parser.add_argument(
+        "--min_component_size",
+        type=int,
+        default=5,
+        help="Min connected component size for shock detection (0 to disable)",
+    )
 
     # Cell sampling
     parser.add_argument(
@@ -525,6 +531,7 @@ def main():
         cell_sampling_k=args.cell_sampling_k,
         transform_override=args.transform,
         proximity_sigma=args.proximity_sigma,
+        min_component_size=args.min_component_size,
     )
 
     train_loader = DataLoader(

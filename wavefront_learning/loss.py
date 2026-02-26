@@ -65,7 +65,6 @@ LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
     "pde_shocks": [
         ("mse", 1.0),
         ("pde_shock_residual", 1.0),
-        ("rh_residual", 1.0, {"mode": "gt"}),
     ],
     "cell_avg_mse": [
         ("cell_avg_mse", 1.0),
@@ -338,6 +337,7 @@ def create_loss_from_args(args) -> nn.Module:
         }
         loss_kwargs["entropy"] = {
             "dx": args.dx,
+            "min_component_size": getattr(args, "min_component_size", 5),
         }
 
     return get_loss(args.loss, loss_kwargs=loss_kwargs)
