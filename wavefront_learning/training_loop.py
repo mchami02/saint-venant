@@ -6,6 +6,7 @@ Extracted from train.py to keep orchestration separate from loop mechanics.
 import numpy as np
 import torch
 import torch.nn as nn
+from configs.training_defaults import TRAINING_DEFAULTS
 from logger import WandbLogger, log_values
 from metrics import compute_metrics, extract_grid_prediction
 from model import save_model
@@ -64,9 +65,10 @@ def train_step(
     batch_target = batch_target.to(device)
 
     # Inject target for models that need it during training (CVAE, teacher forcing)
-    needs_target = getattr(model, "needs_target_input", False) or getattr(
-        model, "teacher_forcing_ratio", 0.0
-    ) > 0
+    needs_target = (
+        getattr(model, "needs_target_input", False)
+        or getattr(model, "teacher_forcing_ratio", 0.0) > 0
+    )
     if needs_target and isinstance(batch_input, dict):
         batch_input["target_grid"] = batch_target
 
@@ -85,7 +87,9 @@ def train_step(
 
     # Backward pass
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+    torch.nn.utils.clip_grad_norm_(
+        model.parameters(), max_norm=TRAINING_DEFAULTS.grad_clip_max_norm
+    )
     optimizer.step()
 
     return loss.item(), detach_output(pred), components
@@ -234,7 +238,7 @@ def _run_training_loop(
     plot_preset: str | None,
     description: str = "Training",
     epoch_offset: int = 0,
-    patience: int = 15,
+    patience: int = TRAINING_DEFAULTS.early_stopping_patience,
     epoch_callback=None,
     extra_log: dict | None = None,
 ) -> float:
@@ -291,11 +295,11 @@ def _run_training_loop(
         log_values(logger, train_metrics, ep, "train", "metrics")
         log_values(logger, val_metrics, ep, "val", "metrics")
 
-        if (epoch + 1) % 5 == 0:
+        if (epoch + 1) % TRAINING_DEFAULTS.plot_every_n_epochs == 0:
             plot(train_samples, grid_config, logger, ep, "train", preset=plot_preset)
             plot(val_samples, grid_config, logger, ep, "val", preset=plot_preset)
 
-        if val_loss < best_val_loss * 0.99:
+        if val_loss < best_val_loss * TRAINING_DEFAULTS.early_stopping_threshold:
             best_val_loss = val_loss
             patience_counter = 0
             save_model(model, save_path, model_config, ep, logger=logger)

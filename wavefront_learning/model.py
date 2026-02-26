@@ -4,24 +4,24 @@ from argparse import Namespace
 
 import torch
 import torch.nn as nn
+from models.autoregressive_fno import (
+    build_autoregressive_fno,
+    build_autoregressive_real_fno,
+)
+from models.autoregressive_waveno import build_autoregressive_waveno
 from models.charno import build_charno
-from models.cvae_deeponet import build_cvae_deeponet
 from models.ctt_seg import build_ctt_seg
-from models.transformer_seg import build_transformer_seg
+from models.cvae_deeponet import build_cvae_deeponet
 from models.deeponet import build_deeponet
 from models.encoder_decoder import (
     build_ecarz,
     build_encoder_decoder,
     build_encoder_decoder_cross,
 )
-from models.autoregressive_fno import (
-    build_autoregressive_fno,
-    build_autoregressive_real_fno,
-)
-from models.autoregressive_waveno import build_autoregressive_waveno
 from models.fno_wrapper import build_fno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
+from models.neural_fv_solver import build_neural_fv_solver
 from models.shock_aware_deeponet import build_shock_aware_deeponet
 from models.shock_trajectory_net import build_shock_net
 from models.traj_deeponet import (
@@ -39,7 +39,7 @@ from models.traj_transformer import (
     build_no_traj_transformer,
     build_traj_transformer,
 )
-from models.neural_fv_solver import build_neural_fv_solver
+from models.transformer_seg import build_transformer_seg
 from models.wavefront_model import build_wavefront_model
 from models.waveno import (
     build_shock_aware_waveno,
@@ -87,41 +87,6 @@ MODELS = {
     "CVAEDeepONet": build_cvae_deeponet,
     "ShockAwareDeepONet": build_shock_aware_deeponet,
     "NeuralFVSolver": build_neural_fv_solver,
-}
-
-# Registry of per-model transforms (string key into TRANSFORMS in data.py).
-# Models not listed here default to None (no transform).
-MODEL_TRANSFORM = {
-    "FNO": "ToGridNoCoords",
-    "AutoregressiveFNO": "ToGridNoCoords",
-    "AutoregressiveRealFNO": "ToGridNoCoords",
-    "AutoregressiveWaveNO": "ToGridNoCoords",
-    "DeepONet": "ToGridInput",
-    "EncoderDecoder": "ToGridInput",
-    "EncoderDecoderCross": "ToGridInput",
-    "ECARZ": "ToGridInput",
-    "TrajTransformer": None,
-    "ClassifierTrajTransformer": None,
-    "ClassifierAllTrajTransformer": None,
-    "BiasedClassifierTrajTransformer": None,
-    "NoTrajTransformer": None,
-    "CharNO": None,
-    "WaveNO": None,
-    "WaveNOCls": None,
-    "WaveNOLocal": None,
-    "WaveNOIndepTraj": None,
-    "WaveNODisc": None,
-    "ShockAwareWaveNO": None,
-    "CTTBiased": None,
-    "CTTSegPhysics": None,
-    "CTTFiLM": None,
-    "CTTSeg": None,
-    "TransformerSeg": None,
-    "WaveFrontModel": None,
-    "LDDeepONet": "LDDeepONet",
-    "CVAEDeepONet": "ToGridInput",
-    "ShockAwareDeepONet": "ToGridInput",
-    "NeuralFVSolver": "ToGridNoCoords",
 }
 
 

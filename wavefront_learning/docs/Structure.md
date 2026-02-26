@@ -7,10 +7,15 @@ wavefront_learning/
 ├── CHARNO_DESIGN.md              # CharNO design document with mathematical justifications
 ├── CLAUDE.md                     # Claude Code guidance for this module
 ├── Structure.md                  # This file
-├── train.py                      # Main training script (orchestration, CLI, model creation)
+├── train.py                      # Main training script (orchestration, model creation)
 ├── training_loop.py              # Training loop primitives (step, epoch, validation, early stopping)
 ├── test.py                       # Testing/evaluation CLI entry point
 ├── eval.sh                       # Shell script for batch evaluation
+├── configs/
+│   ├── __init__.py               # Re-exports all config submodules
+│   ├── presets.py                # All preset mappings (pure data, zero internal imports)
+│   ├── training_defaults.py      # TrainingDefaults frozen dataclass + TRAINING_DEFAULTS singleton
+│   └── cli.py                    # parse_args() function (argparse definitions)
 ├── data/
 │   ├── __init__.py               # WavefrontDataset, collate_wavefront_batch, get_wavefront_datasets
 │   ├── data_loading.py           # HuggingFace upload/download for grid caching
@@ -109,10 +114,20 @@ wavefront_learning/
 
 ## File Details
 
+### Configuration (`configs/`)
+
+- **\_\_init\_\_.py** — Re-exports all public names from submodules.
+- **presets.py** — Pure-data preset mappings (zero internal imports).
+  - `MODEL_LOSS_PRESET`, `MODEL_PLOT_PRESET`, `MODEL_TRANSFORM`, `LOSS_PRESETS`, `PLOT_PRESETS`
+- **training_defaults.py** — Frozen dataclass with training hyperparameter defaults.
+  - `TrainingDefaults`, `TRAINING_DEFAULTS`
+- **cli.py** — Command-line argument parser (moved from train.py).
+  - `parse_args()`
+
 ### Entry Points
 
-- **train.py** — Entry point: CLI args, data loading, model creation, training strategy dispatch.
-  - `parse_args()`, `train_model()`, `train_model_two_phase()`, `main()`
+- **train.py** — Entry point: data loading, model creation, training strategy dispatch.
+  - `train_model()`, `train_model_two_phase()`, `main()`
 - **training_loop.py** — Training loop primitives extracted from train.py.
   - `detach_output()`, `train_step()`, `train_epoch()`, `validate_epoch()`, `_run_training_loop()`
 - **test.py** — Loads a trained model and runs evaluation.
@@ -137,13 +152,13 @@ wavefront_learning/
 
 - **model.py** — Model creation and persistence.
   - `get_model()`, `load_model()`, `save_model()`
-  - `MODELS` registry, `MODEL_TRANSFORM` registry
+  - `MODELS` registry; `MODEL_TRANSFORM` re-exported from `configs.presets`
 - **loss.py** — Loss creation with preset combinations.
   - `CombinedLoss`, `get_loss()`, `create_loss_from_args()`
-  - `LOSSES` registry, `LOSS_PRESETS` registry
+  - `LOSSES` registry; `LOSS_PRESETS` imported from `configs.presets`
 - **plotter.py** — Plotting facade with preset system.
   - `plot()`
-  - `PLOTS` registry, `PLOT_PRESETS` registry
+  - `PLOTS` registry; `PLOT_PRESETS` imported from `configs.presets`
 
 ### Utilities
 

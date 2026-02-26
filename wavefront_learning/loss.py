@@ -3,12 +3,13 @@
 This module provides:
 - CombinedLoss: Combines multiple losses with configurable weights
 - LOSSES: Registry of available loss classes
-- LOSS_PRESETS: Pre-configured loss combinations for common use cases
+- LOSS_PRESETS: Pre-configured loss combinations (defined in configs/presets.py)
 - get_loss(): Factory function to create loss instances
 """
 
 import torch
 import torch.nn as nn
+from configs.presets import LOSS_PRESETS
 from losses.acceleration import AccelerationLoss
 from losses.base import BaseLoss
 from losses.boundary import BoundaryLoss
@@ -20,12 +21,12 @@ from losses.existence_regularization import ICAnchoringLoss
 from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
 from losses.kl_divergence import KLDivergenceLoss
-from losses.shock_proximity import ShockProximityLoss
 from losses.mse import MSELoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
 from losses.selection_supervision import SelectionSupervisionLoss
+from losses.shock_proximity import ShockProximityLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
 from losses.vae_reconstruction import VAEReconstructionLoss
@@ -54,39 +55,6 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "flow_matching": FlowMatchingLoss,
     "kl_divergence": KLDivergenceLoss,
     "shock_proximity": ShockProximityLoss,
-}
-
-# Presets for common configurations
-# Each preset is a list of (loss_name, weight) or (loss_name, weight, kwargs) tuples
-LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
-    "mse": [
-        ("mse", 1.0),
-    ],
-    "pde_shocks": [
-        ("mse", 1.0),
-        ("pde_shock_residual", 1.0),
-    ],
-    "cell_avg_mse": [
-        ("cell_avg_mse", 1.0),
-    ],
-    "traj_regularized": [
-        ("mse", 1.0),
-        ("ic_anchoring", 0.1),
-        ("boundary", 1.0),
-        ("regularize_traj", 0.1),
-    ],
-    "cvae": [
-        ("mse", 1.0),
-        ("kl_divergence", 1.0, {"free_bits": 0.01}),
-    ],
-    "shock_proximity": [
-        ("mse", 1.0),
-        ("shock_proximity", 0.1),
-    ],
-    "mse_wasserstein": [
-        ("mse", 1.0),
-        ("wasserstein", 0.1),
-    ],
 }
 
 

@@ -163,25 +163,27 @@ LOSSES = {
     "my_loss": MyLoss,
 }
 ```
-4. Export it in `losses/__init__.py`
-5. Update `ARCHITECTURE.md` with the mathematical formula and configuration
+4. If you want a preset combining multiple losses, add it to `configs/presets.py` `LOSS_PRESETS`
+5. Export it in `losses/__init__.py`
+6. Update `ARCHITECTURE.md` with the mathematical formula and configuration
 
 ## Adding a New Model
 
 1. Implement your model class in `models/` with a `build_*` factory function
 2. Register it in `model.py`:
    - Add to `MODELS` dict (name → builder function)
+3. Add transform mapping in `configs/presets.py`:
    - Add to `MODEL_TRANSFORM` dict (name → transform string or `None`)
-3. If the model needs a non-default loss, add it to `MODEL_LOSS_PRESET` in `train.py`
-4. If the model needs a non-default plot preset, add it to `MODEL_PLOT_PRESET` in `train.py`
+4. If the model needs a non-default loss, add it to `MODEL_LOSS_PRESET` in `configs/presets.py`
+5. If the model needs a non-default plot preset, add it to `MODEL_PLOT_PRESET` in `configs/presets.py`
 
 ```python
 # model.py
 from models.my_model import build_my_model
 MODELS = { ..., "MyModel": build_my_model }
-MODEL_TRANSFORM = { ..., "MyModel": None }  # or "ToGridInput", "FlattenDiscontinuities"
 
-# train.py — only if model needs non-default presets
+# configs/presets.py
+MODEL_TRANSFORM = { ..., "MyModel": None }  # or "ToGridInput", "ToGridNoCoords"
 MODEL_LOSS_PRESET = { ..., "MyModel": "traj_regularized" }  # default is "mse"
 MODEL_PLOT_PRESET = { ..., "MyModel": "traj_residual" }     # default is "grid_residual"
 ```
