@@ -216,6 +216,41 @@ def parse_args() -> argparse.Namespace:
         help="Min connected component size for shock detection (0 to disable)",
     )
 
+    # NeuralFVSolver parameters
+    parser.add_argument(
+        "--stencil_k", type=int, default=3, help="Stencil half-width for NeuralFVSolver (default: 3)"
+    )
+    parser.add_argument(
+        "--flux_hidden_dim",
+        type=int,
+        default=64,
+        help="Hidden dimension for NeuralFVSolver flux network (default: 64)",
+    )
+    parser.add_argument(
+        "--flux_n_layers",
+        type=int,
+        default=3,
+        help="Number of layers in NeuralFVSolver flux network (default: 3)",
+    )
+    parser.add_argument(
+        "--curriculum_fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of epochs to reach full rollout for NeuralFVSolver (default: 0.5)",
+    )
+    parser.add_argument(
+        "--initial_noise_std",
+        type=float,
+        default=0.01,
+        help="Initial pushforward noise std for NeuralFVSolver (default: 0.01)",
+    )
+    parser.add_argument(
+        "--noise_decay_fraction",
+        type=float,
+        default=0.75,
+        help="Fraction of epochs for noise decay in NeuralFVSolver (default: 0.75)",
+    )
+
     # Cell sampling
     parser.add_argument(
         "--cell_sampling_k",
@@ -331,6 +366,25 @@ def train_model(
             logger.log_metrics({"train/teacher_forcing_ratio": ratio})
 
         callbacks.append(_tf_callback)
+
+    # Curriculum + noise decay for NeuralFVSolver
+    if args.model == "NeuralFVSolver" and hasattr(model, "max_rollout_steps"):
+        total_rollout = args.nt - 1
+        curriculum_epochs = max(1, int(args.curriculum_fraction * args.epochs))
+        noise_decay_epochs = max(1, int(args.noise_decay_fraction * args.epochs))
+        initial_noise = args.initial_noise_std
+
+        def _curriculum_callback(epoch):
+            progress = min(1.0, (epoch + 1) / curriculum_epochs)
+            model.max_rollout_steps = max(1, int(progress * total_rollout))
+            noise_progress = min(1.0, (epoch + 1) / noise_decay_epochs)
+            model.noise_std = initial_noise * max(0.0, 1.0 - noise_progress)
+            logger.log_metrics({
+                "train/max_rollout_steps": model.max_rollout_steps,
+                "train/noise_std": model.noise_std,
+            })
+
+        callbacks.append(_curriculum_callback)
 
     # Compose callbacks into a single function
     epoch_callback = None
@@ -450,6 +504,7 @@ MODEL_LOSS_PRESET: dict[str, str] = {
     "ShockAwareDeepONet": "shock_proximity",
     "ShockAwareWaveNO": "shock_proximity",
     "AutoregressiveWaveNO": "traj_regularized",
+    "NeuralFVSolver": "mse_wasserstein",
 }
 
 MODEL_PLOT_PRESET: dict[str, str] = {
@@ -475,6 +530,7 @@ MODEL_PLOT_PRESET: dict[str, str] = {
     "ShockAwareDeepONet": "shock_proximity",
     "ShockAwareWaveNO": "traj_residual",
     "AutoregressiveWaveNO": "traj_residual",
+    "NeuralFVSolver": "grid_residual",
 }
 
 

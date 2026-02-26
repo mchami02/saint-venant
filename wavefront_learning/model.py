@@ -39,6 +39,7 @@ from models.traj_transformer import (
     build_no_traj_transformer,
     build_traj_transformer,
 )
+from models.neural_fv_solver import build_neural_fv_solver
 from models.wavefront_model import build_wavefront_model
 from models.waveno import (
     build_shock_aware_waveno,
@@ -85,6 +86,7 @@ MODELS = {
     "LDDeepONet": build_ld_deeponet,
     "CVAEDeepONet": build_cvae_deeponet,
     "ShockAwareDeepONet": build_shock_aware_deeponet,
+    "NeuralFVSolver": build_neural_fv_solver,
 }
 
 # Registry of per-model transforms (string key into TRANSFORMS in data.py).
@@ -119,6 +121,7 @@ MODEL_TRANSFORM = {
     "LDDeepONet": "LDDeepONet",
     "CVAEDeepONet": "ToGridInput",
     "ShockAwareDeepONet": "ToGridInput",
+    "NeuralFVSolver": "ToGridNoCoords",
 }
 
 
