@@ -79,7 +79,7 @@ def build_autoregressive_fno(args: dict) -> AutoregressiveFNO:
             - domain_padding: padding fraction for non-periodic BCs (default: 0.2)
     """
     return AutoregressiveFNO(
-        n_modes=(args.get("n_modes_x", 16),),
+        n_modes=(args.get("n_modes_x", 64),),
         hidden_channels=args.get("hidden_channels", 32),
         in_channels=2,
         out_channels=1,
