@@ -9,6 +9,7 @@ generate_n   : generate *n* samples with random piecewise-constant ICs.
 import warnings
 from collections.abc import Callable
 
+import numpy as np
 import torch
 from tqdm import trange
 
@@ -129,13 +130,17 @@ def generate_n(
     v_all = torch.zeros_like(rho_all)
     w_all = torch.zeros_like(rho_all)
 
+    ic_xs_list: list[list[float]] = []
+    ic_rho_ks_list: list[list[float]] = []
+    ic_v_ks_list: list[list[float]] = []
+
     max_retries = 10
     rejected = 0
 
     it = trange(n, desc="ARZ samples", disable=not show_progress)
     for i in it:
         for attempt in range(max_retries):
-            rho0, v0 = random_piecewise(
+            rho0, v0, ic_params = random_piecewise(
                 x, k, rng, rho_range=rho_range, v_range=v_range
             )
             result = generate_one(
@@ -154,6 +159,9 @@ def generate_n(
                 and torch.isfinite(result["v"]).all()
                 and torch.isfinite(result["w"]).all()
             ):
+                ic_xs_list.append(ic_params["xs"])
+                ic_rho_ks_list.append(ic_params["rho_ks"])
+                ic_v_ks_list.append(ic_params["v_ks"])
                 break
             rejected += 1
         else:
@@ -163,6 +171,10 @@ def generate_n(
                 stacklevel=2,
             )
             result = {"rho": torch.zeros(nt + 1, nx), "v": torch.zeros(nt + 1, nx), "w": torch.zeros(nt + 1, nx)}
+            # Dummy IC params for zero-filled sample
+            ic_xs_list.append([0.0] * (k + 1))
+            ic_rho_ks_list.append([0.0] * k)
+            ic_v_ks_list.append([0.0] * k)
 
         rho_all[i] = result["rho"]
         v_all[i] = result["v"]
@@ -182,6 +194,9 @@ def generate_n(
         "dx": dx,
         "dt": dt,
         "nt": nt,
+        "ic_xs": np.array(ic_xs_list),
+        "ic_rho_ks": np.array(ic_rho_ks_list),
+        "ic_v_ks": np.array(ic_v_ks_list),
     }
 
 

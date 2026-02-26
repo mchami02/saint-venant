@@ -31,6 +31,7 @@ wavefront_learning/
 │   ├── ctt_seg.py               # CTTSeg: standalone segment-based ClassifierTrajTransformer
 │   ├── transformer_seg.py       # TransformerSeg: segment-based transformer without trajectory prediction
 │   ├── deeponet.py               # Classic DeepONet baseline
+│   ├── autoregressive_fno.py     # AutoregressiveFNO + AutoregressiveRealFNO (1D spatial FNO, autoregressive in time)
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
@@ -164,6 +165,9 @@ wavefront_learning/
   - `TransformerSeg`, `build_transformer_seg()`
 - **deeponet.py** — Classic DeepONet baseline.
   - `DeepONet`, `build_deeponet()`
+- **autoregressive_fno.py** — 1D spatial FNO applied autoregressively in time with dt conditioning. Two variants: neuralop-based (complex weights) and real-valued (MPS-compatible).
+  - `AutoregressiveFNO`, `build_autoregressive_fno()`, `AutoregressiveRealFNO`, `build_autoregressive_real_fno()`
+  - `SpectralConv1d`, `FNO1dBlock`, `RealFNO1d` (internal components for real-valued variant)
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.
   - `FNOWrapper`, `build_fno()`
 - **encoder_decoder.py** — Transformer encoder-decoder.
