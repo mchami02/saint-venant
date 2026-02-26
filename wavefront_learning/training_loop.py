@@ -63,8 +63,11 @@ def train_step(
         batch_input = batch_input.to(device)
     batch_target = batch_target.to(device)
 
-    # Inject target for CVAE models (inference network needs target during training)
-    if getattr(model, "needs_target_input", False) and isinstance(batch_input, dict):
+    # Inject target for models that need it during training (CVAE, teacher forcing)
+    needs_target = getattr(model, "needs_target_input", False) or getattr(
+        model, "teacher_forcing_ratio", 0.0
+    ) > 0
+    if needs_target and isinstance(batch_input, dict):
         batch_input["target_grid"] = batch_target
 
     # Forward pass
