@@ -22,7 +22,7 @@ Follow this workflow for every task, without exception:
    ```
    Always add or change flags so the sanity check covers the code you touched. If the default command doesn't exercise your change at all, it is not a valid sanity check.
 5. **Analyze the result:**
-   - **Pass** → push the branch, create a pull request with a clear description of what was done, then stop.
+   - **Pass** → push the branch. Before creating the pull request, check for merge conflicts with `main` by running `git merge --no-commit --no-ff main`. If there are conflicts, resolve them locally, commit the merge, and push. Then create a pull request with a clear description of what was done, and stop.
    - **Fail** → diagnose, fix, and re-run. Repeat at most 3 times.
    - **Still failing after 3 attempts** → stop. Write a clear summary of what was tried and what the suspected remaining issue is. Leave the branch as-is without pushing.
 6. **Post-PR fixes.** If review comments or CI checks flag issues, fix them on the same branch and push. Repeat until the PR is clean.
