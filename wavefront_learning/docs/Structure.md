@@ -178,7 +178,7 @@ wavefront_learning/
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
   - `CharNO`, `build_charno()`
 - **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
-  - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`
+  - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`, `build_shock_aware_waveno()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
   - `WaveFrontModel`, `build_wavefront_model()`
 - **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.

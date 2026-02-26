@@ -115,6 +115,7 @@ Use `--no_wandb` flag to disable logging.
 | **CTTSeg** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
 | **TransformerSeg** | Segment-based encoding + cross-attention density decoder, no trajectories | `{output_grid}` |
 | **ShockAwareDeepONet** | Dual-head DeepONet: shared trunk, solution + shock proximity heads | `{output_grid, shock_proximity}` |
+| **ShockAwareWaveNO** | WaveNO with shock proximity head on cross-attention features | `{positions, output_grid, shock_proximity}` |
 
 ## Available Losses
 

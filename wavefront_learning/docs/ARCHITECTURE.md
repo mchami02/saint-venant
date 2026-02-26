@@ -1837,6 +1837,24 @@ Six ablation models isolate which architectural component drives the performance
 | `WaveNOLocal` | `local_features=False` | Removes cumulative mass $N_k$ from `SegmentPhysicsEncoder` (3 scalar features instead of 4) |
 | `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
 | `WaveNODisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
+| `ShockAwareWaveNO` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
+
+#### ShockAwareWaveNO Architecture
+
+WaveNO with a dual output: density solution and shock proximity. The proximity head is an MLP identical to the density head but with sigmoid activation instead of clamp. Both heads operate on the same fused cross-attention features `q`, forcing the shared representation to be shock-aware.
+
+```
+# Same as WaveNO up to cross-attention output q: (nt, nx, H)
+
+q → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
+q → ProximityHead(MLP) → sigmoid → shock_proximity: (1, nt, nx)
+```
+
+Components:
+- **DensityHead**: `Linear(H, H) → ReLU → Dropout → Linear(H, 1)` — initialized near zero (bias=0.5)
+- **ProximityHead**: `Linear(H, H) → ReLU → Dropout → Linear(H, 1)` — initialized at zero
+
+Uses `shock_proximity` loss preset (MSE + proximity MSE) and `traj_residual` plot preset. Uses native dict input (no transform).
 
 ### CTT Ablations (fixing resolution weakness)
 

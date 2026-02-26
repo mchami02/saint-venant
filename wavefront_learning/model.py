@@ -40,6 +40,7 @@ from models.traj_transformer import (
 )
 from models.wavefront_model import build_wavefront_model
 from models.waveno import (
+    build_shock_aware_waveno,
     build_waveno,
     build_waveno_cls,
     build_waveno_disc,
@@ -72,6 +73,7 @@ MODELS = {
     "WaveNOLocal": build_waveno_local,
     "WaveNOIndepTraj": build_waveno_indep_traj,
     "WaveNODisc": build_waveno_disc,
+    "ShockAwareWaveNO": build_shock_aware_waveno,
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
@@ -104,6 +106,7 @@ MODEL_TRANSFORM = {
     "WaveNOLocal": None,
     "WaveNOIndepTraj": None,
     "WaveNODisc": None,
+    "ShockAwareWaveNO": None,
     "CTTBiased": None,
     "CTTSegPhysics": None,
     "CTTFiLM": None,
