@@ -1633,185 +1633,59 @@ $$\mathcal{L}_{total} = \sum_{i} w_i \cdot \mathcal{L}_i$$
 
 **Location**: `loss.py`
 
-Pre-configured loss combinations for common use cases.
+Pre-configured loss combinations for common use cases. Model-to-preset mapping is in `train.py` (`MODEL_LOSS_PRESET` dict) — when `--loss mse` (default), the preset is auto-selected per model.
 
-#### shock_net Preset
+#### mse Preset
 
-For trajectory-only models (ShockNet).
-
-| Loss | Weight | Kwargs |
-|------|--------|--------|
-| `boundary` | 1.0 | — |
-| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
-| `ic_anchoring` | 0.1 | — |
-
-$$\mathcal{L} = \mathcal{L}_{bound} + \mathcal{L}_{accel} + 0.1 \cdot \mathcal{L}_{anchor}$$
-
-#### hybrid Preset
-
-For HybridDeepONet (trajectory + grid prediction).
-
-| Loss | Weight | Kwargs |
-|------|--------|--------|
-| `mse` | 1.0 | — |
-| `rh_residual` | 1.0 | — |
-| `pde_residual` | 0.1 | — |
-| `ic` | 10.0 | — |
-| `ic_anchoring` | 0.01 | — |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{RH} + 0.1 \cdot \mathcal{L}_{PDE} + 10 \cdot \mathcal{L}_{IC} + 0.01 \cdot \mathcal{L}_{anchor}$$
-
-#### traj_net Preset
-
-For TrajDeepONet and NoTrajDeepONet.
+Simple grid MSE only. Default for most models.
 
 | Loss | Weight |
 |------|--------|
 | `mse` | 1.0 |
-| `ic_anchoring` | 0.1 |
-| `boundary` | 1.0 |
-| `regularize_traj` | 0.1 |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
-
-#### classifier_traj_net Preset
-
-For ClassifierTrajDeepONet (TrajDeepONet with existence classifier).
-
-| Loss | Weight | Kwargs |
-|------|--------|--------|
-| `mse` | 1.0 | — |
-| `ic_anchoring` | 0.1 | — |
-| `boundary` | 1.0 | — |
-| `regularize_traj` | 0.1 | — |
-| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
-
-#### traj_transformer Preset
-
-For TrajTransformer.
-
-| Loss | Weight |
-|------|--------|
-| `mse` | 1.0 |
-| `ic_anchoring` | 0.1 |
-| `boundary` | 1.0 |
-| `regularize_traj` | 0.1 |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
-
-#### classifier_traj_transformer Preset
-
-For ClassifierTrajTransformer.
-
-| Loss | Weight | Kwargs |
-|------|--------|--------|
-| `mse` | 1.0 | — |
-| `ic_anchoring` | 0.1 | — |
-| `boundary` | 1.0 | — |
-| `regularize_traj` | 0.1 | — |
-| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
-
-#### classifier_all_traj_transformer Preset
-
-For ClassifierAllTrajTransformer. Same losses as `classifier_traj_transformer`.
-
-| Loss | Weight | Kwargs |
-|------|--------|--------|
-| `mse` | 1.0 | — |
-| `ic_anchoring` | 0.1 | — |
-| `boundary` | 1.0 | — |
-| `regularize_traj` | 0.1 | — |
-| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
-
-#### biased_classifier_traj_transformer Preset
-
-For BiasedClassifierTrajTransformer. Same losses as `classifier_traj_transformer` (the bias is an architectural change, not a loss change).
-
-| Loss | Weight | Kwargs |
-|------|--------|--------|
-| `mse` | 1.0 | — |
-| `ic_anchoring` | 0.1 | — |
-| `boundary` | 1.0 | — |
-| `regularize_traj` | 0.1 | — |
-| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
 
 #### pde_shocks Preset
 
 For models supervised with PDE shock residual.
 
-| Loss | Weight |
-|------|--------|
-| `mse` | 1.0 |
-| `pde_shock_residual` | 1.0 |
+| Loss | Weight | Kwargs |
+|------|--------|--------|
+| `mse` | 1.0 | — |
+| `pde_shock_residual` | 1.0 | — |
+| `rh_residual` | 1.0 | `mode="gt"` |
 
-$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{PDE\text{-}shock}$$
+$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{PDE\text{-}shock} + \mathcal{L}_{RH}$$
 
-#### charno Preset
+#### cell_avg_mse Preset
 
-For CharNO (characteristic neural operator).
-
-| Loss | Weight |
-|------|--------|
-| `mse` | 1.0 |
-| `wasserstein` | 0.5 |
-| `conservation` | 0.1 |
-
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons}$$
-
-#### waveno Preset
-
-For WaveNO (wavefront neural operator). Combines grid losses with trajectory losses for breakpoint evolution.
+Cell-average MSE for finite-volume-consistent training.
 
 | Loss | Weight |
 |------|--------|
+| `cell_avg_mse` | 1.0 |
+
+#### traj_regularized Preset
+
+For trajectory-predicting models (e.g. TrajTransformer). Auto-selected via `MODEL_LOSS_PRESET`.
+
+| Loss | Weight |
+|------|--------|
 | `mse` | 1.0 |
-| `wasserstein` | 0.5 |
-| `conservation` | 0.1 |
-| `ic_anchoring` | 5.0 |
+| `ic_anchoring` | 0.1 |
 | `boundary` | 1.0 |
 | `regularize_traj` | 0.1 |
 
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.5 \cdot \mathcal{L}_{W1} + 0.1 \cdot \mathcal{L}_{cons} + 5.0 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
+$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg}$$
 
-#### ctt_seg Preset
+#### cvae Preset
 
-For CTTSeg (CTT with segment tokens). Same losses as `classifier_traj_transformer`.
+For CVAEDeepONet. Auto-selected via `MODEL_LOSS_PRESET`.
 
 | Loss | Weight | Kwargs |
 |------|--------|--------|
 | `mse` | 1.0 | — |
-| `ic_anchoring` | 0.1 | — |
-| `boundary` | 1.0 | — |
-| `regularize_traj` | 0.1 | — |
-| `acceleration` | 1.0 | `missed_shock_weight=1.0` |
+| `kl_divergence` | 1.0 | `free_bits=0.01` |
 
-$$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{anchor} + \mathcal{L}_{bound} + 0.1 \cdot \mathcal{L}_{reg} + \mathcal{L}_{accel}$$
-
-#### mse Preset
-
-Simple grid MSE only.
-
-| Loss | Weight |
-|------|--------|
-| `mse` | 1.0 |
-
-#### wavefront_model Preset
-
-For WaveFrontModel (learned Riemann solver). Simple MSE supervision only — wave structure emerges from the architecture.
-
-| Loss | Weight |
-|------|--------|
-| `mse` | 1.0 |
-
-$$\mathcal{L} = \mathcal{L}_{MSE}$$
+$$\mathcal{L} = \mathcal{L}_{MSE} + \mathcal{L}_{KL}$$
 
 #### Using Presets
 
@@ -1819,11 +1693,11 @@ $$\mathcal{L} = \mathcal{L}_{MSE}$$
 from loss import get_loss
 
 # Use preset directly
-loss = get_loss("shock_net")
+loss = get_loss("mse")
 
 # Use preset with custom kwargs for individual losses
-loss = get_loss("hybrid", loss_kwargs={
-    "pde_residual": {"dt": 0.004, "dx": 0.02},
+loss = get_loss("pde_shocks", loss_kwargs={
+    "pde_shock_residual": {"dt": 0.004, "dx": 0.02},
     "rh_residual": {"dt": 0.004},
 })
 ```
