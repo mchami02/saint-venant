@@ -78,6 +78,11 @@ def train_step(
     # Compute loss (input_dict, output_dict, target)
     loss, components = loss_fn(batch_input, pred, batch_target)
 
+    # Guard against NaN/Inf loss — skip batch to prevent corrupting weights
+    if torch.isnan(loss) or torch.isinf(loss):
+        optimizer.zero_grad()
+        return loss.item(), detach_output(pred), components
+
     # Backward pass
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
