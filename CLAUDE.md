@@ -2,6 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+Follow this workflow for every task, without exception:
+
+1. **Clarify first.** Before doing anything, identify any ambiguities in the task and ask for clarification. Only proceed once the task is clear.
+2. **Create a branch from main.** Always create a new branch from `main` (never from the current branch). Name it descriptively based on the task.
+3. **Implement the change.**
+4. **Run the sanity check.** From the `wavefront_learning/` directory, execute:
+   ```bash
+   uv run python train.py --n_samples 50 --epochs 1 --model WaveNO --max_steps 4 --max_test_steps 5 --max_high_res 2
+   ```
+   This is a cheap check on a small synthetic case, not a full experiment.
+5. **Analyze the result:**
+   - **Pass** → push the branch, create a pull request with a clear description of what was done, then stop.
+   - **Fail** → diagnose, fix, and re-run. Repeat at most 3 times.
+   - **Still failing after 3 attempts** → stop. Write a clear summary of what was tried and what the suspected remaining issue is. Leave the branch as-is without pushing.
+6. **Post-PR fixes.** If review comments or CI checks flag issues, fix them on the same branch and push. Repeat until the PR is clean.
+7. **Never merge.** Never accept or merge the pull request — that is always the user's decision.
+
+## Scope
+
+Unless explicitly stated otherwise, all learning-related tasks are implemented in `wavefront_learning/`.
+
+## Hard Rules
+
+- Branches are always created from `main`, never from another branch.
+- Do not install or modify packages without asking first.
+- Keep all experiment outputs and checkpoints in the designated output folder.
+- Do not modify files outside the current task's scope.
+- Never merge or push directly to `main` under any circumstances.
+
+## File Maintenance
+
 **IMPORTANT**: After completing any task that modifies a folder's structure (adding/removing files), update the corresponding `structure.md` file to reflect the changes. If no `structure.md` exists in that folder, create one.
 
 **IMPORTANT**: After modifying models or losses:
