@@ -83,6 +83,7 @@ wavefront_learning/
 │   ├── cell_avg_mse.py           # CellAverageMSELoss (FV-consistent cell-average MSE)
 │   ├── entropy.py                # EntropyConditionLoss (Lax entropy condition shock detector)
 │   ├── shock_proximity.py        # ShockProximityLoss (solution MSE + proximity MSE)
+│   ├── shock_utils.py            # Shock detection utilities (connected component filtering)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -235,6 +236,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **cell_avg_mse.py** — `CellAverageMSELoss` (cell-average MSE for FV-consistent training with `CellSamplingTransform`)
 - **entropy.py** — `EntropyConditionLoss` (Lax entropy condition on GT grid: miss + false-positive penalty for predicted trajectories)
 - **shock_proximity.py** — `ShockProximityLoss` (solution MSE + weighted shock proximity MSE)
+- **shock_utils.py** — `filter_small_components()` (connected component filtering for binary shock masks via `scipy.ndimage.label`)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)

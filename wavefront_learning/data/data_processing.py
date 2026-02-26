@@ -138,6 +138,7 @@ def compute_shock_proximity(
     gt_grid: np.ndarray,
     dx: float,
     sigma: float,
+    min_component_size: int = 5,
 ) -> torch.Tensor:
     """Compute shock proximity field from a ground truth density grid.
 
@@ -166,6 +167,11 @@ def compute_shock_proximity(
 
     # Lax entropy condition: char_L > s > char_R
     is_shock = (char_L > s) & (s > char_R)  # (nt, nx-1)
+
+    # Remove small isolated components (noise)
+    from losses.shock_utils import filter_small_components
+
+    is_shock = filter_small_components(is_shock, min_component_size)
 
     # Interface midpoints: interface j is between cell j and j+1
     x_interfaces = np.arange(1, nx) * dx  # (nx-1,)
@@ -417,6 +423,7 @@ def preprocess_wavefront_data(
     ic_n_pieces_all: np.ndarray | None = None,
     ic_v_ks_all: np.ndarray | None = None,
     proximity_sigma: float | None = None,
+    min_component_size: int = 5,
 ) -> list[tuple[dict, torch.Tensor]]:
     """Preprocess grids for wavefront learning.
 
@@ -500,7 +507,7 @@ def preprocess_wavefront_data(
         # Compute shock proximity ground truth if requested
         if proximity_sigma is not None and equation == "LWR":
             input_data["shock_proximity"] = compute_shock_proximity(
-                grids[idx], dx, proximity_sigma
+                grids[idx], dx, proximity_sigma, min_component_size
             )
 
         # For ARZ, also handle velocity IC
@@ -543,6 +550,7 @@ def get_wavefront_data(
     equation: str = "LWR",
     equation_kwargs: dict | None = None,
     proximity_sigma: float | None = None,
+    min_component_size: int = 5,
 ) -> list[tuple[dict, torch.Tensor]]:
     """Get wavefront data, downloading from HuggingFace or generating locally.
 
@@ -781,6 +789,7 @@ def get_wavefront_data(
         ic_n_pieces_all=n_pieces_all,
         ic_v_ks_all=ic_v_ks_all,
         proximity_sigma=proximity_sigma,
+        min_component_size=min_component_size,
     )
 
     return processed

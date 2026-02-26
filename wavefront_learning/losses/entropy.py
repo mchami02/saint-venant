@@ -33,10 +33,13 @@ class EntropyConditionLoss(BaseLoss):
         fp_weight: Weight for the false-positive penalty term.
     """
 
-    def __init__(self, dx: float = 0.02, fp_weight: float = 1.0):
+    def __init__(
+        self, dx: float = 0.02, fp_weight: float = 1.0, min_component_size: int = 5
+    ):
         super().__init__()
         self.dx = dx
         self.fp_weight = fp_weight
+        self.min_component_size = min_component_size
 
     def forward(
         self,
@@ -78,6 +81,18 @@ class EntropyConditionLoss(BaseLoss):
 
         # Lax entropy condition: char_left > shock_speed > char_right
         is_shock = (char_left > shock_speed) & (shock_speed > char_right)  # (B, nt, nx-1)
+
+        # Remove small isolated components (noise)
+        if self.min_component_size > 0:
+            from losses.shock_utils import filter_small_components
+
+            device = is_shock.device
+            filtered = []
+            for b in range(B):
+                mask_np = is_shock[b].cpu().numpy()
+                mask_np = filter_small_components(mask_np, self.min_component_size)
+                filtered.append(torch.from_numpy(mask_np))
+            is_shock = torch.stack(filtered).to(device)
 
         # Jump strength as weighting for miss penalty
         jump_strength = torch.abs(rho_left - rho_right)  # (B, nt, nx-1)

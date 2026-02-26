@@ -2015,7 +2015,25 @@ where:
 
 Ground truth proximity is precomputed from the Lax entropy condition:
 1. Detect shocks at each cell interface via $\lambda_L > s > \lambda_R$ where $\lambda = 1 - 2\rho$ and $s = 1 - \rho_L - \rho_R$
-2. For each cell, compute minimum distance to any shock interface
-3. $p = \exp(-d_{\min} / \sigma)$ where $\sigma$ = `proximity_sigma` (default: 0.05)
+2. Filter the binary shock mask with connected component analysis (`scipy.ndimage.label`), removing components with fewer than `min_component_size` cells (default: 5, configurable via `--min_component_size`)
+3. For each cell, compute minimum distance to any shock interface
+4. $p = \exp(-d_{\min} / \sigma)$ where $\sigma$ = `proximity_sigma` (default: 0.05)
 
 Used via the `shock_proximity` preset: `mse` (weight 1.0) + `shock_proximity` (weight 0.1).
+
+#### EntropyConditionLoss
+
+Uses the Lax entropy condition on the GT grid as a threshold-free shock detector. Penalizes missed shocks (entropy-detected shocks far from predictions) and false positives (predictions far from shocks).
+
+Shock detection:
+1. For each cell interface: $\lambda_L = 1 - 2\rho_j$, $\lambda_R = 1 - 2\rho_{j+1}$, $s = 1 - \rho_j - \rho_{j+1}$
+2. Interface is a shock if $\lambda_L > s > \lambda_R$ (Lax entropy condition)
+3. Small isolated components (< `min_component_size` cells) are removed via connected component filtering (`scipy.ndimage.label`)
+
+Loss:
+$$\mathcal{L} = \mathcal{L}_{\text{miss}} + w_{\text{fp}} \cdot \mathcal{L}_{\text{fp}}$$
+
+- $\mathcal{L}_{\text{miss}}$: jump-weighted distance from entropy-detected shocks to nearest active prediction
+- $\mathcal{L}_{\text{fp}}$: existence-weighted distance from predictions to nearest entropy-detected shock
+
+Parameters: `dx` (spatial step), `fp_weight` (false-positive weight, default: 1.0), `min_component_size` (default: 5, 0 to disable).
