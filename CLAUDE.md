@@ -11,7 +11,7 @@ Follow this workflow for every task, without exception:
 3. **Implement the change.**
 4. **Run the sanity check.** From the `wavefront_learning/` directory, execute:
    ```bash
-   uv run python train.py --n_samples 50 --epochs 1 --model WaveNO --max_steps 4 --max_test_steps 5 --max_high_res 2
+   uv run python train.py --n_samples 50 --epochs 1 --model WaveNO --max_steps 4 --max_test_steps 5 --max_high_res 2 --no_wandb
    ```
    This is a cheap check on a small synthetic case, not a full experiment.
 5. **Analyze the result:**

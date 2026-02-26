@@ -388,6 +388,62 @@ grid_input: (3, nt, nx)
 
 ---
 
+### AutoregressiveFNO / AutoregressiveRealFNO
+
+**Location**: `models/autoregressive_fno.py`
+
+Two variants of a 1D spatial FNO that steps autoregressively in time. Instead of applying spectral convolutions over the full 2D space-time grid, these models use a 1D FNO in space only and march forward one timestep at a time. A residual connection predicts the state delta at each step. The model is conditioned on `dt` via an input channel, enabling it to handle different temporal resolutions during high-res testing.
+
+- **AutoregressiveFNO**: wraps `neuralop.models.FNO` (complex-valued spectral weights). Does **not** work with `clip_grad_norm_` on MPS.
+- **AutoregressiveRealFNO**: self-contained 1D FNO storing real/imag weight parts as separate real `nn.Parameter` tensors. Works on all backends including MPS.
+
+#### Pseudocode
+
+```
+grid_input: (1, nt, nx)  →  extract IC  →  state: (1, nx)
+dt: scalar               →  broadcast   →  dt_channel: (1, nx)
+
+for t in 1..nt-1:
+    fno_input = cat([state, dt_channel], dim=0)    # (2, nx)
+    state = state + FNO_1d(fno_input)              # (1, nx)  [residual]
+    outputs.append(state)
+
+stack(outputs, dim=1)  →  output_grid: (1, nt, nx)
+```
+
+**RealFNO1d internals** (AutoregressiveRealFNO only):
+
+```
+x: (C_in, nx)
+→  Lifting: Conv1d(C_in → H, k=1)
+→  [SpectralConv1d(H, H, n_modes) + Conv1d(H, H, k=1) skip + GELU] × L
+→  Projection: Conv1d(H → C_out, k=1)
+→  (C_out, nx)
+
+SpectralConv1d:
+    rfft(x)  →  truncate to n_modes  →  einsum(x_ft, weight_real + i*weight_imag)  →  irfft
+```
+
+#### Input/Output Format
+
+**Input**: dict with:
+- `grid_input`: $(1, n_t, n_x)$ from `ToGridNoCoords` — masked IC (only first row used)
+- `dt`: scalar — temporal grid spacing
+
+**Output** (dictionary):
+- `output_grid`: $(1, n_t, n_x)$ — predicted solution
+
+#### Default Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_modes_x` | 16 | Fourier modes in space dimension |
+| `hidden_channels` | 32 | FNO hidden channel width |
+| `n_layers` | 2 | Number of spectral convolution layers per step |
+| `domain_padding` | 0.2 | Padding fraction for non-periodic boundary conditions |
+
+---
+
 ### EncoderDecoder
 
 **Location**: `models/encoder_decoder.py`
