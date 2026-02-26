@@ -67,6 +67,7 @@ from .wandb_trajectory_plots import (
     plot_trajectory_vs_analytical,
 )
 from .cvae_plots import plot_cvae_samples, plot_cvae_uncertainty
+from .shock_proximity_plots import plot_shock_proximity
 from .wavefront_plots import plot_wave_pattern
 
 __all__ = [
@@ -120,4 +121,6 @@ __all__ = [
     # CVAE plots
     "plot_cvae_samples",
     "plot_cvae_uncertainty",
+    # Shock proximity plots
+    "plot_shock_proximity",
 ]

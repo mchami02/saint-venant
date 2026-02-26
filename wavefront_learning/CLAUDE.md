@@ -114,6 +114,7 @@ Use `--no_wandb` flag to disable logging.
 | **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |
 | **CTTSeg** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
 | **TransformerSeg** | Segment-based encoding + cross-attention density decoder, no trajectories | `{output_grid}` |
+| **ShockAwareDeepONet** | Dual-head DeepONet: shared trunk, solution + shock proximity heads | `{output_grid, shock_proximity}` |
 
 ## Available Losses
 
@@ -133,6 +134,7 @@ Individual losses (in `losses/`):
 | `acceleration` | Shock detection via high acceleration + missed shock term |
 | `regularize_traj` | Penalize erratic trajectory jumps between timesteps |
 | `entropy` | Lax entropy condition on GT: penalizes missed shocks and false positives |
+| `shock_proximity` | Solution MSE + weighted shock proximity MSE |
 
 Presets (in `loss.py`):
 | Preset | Description |
@@ -142,6 +144,7 @@ Presets (in `loss.py`):
 | `cell_avg_mse` | cell-average MSE |
 | `traj_regularized` | mse + ic_anchoring + boundary + regularize_traj |
 | `cvae` | mse + kl_divergence |
+| `shock_proximity` | shock_proximity (solution MSE + proximity MSE) |
 
 Model-to-loss mapping is in `train.py` `MODEL_LOSS_PRESET` dict. When `--loss mse` (default), the preset is auto-selected per model.
 

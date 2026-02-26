@@ -188,6 +188,14 @@ def parse_args() -> argparse.Namespace:
         help="Dropout probability for WaveNO (default: 0.05)",
     )
 
+    # ShockAwareDeepONet parameters
+    parser.add_argument(
+        "--proximity_sigma",
+        type=float,
+        default=0.05,
+        help="Length scale for shock proximity decay (default: 0.05)",
+    )
+
     # Cell sampling
     parser.add_argument(
         "--cell_sampling_k",
@@ -395,6 +403,7 @@ def train_model_two_phase(
 MODEL_LOSS_PRESET: dict[str, str] = {
     "CVAEDeepONet": "cvae",
     "TrajTransformer": "traj_regularized",
+    "ShockAwareDeepONet": "shock_proximity",
 }
 
 MODEL_PLOT_PRESET: dict[str, str] = {
@@ -417,6 +426,7 @@ MODEL_PLOT_PRESET: dict[str, str] = {
     "WaveFrontModel": "wavefront",
     "CVAEDeepONet": "cvae",
     "ECARZ": "ecarz",
+    "ShockAwareDeepONet": "shock_proximity",
 }
 
 
@@ -472,6 +482,7 @@ def main():
         equation_kwargs=equation_kwargs,
         cell_sampling_k=args.cell_sampling_k,
         transform_override=args.transform,
+        proximity_sigma=args.proximity_sigma,
     )
 
     train_loader = DataLoader(

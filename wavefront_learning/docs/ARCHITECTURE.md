@@ -1883,3 +1883,54 @@ seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
 ```
 
 **Key difference from CTTSeg**: Removes BreakpointEvolution (trajectory prediction), classifier head, and boundary conditioning. The density decoder uses `with_boundaries=False`, encoding only `(t, x)` coordinates instead of `(t, x, x_left, x_right)`.
+
+---
+
+#### ShockAwareDeepONet Architecture
+
+Dual-head DeepONet with a shared trunk (SpaceTimeEncoder) and two branch heads: one for the solution field and one for shock proximity. The shared trunk forces the model to learn shock-aware basis functions.
+
+```
+grid_input: (3, nt, nx) [ic_masked, t_coords, x_coords]
+
+ic = grid_input[0, 0, :]                       # (nx,)
+ic_pooled = AdaptiveAvgPool1d(ic, train_nx)     # resolution invariance
+ic_emb = ICEncoder(ic_pooled)                   # (hidden_dim,)
+
+sol_coeffs = SolutionBranch(ic_emb)             # (latent_dim,)
+prox_coeffs = ProximityBranch(ic_emb)           # (latent_dim,)
+
+trunk_out = SpaceTimeEncoder(t_coords, x_coords)  # (nt, nx, latent_dim)
+
+output_grid = einsum(sol_coeffs, trunk_out) + bias_sol        # (1, nt, nx)
+shock_proximity = sigmoid(einsum(prox_coeffs, trunk_out) + bias_prox)  # (1, nt, nx)
+```
+
+Components:
+- **ICEncoder**: `Linear(nx, H) → GELU → [Linear(H, H) → GELU] × (L-1)` — shared IC MLP
+- **SolutionBranch**: `[Linear(H, H) → GELU] × (L-1) → Linear(H, latent)` — solution coefficients
+- **ProximityBranch**: `[Linear(H, H) → GELU] × (L-1) → Linear(H, latent)` — proximity coefficients
+- **Trunk**: `SpaceTimeEncoder(hidden_dim, latent_dim)` — Fourier-encoded coordinate MLP
+
+Default hyperparameters: hidden_dim=128, latent_dim=64, num_ic_layers=3, num_branch_layers=2, num_trunk_layers=3.
+
+Uses `ToGridInput` transform. Resolution invariant via SpaceTimeEncoder + adaptive IC pooling.
+
+---
+
+#### ShockProximityLoss
+
+MSE on the shock proximity field:
+
+$$\mathcal{L}_{\text{prox}} = \text{MSE}(\hat{p}, p)$$
+
+where:
+- $\hat{p}$ = predicted shock proximity (`output_dict["shock_proximity"]`)
+- $p$ = ground truth shock proximity (`input_dict["shock_proximity"]`)
+
+Ground truth proximity is precomputed from the Lax entropy condition:
+1. Detect shocks at each cell interface via $\lambda_L > s > \lambda_R$ where $\lambda = 1 - 2\rho$ and $s = 1 - \rho_L - \rho_R$
+2. For each cell, compute minimum distance to any shock interface
+3. $p = \exp(-d_{\min} / \sigma)$ where $\sigma$ = `proximity_sigma` (default: 0.05)
+
+Used via the `shock_proximity` preset: `mse` (weight 1.0) + `shock_proximity` (weight 0.1).

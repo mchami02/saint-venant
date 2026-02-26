@@ -38,6 +38,7 @@ wavefront_learning/
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
 │   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
+│   ├── shock_aware_deeponet.py      # ShockAwareDeepONet: dual-head DeepONet (solution + shock proximity)
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -80,6 +81,7 @@ wavefront_learning/
 │   ├── flow_matching.py          # FlowMatchingLoss (velocity MSE for flow matching)
 │   ├── cell_avg_mse.py           # CellAverageMSELoss (FV-consistent cell-average MSE)
 │   ├── entropy.py                # EntropyConditionLoss (Lax entropy condition shock detector)
+│   ├── shock_proximity.py        # ShockProximityLoss (solution MSE + proximity MSE)
 │   └── visualize_losses.ipynb    # Jupyter notebook for loss visualization
 ├── plotting/
 │   ├── __init__.py               # Re-exports all plotting functions
@@ -89,6 +91,7 @@ wavefront_learning/
 │   ├── wandb_trajectory_plots.py # Trajectory plots for PLOTS registry (W&B-compatible)
 │   ├── hybrid_plots.py           # HybridDeepONet-specific visualization
 │   ├── charno_plots.py           # CharNO diagnostic visualization (selection weights, entropy, etc.)
+│   ├── shock_proximity_plots.py  # ShockAwareDeepONet proximity visualization (GT vs pred + error)
 │   └── wavefront_plots.py        # WaveFrontModel visualization (wave pattern overlay on GT grid)
 ├── testing/
 │   ├── __init__.py               # Re-exports all test functions
@@ -180,6 +183,8 @@ wavefront_learning/
   - `WaveFrontModel`, `build_wavefront_model()`
 - **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.
   - `LatentDiffusionDeepONet`, `build_ld_deeponet()`
+- **shock_aware_deeponet.py** — Dual-head DeepONet: solution + shock proximity prediction.
+  - `ShockAwareDeepONet`, `build_shock_aware_deeponet()`
 
 ### Model Base Components (`models/base/`)
 
@@ -226,6 +231,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **flow_matching.py** — `FlowMatchingLoss` (velocity MSE for OT flow matching)
 - **cell_avg_mse.py** — `CellAverageMSELoss` (cell-average MSE for FV-consistent training with `CellSamplingTransform`)
 - **entropy.py** — `EntropyConditionLoss` (Lax entropy condition on GT grid: miss + false-positive penalty for predicted trajectories)
+- **shock_proximity.py** — `ShockProximityLoss` (solution MSE + weighted shock proximity MSE)
 - **visualize_losses.ipynb** — Jupyter notebook for visualizing loss components
 
 ### Plotting (`plotting/`)
@@ -237,6 +243,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **hybrid_plots.py** — `plot_prediction_with_trajectory_existence()`, `plot_mse_error()`, `plot_region_weights()`, `plot_pred_traj()`, `plot_hybrid_predictions()`
 - **charno_plots.py** — `plot_selection_weights()`, `plot_winning_segment()`, `plot_selection_entropy()`, `plot_local_densities()`, `plot_charno_decomposition()`
 - **wavefront_plots.py** — `plot_wave_pattern()` (wave lines overlaid on GT grid heatmap)
+- **shock_proximity_plots.py** — `plot_shock_proximity()` (GT vs predicted proximity with error)
 
 ### Testing (`testing/`)
 
