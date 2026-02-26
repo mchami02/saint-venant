@@ -13,9 +13,12 @@ wavefront_learning/
 ├── eval.sh                       # Shell script for batch evaluation
 ├── configs/
 │   ├── __init__.py               # Re-exports all config submodules
-│   ├── presets.py                # All preset mappings (pure data, zero internal imports)
-│   ├── training_defaults.py      # TrainingDefaults frozen dataclass + TRAINING_DEFAULTS singleton
-│   └── cli.py                    # parse_args() function (argparse definitions)
+│   ├── presets.yaml              # All preset mappings as YAML (source of truth)
+│   ├── training.yaml             # Training hyperparams + CLI arg defaults as YAML
+│   ├── loader.py                 # YAML loading + type conversion + TrainingDefaults dataclass
+│   ├── presets.py                # Thin wrapper: loads presets.yaml, exposes same Python API
+│   ├── training_defaults.py      # Thin wrapper: loads training.yaml, exposes TrainingDefaults
+│   └── cli.py                    # parse_args() with YAML defaults + unknown arg passthrough
 ├── data/
 │   ├── __init__.py               # WavefrontDataset, collate_wavefront_batch, get_wavefront_datasets
 │   ├── data_loading.py           # HuggingFace upload/download for grid caching
@@ -117,12 +120,19 @@ wavefront_learning/
 ### Configuration (`configs/`)
 
 - **\_\_init\_\_.py** — Re-exports all public names from submodules.
-- **presets.py** — Pure-data preset mappings (zero internal imports).
+- **presets.yaml** — All preset mappings as YAML (source of truth for presets.py).
+  - `model_loss_preset`, `model_plot_preset`, `model_transform`, `loss_presets`, `plot_presets`
+- **training.yaml** — Training hyperparameters and CLI argument defaults as YAML.
+  - `training_defaults` (scheduler, early stopping, grad clipping, etc.)
+  - `cli_defaults` (model, loss, epochs, batch_size, lr, etc.)
+- **loader.py** — YAML loading, type conversion, and `TrainingDefaults` dataclass.
+  - `TrainingDefaults`, `load_presets()`, `load_training_defaults()`, `load_cli_defaults()`
+- **presets.py** — Thin wrapper that loads from presets.yaml and exposes the same Python API.
   - `MODEL_LOSS_PRESET`, `MODEL_PLOT_PRESET`, `MODEL_TRANSFORM`, `LOSS_PRESETS`, `PLOT_PRESETS`
-- **training_defaults.py** — Frozen dataclass with training hyperparameter defaults.
+- **training_defaults.py** — Thin wrapper that loads from training.yaml.
   - `TrainingDefaults`, `TRAINING_DEFAULTS`
-- **cli.py** — Command-line argument parser (moved from train.py).
-  - `parse_args()`
+- **cli.py** — Command-line argument parser with YAML defaults and unknown arg passthrough.
+  - `parse_args()` — uses `parse_known_args()` + injects unknown `--key value` pairs
 
 ### Entry Points
 
