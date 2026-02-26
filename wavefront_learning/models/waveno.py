@@ -99,6 +99,9 @@ class WaveNO(nn.Module):
         num_freq_bound: Fourier frequency bands for boundary features
             in query encoder.
         flux: Flux function instance.
+        predict_proximity: If True, add a second MLP head that predicts
+            a sigmoid-activated shock proximity field from the same
+            cross-attention features as the density head.
     """
 
     def __init__(
@@ -124,6 +127,7 @@ class WaveNO(nn.Module):
         local_features: bool = True,
         independent_traj: bool = False,
         use_discontinuities: bool = False,
+        predict_proximity: bool = False,
         dropout: float = 0.05,
     ):
         super().__init__()
@@ -134,6 +138,7 @@ class WaveNO(nn.Module):
         self.with_classifier = with_classifier
         self.independent_traj = independent_traj
         self.use_discontinuities = use_discontinuities
+        self.predict_proximity = predict_proximity
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
@@ -274,6 +279,17 @@ class WaveNO(nn.Module):
         # Initialize last layer near zero for stable start
         nn.init.zeros_(self.density_head[-1].weight)
         nn.init.constant_(self.density_head[-1].bias, 0.5)
+
+        # === Optional: Proximity head ===
+        if predict_proximity:
+            self.proximity_head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, 1),
+            )
+            nn.init.zeros_(self.proximity_head[-1].weight)
+            nn.init.zeros_(self.proximity_head[-1].bias)
 
     def forward(
         self,
@@ -464,6 +480,9 @@ class WaveNO(nn.Module):
             "output_grid": output_grid,
             "characteristic_bias": char_bias,
         }
+        if self.predict_proximity:
+            proximity = torch.sigmoid(self.proximity_head(q).squeeze(-1))  # (B*nt, nx)
+            output["shock_proximity"] = proximity.reshape(B, 1, nt, nx)
         if positions is not None:
             output["positions"] = positions
         if existence is not None:
@@ -612,6 +631,9 @@ class WaveNO(nn.Module):
             "output_grid": output_grid,
             "characteristic_bias": char_bias,
         }
+        if self.predict_proximity:
+            proximity = torch.sigmoid(self.proximity_head(q).squeeze(-1))  # (B*nt, nx)
+            output["shock_proximity"] = proximity.reshape(B, 1, nt, nx)
         if positions is not None:
             output["positions"] = positions
 
@@ -696,3 +718,8 @@ def build_waveno_indep_traj(args: dict) -> WaveNO:
 def build_waveno_disc(args: dict) -> WaveNO:
     """WaveNO with discontinuity-based tokens instead of segments."""
     return _build_waveno_base(args, use_discontinuities=True)
+
+
+def build_shock_aware_waveno(args: dict) -> WaveNO:
+    """WaveNO with shock proximity prediction head."""
+    return _build_waveno_base(args, predict_proximity=True)

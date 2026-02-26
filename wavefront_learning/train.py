@@ -442,6 +442,7 @@ MODEL_LOSS_PRESET: dict[str, str] = {
     "CVAEDeepONet": "cvae",
     "TrajTransformer": "traj_regularized",
     "ShockAwareDeepONet": "shock_proximity",
+    "ShockAwareWaveNO": "shock_proximity",
 }
 
 MODEL_PLOT_PRESET: dict[str, str] = {
@@ -465,6 +466,7 @@ MODEL_PLOT_PRESET: dict[str, str] = {
     "CVAEDeepONet": "cvae",
     "ECARZ": "ecarz",
     "ShockAwareDeepONet": "shock_proximity",
+    "ShockAwareWaveNO": "traj_residual",
 }
 
 
