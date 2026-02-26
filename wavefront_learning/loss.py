@@ -55,33 +55,24 @@ LOSSES: dict[str, type[BaseLoss]] = {
 # Presets for common configurations
 # Each preset is a list of (loss_name, weight) or (loss_name, weight, kwargs) tuples
 LOSS_PRESETS: dict[str, list[tuple[str, float] | tuple[str, float, dict]]] = {
+    "mse": [
+        ("mse", 1.0),
+    ],
     "pde_shocks": [
         ("mse", 1.0),
         ("pde_shock_residual", 1.0),
         ("rh_residual", 1.0, {"mode": "gt"}),
     ],
-    "mse": [
-        ("mse", 1.0),
-    ],
-    "ecarz": [
-        ("mse", 1.0),
-    ],
     "cell_avg_mse": [
         ("cell_avg_mse", 1.0),
     ],
-    "traj_transformer": [
+    "traj_regularized": [
         ("mse", 1.0),
         ("ic_anchoring", 0.1),
         ("boundary", 1.0),
         ("regularize_traj", 0.1),
     ],
-    "transformer_seg": [
-        ("mse", 1.0),
-    ],
-    "ld_deeponet": [
-        ("mse", 1.0),
-    ],
-    "cvae_deeponet": [
+    "cvae": [
         ("mse", 1.0),
         ("kl_divergence", 1.0, {"free_bits": 0.01}),
     ],
@@ -118,7 +109,7 @@ class CombinedLoss(BaseLoss):
         """Create CombinedLoss from a preset configuration.
 
         Args:
-            preset_name: Name of the preset (e.g., 'shock_net', 'hybrid').
+            preset_name: Name of the preset (e.g., 'mse', 'pde_shocks').
             loss_kwargs: Optional dict of {loss_name: kwargs} for customizing
                 individual loss instances. These override preset defaults.
 
@@ -278,14 +269,11 @@ def get_loss(loss_name: str, **kwargs) -> nn.Module:
 
     Examples:
         # Use a preset
-        loss = get_loss("shock_net")
-
-        # Use an individual loss
         loss = get_loss("mse")
 
         # Use a preset with custom parameters
-        loss = get_loss("hybrid", loss_kwargs={
-            "pde_residual": {"dt": 0.004, "dx": 0.02},
+        loss = get_loss("pde_shocks", loss_kwargs={
+            "pde_shock_residual": {"dt": 0.004, "dx": 0.02},
             "rh_residual": {"dt": 0.004},
         })
     """

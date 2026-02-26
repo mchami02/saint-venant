@@ -134,22 +134,15 @@ Individual losses (in `losses/`):
 | `regularize_traj` | Penalize erratic trajectory jumps between timesteps |
 
 Presets (in `loss.py`):
-| Preset | Models | Description |
-|--------|--------|-------------|
-| `shock_net` | ShockNet | boundary + acceleration + ic_anchoring |
-| `hybrid` | HybridDeepONet | mse + rh_residual + pde_residual + ic + ic_anchoring |
-| `traj_net` | TrajDeepONet, NoTrajDeepONet | mse + ic_anchoring + boundary + regularize_traj |
-| `classifier_traj_net` | ClassifierTrajDeepONet | mse + ic_anchoring + boundary + regularize_traj + acceleration |
-| `traj_transformer` | TrajTransformer | mse + ic_anchoring + boundary + regularize_traj |
-| `classifier_traj_transformer` | ClassifierTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
-| `classifier_all_traj_transformer` | ClassifierAllTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
-| `biased_classifier_traj_transformer` | BiasedClassifierTrajTransformer | mse + ic_anchoring + boundary + regularize_traj + acceleration |
-| `no_traj_transformer` | NoTrajTransformer | mse |
-| `pde_shocks` | Any grid model | mse + pde_shock_residual |
-| `mse` | Any grid model | mse only |
-| `ecarz` | ECARZ | mse only |
-| `ctt_seg` | CTTSeg | mse + ic_anchoring + boundary + regularize_traj + acceleration |
-| `transformer_seg` | TransformerSeg | mse |
+| Preset | Description |
+|--------|-------------|
+| `mse` | mse only (default for most models) |
+| `pde_shocks` | mse + pde_shock_residual + rh_residual |
+| `cell_avg_mse` | cell-average MSE |
+| `traj_regularized` | mse + ic_anchoring + boundary + regularize_traj |
+| `cvae` | mse + kl_divergence |
+
+Model-to-loss mapping is in `train.py` `MODEL_LOSS_PRESET` dict. When `--loss mse` (default), the preset is auto-selected per model.
 
 ## Adding a New Loss
 
@@ -172,8 +165,8 @@ LOSSES = {
 2. Register it in `model.py`:
    - Add to `MODELS` dict (name → builder function)
    - Add to `MODEL_TRANSFORM` dict (name → transform string or `None`)
-3. Add a loss preset in `loss.py` `LOSS_PRESETS` dict
-4. Add a plot preset in `plotter.py` `PLOT_PRESETS` dict
+3. If the model needs a non-default loss, add it to `MODEL_LOSS_PRESET` in `train.py`
+4. If the model needs a non-default plot preset, add it to `MODEL_PLOT_PRESET` in `train.py`
 
 ```python
 # model.py
@@ -181,11 +174,9 @@ from models.my_model import build_my_model
 MODELS = { ..., "MyModel": build_my_model }
 MODEL_TRANSFORM = { ..., "MyModel": None }  # or "ToGridInput", "FlattenDiscontinuities"
 
-# loss.py
-LOSS_PRESETS = { ..., "my_model": [("mse", 1.0), ("ic", 10.0)] }
-
-# plotter.py
-PLOT_PRESETS = { ..., "my_model": ["ground_truth", "mse_error"] }
+# train.py — only if model needs non-default presets
+MODEL_LOSS_PRESET = { ..., "MyModel": "traj_regularized" }  # default is "mse"
+MODEL_PLOT_PRESET = { ..., "MyModel": "traj_residual" }     # default is "grid_residual"
 ```
 
 ## Testing / Verification

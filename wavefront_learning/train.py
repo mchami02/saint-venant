@@ -88,9 +88,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--loss",
         type=str,
-        default="shock_net",
+        default="mse",
         choices=list(LOSSES.keys()) + list(LOSS_PRESETS.keys()),
-        help="Loss function or preset (shock_net, hybrid, or individual losses)",
+        help="Loss function or preset (default: mse, auto-selected per model)",
     )
 
     # Training parameters
@@ -392,6 +392,34 @@ def train_model_two_phase(
     return model
 
 
+MODEL_LOSS_PRESET: dict[str, str] = {
+    "CVAEDeepONet": "cvae",
+    "TrajTransformer": "traj_regularized",
+}
+
+MODEL_PLOT_PRESET: dict[str, str] = {
+    "TrajDeepONet": "traj_residual",
+    "TrajTransformer": "traj_residual",
+    "WaveNO": "traj_residual",
+    "WaveNOLocal": "traj_residual",
+    "WaveNOIndepTraj": "traj_residual",
+    "WaveNODisc": "traj_residual",
+    "ClassifierTrajTransformer": "traj_existence",
+    "ClassifierAllTrajTransformer": "traj_existence",
+    "BiasedClassifierTrajTransformer": "traj_existence",
+    "WaveNOCls": "traj_existence",
+    "CTTBiased": "traj_existence",
+    "CTTSegPhysics": "traj_existence",
+    "CTTFiLM": "traj_existence",
+    "CTTSeg": "traj_existence",
+    "CharNO": "charno",
+    "TransformerSeg": "grid_minimal",
+    "WaveFrontModel": "wavefront",
+    "CVAEDeepONet": "cvae",
+    "ECARZ": "ecarz",
+}
+
+
 def main():
     """Main entry point for training."""
     args = parse_args()
@@ -399,19 +427,11 @@ def main():
     # Create grid_config dict for plotting functions
     grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
 
-    # Auto-set loss and plot presets for LDDeepONet
-    if args.model == "LDDeepONet":
-        if args.loss == "shock_net":  # still the default
-            args.loss = "ld_deeponet"
-        if args.plot is None:
-            args.plot = "ld_deeponet"
-
-    # Auto-set loss and plot presets for CVAEDeepONet
-    if args.model == "CVAEDeepONet":
-        if args.loss == "shock_net":  # still the default
-            args.loss = "cvae_deeponet"
-        if args.plot is None:
-            args.plot = "cvae_deeponet"
+    # Auto-select loss and plot presets based on model
+    if args.loss == "mse":  # default — auto-select per model
+        args.loss = MODEL_LOSS_PRESET.get(args.model, "mse")
+    if args.plot is None:
+        args.plot = MODEL_PLOT_PRESET.get(args.model, "grid_residual")
 
     print(f"Using device: {device}")
     print(f"Equation: {args.equation}")
