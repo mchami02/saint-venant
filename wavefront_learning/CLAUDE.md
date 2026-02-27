@@ -137,6 +137,7 @@ Individual losses (in `losses/`):
 | `acceleration` | Shock detection via high acceleration + missed shock term |
 | `regularize_traj` | Penalize erratic trajectory jumps between timesteps |
 | `entropy` | Lax entropy condition on GT: penalizes missed shocks and false positives |
+| `mse_shock` | MSE on non-shock cells (shocks detected via Lax entropy condition on GT) |
 | `shock_proximity` | Solution MSE + weighted shock proximity MSE |
 
 Presets (in `loss.py`):
@@ -149,6 +150,7 @@ Presets (in `loss.py`):
 | `cvae` | mse + kl_divergence |
 | `shock_proximity` | shock_proximity (solution MSE + proximity MSE) |
 | `mse_wasserstein` | mse + wasserstein (sharp shocks via W1 distance) |
+| `mse_shock` | mse_shock only (MSE on non-shock cells) |
 
 Model-to-loss mapping is in `train.py` `MODEL_LOSS_PRESET` dict. When `--loss mse` (default), the preset is auto-selected per model.
 

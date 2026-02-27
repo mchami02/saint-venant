@@ -1895,6 +1895,14 @@ For NeuralFVSolver. Combines grid MSE with Wasserstein distance for sharper shoc
 
 $$\mathcal{L} = \mathcal{L}_{MSE} + 0.1 \cdot \mathcal{L}_{W_1}$$
 
+#### mse_shock Preset
+
+MSE on non-shock cells only. Excludes shock regions detected via Lax entropy condition on GT.
+
+| Loss | Weight |
+|------|--------|
+| `mse_shock` | 1.0 |
+
 #### Using Presets
 
 ```python
@@ -2125,3 +2133,21 @@ $$\mathcal{L} = \mathcal{L}_{\text{miss}} + w_{\text{fp}} \cdot \mathcal{L}_{\te
 - $\mathcal{L}_{\text{fp}}$: existence-weighted distance from predictions to nearest entropy-detected shock
 
 Parameters: `dx` (spatial step), `fp_weight` (false-positive weight, default: 1.0), `min_component_size` (default: 5, 0 to disable).
+
+#### MSEShockLoss
+
+MSE computed only on non-shock cells. Shocks are detected on the GT grid using the Lax entropy condition, then expanded from interface masks to cell masks. This focuses learning on smooth regions without penalizing sharp shock approximations.
+
+Shock detection (same as EntropyConditionLoss):
+1. For each cell interface: $\lambda_L = 1 - 2\rho_j$, $\lambda_R = 1 - 2\rho_{j+1}$, $s = 1 - \rho_j - \rho_{j+1}$
+2. Interface is a shock if $\lambda_L > s > \lambda_R$ (Lax entropy condition)
+3. Small isolated components (< `min_component_size` cells) are removed via connected component filtering
+
+Cell mask expansion: a cell $j$ is marked as shock if either adjacent interface ($j-1$ or $j$) is a shock.
+
+Loss:
+$$\mathcal{L} = \frac{1}{|\mathcal{S}^c|} \sum_{i \in \mathcal{S}^c} (\hat{u}_i - u_i)^2$$
+
+where $\mathcal{S}^c$ is the set of non-shock cells and $|\mathcal{S}^c|$ is its cardinality. Returns 0 if all cells are shock.
+
+Parameters: `dx` (spatial step, kept for interface compatibility), `min_component_size` (default: 5, 0 to disable).

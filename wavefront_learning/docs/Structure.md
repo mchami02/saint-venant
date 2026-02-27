@@ -74,6 +74,7 @@ wavefront_learning/
 │   ├── base.py                   # BaseLoss abstract class
 │   ├── flux.py                   # greenshields_flux, greenshields_flux_derivative, compute_shock_speed
 │   ├── mse.py                    # MSELoss
+│   ├── mse_shock.py              # MSEShockLoss (MSE on non-shock cells)
 │   ├── ic.py                     # ICLoss
 │   ├── trajectory_consistency.py # TrajectoryConsistencyLoss
 │   ├── boundary.py               # BoundaryLoss
@@ -246,6 +247,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **base.py** — `BaseLoss` abstract class
 - **flux.py** — `greenshields_flux()`, `greenshields_flux_derivative()`, `compute_shock_speed()`
 - **mse.py** — `MSELoss` (grid MSE)
+- **mse_shock.py** — `MSEShockLoss` (MSE on non-shock cells, shocks detected via Lax entropy condition with component filtering)
 - **ic.py** — `ICLoss` (initial condition matching at t=0)
 - **trajectory_consistency.py** — `TrajectoryConsistencyLoss` (analytical RH trajectory matching)
 - **boundary.py** — `BoundaryLoss` (penalize shocks outside domain)
