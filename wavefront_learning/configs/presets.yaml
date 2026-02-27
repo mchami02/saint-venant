@@ -57,6 +57,7 @@ model_transform:
   NoTrajTransformer: null
   CharNO: null
   WaveNO: null
+  WaveNOBase: null
   WaveNOCls: null
   WaveNOLocal: null
   WaveNOIndepTraj: null

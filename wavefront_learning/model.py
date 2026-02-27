@@ -44,6 +44,7 @@ from models.wavefront_model import build_wavefront_model
 from models.waveno import (
     build_shock_aware_waveno,
     build_waveno,
+    build_waveno_base,
     build_waveno_cls,
     build_waveno_disc,
     build_waveno_indep_traj,
@@ -72,6 +73,7 @@ MODELS = {
     "NoTrajTransformer": build_no_traj_transformer,
     "CharNO": build_charno,
     "WaveNO": build_waveno,
+    "WaveNOBase": build_waveno_base,
     "WaveNOCls": build_waveno_cls,
     "WaveNOLocal": build_waveno_local,
     "WaveNOIndepTraj": build_waveno_indep_traj,
@@ -88,6 +90,8 @@ MODELS = {
     "ShockAwareDeepONet": build_shock_aware_deeponet,
     "NeuralFVSolver": build_neural_fv_solver,
 }
+
+
 
 
 def get_model(model_name: str, args: dict) -> nn.Module:

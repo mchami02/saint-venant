@@ -105,6 +105,7 @@ Use `--no_wandb` flag to disable logging.
 | **EncoderDecoder** | Transformer encoder + axial attention decoder | `{output_grid}` |
 | **EncoderDecoderCross** | Transformer encoder + cross-attention decoder | `{output_grid}` |
 | **ECARZ** | EncoderDecoderCross with 2-channel output for ARZ (rho, v) | `{output_grid}` (B,2,T,X) |
+| **WaveNOBase** | WaveNO without trajectory prediction (grid-only ablation) | `{output_grid}` |
 | **WaveNOCls** | WaveNO + classifier head to filter breakpoints | `{positions, existence, output_grid}` |
 | **WaveNOLocal** | WaveNO without cumulative mass (N_k) feature | `{positions, output_grid}` |
 | **WaveNOIndepTraj** | WaveNO with independent trajectory from raw discontinuities | `{positions, output_grid}` |
