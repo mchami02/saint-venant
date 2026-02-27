@@ -49,6 +49,7 @@ wavefront_learning/
 │   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
 │   ├── shock_aware_deeponet.py      # ShockAwareDeepONet: dual-head DeepONet (solution + shock proximity)
 │   ├── neural_fv_solver.py          # NeuralFVSolver: learned FV time-marching with stencil features + shock proximity
+│   ├── lno.py                       # LNO: Lagrangian Neural Operator (characteristic-aligned dual-branch, autoregressive)
 │   └── base/
 │       ├── __init__.py           # Re-exports all base components
 │       ├── base_model.py         # BaseWavefrontModel abstract class
@@ -217,6 +218,8 @@ wavefront_learning/
   - `ShockAwareDeepONet`, `build_shock_aware_deeponet()`
 - **neural_fv_solver.py** — Learned finite volume time-marching with stencil features, characteristic speeds, and shock proximity.
   - `DifferentiableShockProximity`, `FluxNetwork`, `NeuralFVSolver`, `build_neural_fv_solver()`
+- **lno.py** — Lagrangian Neural Operator: dual-branch (Eulerian + Lagrangian) 1D operator with autoregressive time stepping.
+  - `grid_sample_1d()`, `LNO1dBlock`, `LNO1d`, `LNO`, `build_lno()`
 
 ### Model Base Components (`models/base/`)
 

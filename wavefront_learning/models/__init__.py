@@ -16,6 +16,7 @@ from .encoder_decoder import (
     build_encoder_decoder_cross,
 )
 from .hybrid_deeponet import HybridDeepONet, build_hybrid_deeponet
+from .lno import LNO, build_lno
 from .shock_trajectory_net import ShockTrajectoryNet, build_shock_net
 
 __all__ = [
@@ -35,4 +36,7 @@ __all__ = [
     # CharNO
     "CharNO",
     "build_charno",
+    # LNO
+    "LNO",
+    "build_lno",
 ]
