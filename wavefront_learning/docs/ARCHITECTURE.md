@@ -1276,7 +1276,7 @@ grid_input: (1, nt, nx), dt: scalar, dx: scalar
 
 state = grid_input[:, 0, :]                              # (1, nx) — IC
 
-For t = 0..rollout_steps-1:
+For t = 0..nt-2:
   padded = replicate_pad(state, k)                        # (1, nx+2k)
   stencil = unfold(padded, 2k+1)                          # (2k+1, nx)
   char_speeds = flux.derivative(stencil)                  # (2k+1, nx)
@@ -1285,12 +1285,12 @@ For t = 0..rollout_steps-1:
   features = cat[stencil, char_speeds, stencil_prox, dt]  # (3*(2k+1)+1, nx)
   update = FluxNetwork(features)                          # (1, nx)
   state = clamp(state + (dt/dx) * update, 0, 1)
+  store(state)                                            # clean prediction
 
   # Training only:
   state += N(0, noise_std)                                # pushforward noise
   state = teacher_force(state, GT[t+1])                   # stochastic replacement
 
-# Pad remaining steps with detached last state (curriculum)
 → output_grid: (1, nt, nx)
 ```
 
@@ -1306,9 +1306,12 @@ For t = 0..rollout_steps-1:
 
 #### Training Schedule
 
-- **Curriculum**: Rollout steps ramp linearly from 1 to $n_t - 1$ over `curriculum_fraction` of training
-- **Pushforward noise**: $\mathcal{N}(0, \sigma)$ added after each step, $\sigma$ decays linearly to 0 over `noise_decay_fraction` of training
-- **Teacher forcing**: Optional stochastic replacement of predicted state with GT
+Uses the shared 2-phase teacher forcing strategy (see below).
+- **Phase 1**: TF=1.0 — full teacher forcing
+- **Phase 2**: TF=`tf_phase2_ratio` (default 0.3) — partial teacher forcing
+- **Pushforward noise**: Constant $\mathcal{N}(0, \sigma)$ with `ar_noise_std` (default 0.01) during both phases
+- **Final test**: TF=0, noise=0 (full autonomous rollout)
+- Always rolls out full `nt-1` steps (no curriculum)
 
 #### Default Hyperparameters
 
@@ -1318,9 +1321,6 @@ For t = 0..rollout_steps-1:
 | `flux_hidden_dim` | 64 | FluxNetwork hidden channels |
 | `flux_n_layers` | 3 | FluxNetwork depth |
 | `proximity_sigma` | 0.05 | Shock proximity decay scale |
-| `curriculum_fraction` | 0.5 | Epochs to reach full rollout |
-| `initial_noise_std` | 0.01 | Initial pushforward noise |
-| `noise_decay_fraction` | 0.75 | Epochs for noise decay |
 
 Uses `ToGridNoCoords` transform, `mse_wasserstein` loss preset, `grid_residual` plot preset.
 
@@ -2212,3 +2212,36 @@ $$\mathcal{L} = \frac{1}{|\mathcal{S}^c|} \sum_{i \in \mathcal{S}^c} (\hat{u}_i 
 where $\mathcal{S}^c$ is the set of non-shock cells and $|\mathcal{S}^c|$ is its cardinality. Returns 0 if all cells are shock.
 
 Parameters: `dx` (spatial step, kept for interface compatibility), `min_component_size` (default: 5, 0 to disable).
+
+---
+
+## Two-Phase Teacher Forcing (All Autoregressive Models)
+
+All autoregressive models (AutoregressiveFNO, AutoregressiveRealFNO, AutoregressiveWaveNO, LNO, NeuralFVSolver) share a unified 2-phase teacher forcing training strategy, orchestrated by `train_model_two_phase_tf()` in `train.py`.
+
+### Training Phases
+
+| Phase | TF Ratio | Noise | Optimizer | Description |
+|-------|----------|-------|-----------|-------------|
+| Phase 1 | 1.0 | `ar_noise_std` | Fresh AdamW + ReduceLROnPlateau | Full teacher forcing — model learns single-step prediction |
+| Phase 2 | `tf_phase2_ratio` | `ar_noise_std` | Fresh AdamW + ReduceLROnPlateau | Partial TF — model learns to recover from its own errors |
+| Final test | 0.0 | 0.0 | — | Fully autonomous rollout |
+
+### Noise Injection
+
+Pushforward noise $\mathcal{N}(0, \sigma)$ with constant `ar_noise_std` is added to the predicted state **after** it is stored in the output list but **before** TF replacement. This ensures:
+- Clean predictions in the output (for loss computation)
+- Noisy inputs to the next step (for robustness)
+
+### Validation
+
+During training, validation runs with the **same TF ratio** as training (target_grid is injected into the input dict). This gives a realistic estimate of training-time performance. The final test always runs with TF=0.
+
+### Default Hyperparameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `tf_phase1_epochs` | `--epochs` | Phase 1 duration |
+| `tf_phase2_epochs` | `--epochs` | Phase 2 duration |
+| `tf_phase2_ratio` | 0.3 | TF ratio during phase 2 |
+| `ar_noise_std` | 0.01 | Pushforward noise std (both phases) |

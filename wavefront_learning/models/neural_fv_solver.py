@@ -8,17 +8,17 @@ local, finite-speed-of-propagation structure of hyperbolic PDEs by design.
 
 Architecture:
     1. Extract IC from grid_input[:, :, 0, :]
-    2. Autoregressive rollout (for t = 0..rollout_steps-1):
+    2. Autoregressive rollout (for t = 0..nt-2):
        a. Ghost-cell pad + stencil extraction via unfold
        b. Characteristic speeds from flux.derivative(stencil)
        c. Shock proximity from DifferentiableShockProximity (detached)
        d. Stack features: [stencil, char_speeds, stencil_prox, dt]
        e. FluxNetwork(features) -> update
        f. Euler step: state = state + (dt/dx) * update, clamped to [0, 1]
-       g. Pushforward noise (training only)
-       h. Teacher forcing (training only)
-    3. Pad remaining steps if rollout < nt-1 (curriculum)
-    4. Return {"output_grid": (B, 1, nt, nx)}
+       g. Store clean prediction
+       h. Pushforward noise (training only)
+       i. Teacher forcing
+    3. Return {"output_grid": (B, 1, nt, nx)}
 
 Input (via ToGridNoCoords transform):
     - grid_input: (B, 1, nt, nx) -- masked IC on grid (only t=0 used)
@@ -199,9 +199,8 @@ class NeuralFVSolver(nn.Module):
             dropout=dropout,
         )
 
-        # Curriculum and noise attributes (set by training callbacks)
-        self.max_rollout_steps: int = 1
-        self.noise_std: float = 0.01
+        # Noise and teacher forcing (set by training orchestrator)
+        self.noise_std: float = 0.0
         self.teacher_forcing_ratio: float = 0.0
 
     def forward(
@@ -230,17 +229,15 @@ class NeuralFVSolver(nn.Module):
         # Extract IC
         state = grid_input[:, :, 0, :]  # (B, 1, nx)
 
-        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        tf_ratio = self.teacher_forcing_ratio
         target_grid = batch_input.get("target_grid") if tf_ratio > 0 else None
-
-        rollout_steps = self.max_rollout_steps if self.training else nt - 1
 
         # dt as a broadcast channel: (B, 1, 1) for feature stacking
         dt_val = dt[:, None, None]  # (B, 1, 1)
 
         state_list = [state]
 
-        for t in range(rollout_steps):
+        for t in range(nt - 1):
             # a. Ghost cell boundary + stencil extraction
             padded = F.pad(state, (k, k), mode="replicate")  # (B, 1, nx+2k)
             # unfold: extract sliding windows of size 2k+1
@@ -268,22 +265,16 @@ class NeuralFVSolver(nn.Module):
             # f. Euler step
             state = (state + (dt_val / dx) * update).clamp(0.0, 1.0)
 
-            # g. Pushforward noise (training only)
-            if self.training and self.noise_std > 0:
-                noise = torch.randn_like(state) * self.noise_std
-                state = (state + noise).clamp(0.0, 1.0)
-
+            # g. Store clean prediction
             state_list.append(state)
 
-            # h. Teacher forcing
+            # h. Pushforward noise (training only)
+            if self.training and self.noise_std > 0:
+                state = (state + torch.randn_like(state) * self.noise_std).clamp(0.0, 1.0)
+
+            # i. Teacher forcing
             if target_grid is not None and torch.rand(1).item() < tf_ratio:
                 state = target_grid[:, :, t + 1, :]
-
-        # Pad remaining steps with detached last state if curriculum < full rollout
-        if len(state_list) < nt:
-            last_state = state_list[-1].detach()
-            for _ in range(nt - len(state_list)):
-                state_list.append(last_state)
 
         output_grid = torch.stack(state_list, dim=2)  # (B, 1, nt, nx)
 

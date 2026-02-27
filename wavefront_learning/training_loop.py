@@ -190,6 +190,14 @@ def validate_epoch(
                 batch_input = batch_input.to(device)
             batch_target = batch_target.to(device)
 
+            # Inject target for models that use teacher forcing during validation
+            needs_target = (
+                getattr(model, "needs_target_input", False)
+                or getattr(model, "teacher_forcing_ratio", 0.0) > 0
+            )
+            if needs_target and isinstance(batch_input, dict):
+                batch_input["target_grid"] = batch_target
+
             # Forward pass
             pred = model(batch_input)
             # Compute loss (input_dict, output_dict, target)

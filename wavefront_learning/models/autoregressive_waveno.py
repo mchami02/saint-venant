@@ -128,8 +128,9 @@ class AutoregressiveWaveNO(nn.Module):
         nn.init.zeros_(self.traj_mlp[-1].weight)
         nn.init.zeros_(self.traj_mlp[-1].bias)
 
-        # Teacher forcing support
+        # Teacher forcing and noise support
         self.teacher_forcing_ratio = 0.0
+        self.noise_std = 0.0
 
     def forward(
         self,
@@ -197,7 +198,7 @@ class AutoregressiveWaveNO(nn.Module):
         x_grid = x_coords[:, 0, 0, :]  # (B, nx) — spatial grid (same for all t)
         dt_channel = dt.view(B, 1, 1).expand(B, 1, nx)  # (B, 1, nx)
 
-        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        tf_ratio = self.teacher_forcing_ratio
         target_grid = batch_input.get("target_grid") if tf_ratio > 0 else None
 
         # === Stage 4: Autoregressive rollout ===
@@ -228,11 +229,15 @@ class AutoregressiveWaveNO(nn.Module):
             delta_pos = self.traj_mlp(traj_in).squeeze(-1).clamp(-0.1, 0.1)  # (B, D)
             positions = (positions + delta_pos).clamp(0.0, 1.0) * disc_mask  # (B, D)
 
-            # d. Store
+            # d. Store clean predictions
             state_list.append(state)
             pos_list.append(positions)
 
-            # e. Teacher forcing: replace state with GT for next step
+            # e. Pushforward noise: perturb input to next step (training only)
+            if self.training and self.noise_std > 0:
+                state = (state + torch.randn_like(state) * self.noise_std).clamp(0.0, 1.0)
+
+            # f. Teacher forcing: replace state with GT for next step
             if target_grid is not None and torch.rand(1).item() < tf_ratio:
                 state = target_grid[:, :, t + 1, :]
 

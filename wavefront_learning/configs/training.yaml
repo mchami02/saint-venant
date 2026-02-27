@@ -62,9 +62,11 @@ cli_defaults:
   initial_damping_sharpness: 5.0
   dropout: 0.05
 
-  # Teacher forcing
+  # Teacher forcing (2-phase)
   teacher_forcing: 0.0
   tf_decay_fraction: 0.25
+  tf_phase2_ratio: 0.3
+  ar_noise_std: 0.01
 
   # ShockAwareDeepONet
   proximity_sigma: 0.05
@@ -74,9 +76,6 @@ cli_defaults:
   stencil_k: 3
   flux_hidden_dim: 64
   flux_n_layers: 3
-  curriculum_fraction: 0.5
-  initial_noise_std: 0.01
-  noise_decay_fraction: 0.75
 
   # Cell sampling
   cell_sampling_k: 0
