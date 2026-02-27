@@ -1044,46 +1044,56 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 
 **Location**: `models/wavefront_model.py`
 
-A learned Riemann solver that explicitly constructs solutions by predicting wave characteristics (shock vs rarefaction, speeds) for each discontinuity, handling wave interactions iteratively, and reconstructing the full density grid from the resulting wave pattern. No attention mechanisms — each discontinuity is processed independently by a shared encoder + 3 heads.
+A learned Riemann solver that explicitly constructs solutions by predicting wave characteristics (shock vs rarefaction, speeds) for each discontinuity, handling type-aware wave interactions iteratively, and reconstructing the full density grid from the resulting wave pattern. No attention mechanisms — each discontinuity is processed independently by a shared encoder + 2 heads.
+
+Three wave types:
+- **Type 0 — Shock**: step function at linear position $x(t) = x_0 + s \cdot (t - t_0)$
+- **Type 1 — Rarefaction**: entropy solution fan with characteristic speeds from the Flux interface
+- **Type 2 — Bent shock**: step function at polynomial position, produced by shock-rarefaction interactions
 
 #### Pseudocode
 
 ```
-discontinuities: (D, 3)  →  DiscontinuityEncoder(Fourier + MLP)  →  emb: (D, H)
+discontinuities: (D, 3)  →  MLP encoder (2 → H)  →  emb: (D, H)
 emb  →  ClassifierHead(MLP → Sigmoid)    →  is_shock: (D,)
 emb  →  ShockHead(MLP)                   →  shock_speed: (D,)
-emb  →  RarefactionHead(MLP)             →  [speed1, delta]: (D, 2)
 
-Per disc d:
-  shock branch:  1 wave at shock_speed, jump = (rho_R - rho_L) * is_shock
-  rarefaction branch: N sub-waves, speeds linspace(speed1, speed1 + softplus(delta)),
-                      each jump = (rho_R - rho_L) * (1 - is_shock) / N
+build_initial_waves (STE during training):
+  Per disc d:
+    shock slot:  active = STE(is_shock), speeds = shock_speed
+    rar slot:    active = STE(1 - is_shock), speeds = f'(rho_L), f'(rho_R)
+  → Wave buffer: (W,) with [origin_x, origin_t, rho_L, rho_R,
+                             left_speed, right_speed, active, type,
+                             poly_c2, poly_c3, poly_duration]
 
-→ Wave buffer: (W_max,) containing [origin_x, origin_t, speed, jump, active, type]
-
-Collision loop (max_interaction_rounds times):
+process_collisions (type-aware, both train and eval):
   Sort active waves by position → find earliest pairwise collision
-  At collision: create new disc (x_coll, rho_L_outer, rho_R_outer)
-  Re-encode with same encoder+heads → spawn new waves in buffer
-  Soft-deactivate colliding waves
+  Determine collision type from colliding wave types:
+    shock-shock → new shock (analytical Rankine-Hugoniot)
+    rar-rar → merged rarefaction (wider fan with outer states)
+    shock-rar → bent shock (MLP predicts c2, c3, duration)
+  Deactivate colliding waves, spawn new wave
 
-Grid reconstruction (fully vectorized over B, W, nt, nx):
-  density(t, x) = ks[0] + Σ_w jump_w · σ((x - pos_w(t)) / σ) · active_w
-  where pos_w(t) = origin_x_w + speed_w · (t - origin_t_w)
+reconstruct_grid (type-aware, vectorized over B, W, nt, nx):
+  density(t, x) = ks[0] + Σ_w (rho_R - rho_L)_w · fraction_w · active_w
+  where fraction depends on wave type:
+    shock: σ((x - pos(t)) / σ) with pos(t) = x₀ + s·(t-t₀)
+    rar: clamp((ξ - s_L) / (s_R - s_L), 0, 1) with ξ = (x-x₀)/(t-t₀)
+    bent: σ((x - poly(t)) / σ) with poly(t) = x₀ + c₁·dt + c₂·dt² + c₃·dt³
 → output_grid: (1, nt, nx)
 ```
 
 #### Sub-Components
 
-##### DiscontinuityEncoder (shared)
+##### Discontinuity Encoder (shared)
 
-Reuses `models/base/feature_encoders.py:DiscontinuityEncoder`. Fourier features on x coordinate + MLP. Each discontinuity processed independently. Same encoder used for both initial and spawned discontinuities (weight sharing).
+MLP: $(\rho_L, \rho_R) \to H$. Each discontinuity processed independently.
 
 ##### Classifier Head
 
 $$P(\text{shock})_d = \sigma(W_2 \cdot \text{ReLU}(W_1 \cdot h_d + b_1) + b_2) \cdot m_d$$
 
-Binary per-discontinuity: shock (1) vs rarefaction (0).
+Binary per-discontinuity: shock (1) vs rarefaction (0). Uses **straight-through estimator** (STE) during training: hard threshold forward (clean wave types), soft sigmoid backward (gradient flow).
 
 ##### Shock Head
 
@@ -1091,74 +1101,77 @@ $$s_d = W_2 \cdot \text{GELU}(W_1 \cdot h_d + b_1) + b_2$$
 
 Predicts shock speed (dx/dt) per discontinuity. Unbounded output.
 
-##### Rarefaction Head
+##### Bent Shock Head
 
-$$[\text{speed}_1, \delta]_d = W_2 \cdot \text{GELU}(W_1 \cdot h_d + b_1) + b_2$$
+$$[c_2, c_3, \log d]_d = W_2 \cdot \text{GELU}(W_1 \cdot \mathbf{f} + b_1) + b_2$$
 
-Speed range: $[\text{speed}_1, \text{speed}_1 + \text{softplus}(\delta)]$. $N$ sub-waves evenly spaced within this range.
+where $\mathbf{f} = [\rho_L^{shock}, \rho_R^{shock}, \rho_L^{rar}, \rho_R^{rar}, s_{shock}, s_L^{rar}, s_R^{rar}]$ is a 7-feature context vector from the colliding shock and rarefaction. Duration $d = \text{softplus}(\log d)$.
 
-##### Wave Buffer
+##### Wave Data Structure
 
-Pre-allocated tensor of size $W_{max} = D \cdot (N + 1) + R \cdot (N + 1)$ where $R$ = `max_interaction_rounds`.
+Each wave stores 11 properties: `(origin_x, origin_t, rho_L, rho_R, left_speed, right_speed, active, type, poly_c2, poly_c3, poly_duration)`.
 
-Each wave stores: `(origin_x, origin_t, speed, jump, active, type)`.
+- Training: $W = 2D$ (shock + rarefaction slot per disc, STE selects)
+- Eval: $W = D$ (hard threshold, 1 slot per disc)
+- W grows by 1 per collision round
 
-##### Collision Processing
+##### Collision Processing (Type-Aware)
 
 For each round:
 1. Sort active waves by spatial position at $t_{ref} = T/2$
-2. Compute pairwise collision time for adjacent converging waves:
-   $$t_{coll} = \frac{x_j - x_i + s_i \cdot t_{o,i} - s_j \cdot t_{o,j}}{s_i - s_j}$$
-3. Find earliest valid collision (both active, converging, within domain)
-4. At collision: spawn new wave(s) by re-encoding $(x_{coll}, \rho_{L,outer}, \rho_{R,outer})$
-5. Soft-deactivate colliding waves: $\text{active}_w \leftarrow \text{active}_w \cdot (1 - \mathbb{1}_{colliding})$
+2. Detect collision: right edge speed of left wave vs left edge speed of right wave
+3. Determine collision type and compute outcome:
+   - **Shock-shock**: $s_{new} = (f(\rho_R) - f(\rho_L)) / (\rho_R - \rho_L)$ (Rankine-Hugoniot)
+   - **Rar-rar**: merged fan with $s_L = f'(\rho_L^{outer})$, $s_R = f'(\rho_R^{outer})$
+   - **Shock-rar**: bent shock with $x(t) = x_0 + c_1 \cdot dt + c_2 \cdot dt^2 + c_3 \cdot dt^3$ for $dt \leq d$, then linear at exit speed
+4. Deactivate colliding waves, concatenate new wave
 
-##### Grid Reconstruction (Jump-based)
+##### Grid Reconstruction (Type-Aware)
 
-$$\rho(t, x) = \rho_0 + \sum_{w} j_w \cdot \sigma\left(\frac{x - p_w(t)}{\sigma}\right) \cdot a_w$$
+$$\rho(t, x) = \rho_0 + \sum_{w} (\rho_R - \rho_L)_w \cdot F_w(t, x) \cdot a_w$$
 
-where:
-- $\rho_0 = \text{ks}[0]$ is the leftmost piece value (base density)
-- $j_w$ is the density jump at wave $w$
-- $p_w(t) = x_{o,w} + s_w \cdot (t - t_{o,w})$ is the wave position at time $t$
-- $a_w$ is the soft activity of wave $w$
-- $\sigma$ is the sigmoid sharpness parameter
+where $F_w$ depends on wave type:
 
-Fully vectorized: no loops over spatial or temporal dimensions.
+**Shock** ($F_0$): $\sigma((x - p_w(t)) / \sigma)$ with linear position
 
-#### Soft Blending for Differentiability
+**Rarefaction** ($F_1$): $\text{clamp}\left(\frac{\xi - s_L}{s_R - s_L}, 0, 1\right)$ where $\xi = \frac{x - x_0}{t - t_0}$ (exact entropy solution for concave flux)
 
-During training, both shock and rarefaction waves are active for each discontinuity, weighted by classifier probability:
-- Shock wave jump: $(\\rho_R - \\rho_L) \cdot P(\text{shock})$
-- Rarefaction sub-wave jumps: $(\\rho_R - \\rho_L) \cdot (1 - P(\text{shock})) / N$
+**Bent shock** ($F_2$): $\sigma((x - q_w(t)) / \sigma)$ with polynomial position $q_w(t) = x_0 + c_1 dt + c_2 dt^2 + c_3 dt^3$ (curved portion) then linear after duration $d$
 
-This ensures gradients flow through both branches regardless of the classifier output.
+#### Gradient Flow
+
+| Component | Gradient mechanism |
+|-----------|-------------------|
+| `classifier_head` | STE: forward uses hard threshold, backward uses soft sigmoid |
+| `shock_head` | Direct: shock speed flows through reconstruction loss when disc is shock |
+| `bent_shock_head` | Direct: c2, c3, duration flow through polynomial trajectory → reconstruction loss |
+| `disc_encoder` | Direct: shared encoder for all heads |
+| Collision detection | Non-differentiable (argsort), but wave parameters maintain gradients through gather ops |
 
 #### Input/Output Format
 
 **Input** (dictionary):
-- `discontinuities`: $(D, 3)$ — $[x_0, \\rho_L, \\rho_R]$ per discontinuity
+- `discontinuities`: $(D, 3)$ — $[x_0, \rho_L, \rho_R]$ per discontinuity
 - `disc_mask`: $(D,)$ — validity mask
 - `t_coords`: $(1, n_t, n_x)$ — time coordinates
 - `x_coords`: $(1, n_t, n_x)$ — space coordinates
-- `ks`: $(K,)$ — piece values (used for base density $\\rho_0 = ks[0]$)
+- `ks`: $(K,)$ — piece values (used for base density $\rho_0 = ks[0]$)
 
 **Output** (dictionary):
 - `output_grid`: $(1, n_t, n_x)$ — predicted density grid
-- `wave_origins_x`: $(W,)$ — wave origin x-positions (for plotting)
-- `wave_origins_t`: $(W,)$ — wave origin times (for plotting)
-- `wave_speeds`: $(W,)$ — wave speeds (for plotting)
-- `wave_active`: $(W,)$ — wave activity masks (for plotting)
-- `wave_types`: $(W,)$ — 0=shock, 1=rarefaction, 2=spawned (for plotting)
+- `wave_origins_x`: $(W,)$ — wave origin x-positions (eval only, for plotting)
+- `wave_origins_t`: $(W,)$ — wave origin times (eval only)
+- `wave_left_speed`: $(W,)$ — left edge speeds (eval only)
+- `wave_right_speed`: $(W,)$ — right edge speeds (eval only)
+- `wave_active`: $(W,)$ — wave activity masks (eval only)
+- `wave_types`: $(W,)$ — 0=shock, 1=rarefaction, 2=bent shock (eval only)
+- `wave_poly_c2`, `wave_poly_c3`, `wave_poly_duration`: $(W,)$ — bent shock params (eval only)
 
 #### Default Configuration
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `hidden_dim` | 64 | Encoder and head hidden dimension |
-| `num_disc_frequencies` | 8 | Fourier features for position encoding |
-| `num_disc_layers` | 2 | MLP depth in discontinuity encoder |
-| `rarefaction_angles` | 5 | N sub-waves per rarefaction fan |
 | `max_interaction_rounds` | 5 | Bounded collision processing iterations |
 | `sigma` | 0.01 | Sigmoid sharpness for reconstruction |
 | `dropout` | 0.05 | Dropout rate in encoder |
@@ -2004,7 +2017,7 @@ loss = get_loss("pde_shocks", loss_kwargs={
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
 | TransformerSeg | IC segments (xs, ks) + coordinates | Full grid | Segment-based encoding + cross-attention density decoder, no trajectory prediction |
-| WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with analytical wave reconstruction |
+| WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with type-aware waves (shock/rarefaction/bent shock) |
 | LDDeepONet | Piecewise IC (xs, ks) + target grid (training) | Full grid (generative) | VAE + flow matching with resolution-invariant DeepONet decoder |
 | NeuralFVSolver | Grid IC $(1, n_t, n_x)$ | Full grid | Learned FV time-marching with stencil features + shock proximity |
 

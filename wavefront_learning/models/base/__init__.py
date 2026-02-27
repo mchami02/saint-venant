@@ -37,10 +37,13 @@ from .feature_encoders import (
     TimeEncoder,
 )
 from .flow_matching import ConditionEncoder, FlowMatchingDenoiser, HeunODESolver
+from .collision_processor import process_collisions
 from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
 from .regions import RegionTrunk, RegionTrunkSet
 from .transformer_encoder import Encoder
 from .vae_encoder import VAEEncoder
+from .wave_builder import build_initial_waves
+from .wave_reconstructor import reconstruct_grid
 
 __all__ = [
     # Base class
@@ -87,4 +90,8 @@ __all__ = [
     "DiscontinuityPhysicsEncoder",
     "CharacteristicFeatureComputer",
     "TimeConditioner",
+    # Wave construction & reconstruction
+    "build_initial_waves",
+    "reconstruct_grid",
+    "process_collisions",
 ]

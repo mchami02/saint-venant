@@ -1,7 +1,7 @@
 """Wave pattern visualization for WaveFrontModel.
 
 Plot functions compatible with the PLOTS registry:
-- plot_wave_pattern: GT grid with wave lines overlay (shocks, rarefactions, spawned)
+- plot_wave_pattern: GT grid with wave lines overlay (shocks, rarefactions, bent shocks)
 
 All functions return list[tuple[str, Figure]] of (log_key, figure) pairs.
 """
@@ -23,9 +23,9 @@ def plot_wave_pattern(
 
     For each sample (up to 3):
     - Background: GT grid heatmap (viridis)
-    - Red solid lines: shock waves
-    - Blue line bundles: rarefaction fans (N sub-waves)
-    - Green dashed lines: spawned waves from interactions
+    - Red solid lines: shock waves (single line)
+    - Blue filled region: rarefaction fans (two diverging edges)
+    - Lime solid lines: bent shock waves (polynomial curve)
     - Star markers at collision points (origin_t > 0)
 
     Args:
@@ -33,9 +33,13 @@ def plot_wave_pattern(
             - grids: (B, nt, nx) ground truth grids
             - wave_origins_x: (B, W) wave origin x positions
             - wave_origins_t: (B, W) wave origin times
-            - wave_speeds: (B, W) wave speeds
+            - wave_left_speed: (B, W) left edge speeds
+            - wave_right_speed: (B, W) right edge speeds
             - wave_active: (B, W) wave activity masks
-            - wave_types: (B, W) wave types (0=shock, 1=rarefaction, 2=spawned)
+            - wave_types: (B, W) wave types (0=shock, 1=rarefaction, 2=bent shock)
+            - wave_poly_c2: (B, W) bent shock quadratic coeff (optional)
+            - wave_poly_c3: (B, W) bent shock cubic coeff (optional)
+            - wave_poly_duration: (B, W) bent shock curve duration (optional)
         grid_config: Dict with {nx, nt, dx, dt}.
 
     Returns:
@@ -44,9 +48,15 @@ def plot_wave_pattern(
     grids = traj_data["grids"]
     wave_ox = traj_data["wave_origins_x"]
     wave_ot = traj_data["wave_origins_t"]
-    wave_sp = traj_data["wave_speeds"]
+    wave_left_sp = traj_data["wave_left_speed"]
+    wave_right_sp = traj_data["wave_right_speed"]
     wave_ac = traj_data["wave_active"]
     wave_ty = traj_data["wave_types"]
+
+    # Optional bent shock parameters
+    wave_c2 = traj_data.get("wave_poly_c2")
+    wave_c3 = traj_data.get("wave_poly_c3")
+    wave_dur = traj_data.get("wave_poly_duration")
 
     nx, nt, dx, dt = (
         grid_config["nx"],
@@ -89,60 +99,74 @@ def plot_wave_pattern(
 
             ox = float(wave_ox[b, w])
             ot = float(wave_ot[b, w])
-            sp = float(wave_sp[b, w])
+            left_sp = float(wave_left_sp[b, w])
+            right_sp = float(wave_right_sp[b, w])
             wtype = float(wave_ty[b, w])
 
-            # Compute wave line endpoints clipped to domain
-            # Wave: x(t) = ox + sp * (t - ot)
-            # Find t range where x is in [0, X_max]
-            t_start = ot
-            t_end = T_max
-
-            # Clip to spatial domain
-            if abs(sp) > 1e-8:
-                t_at_x0 = ot + (0.0 - ox) / sp
-                t_at_xmax = ot + (X_max - ox) / sp
-                t_bounds = sorted([t_at_x0, t_at_xmax])
-                t_start = max(t_start, t_bounds[0])
-                t_end = min(t_end, t_bounds[1])
-
-            if t_end <= t_start:
-                continue
-
-            x_start = ox + sp * (t_start - ot)
-            x_end = ox + sp * (t_end - ot)
-
-            # Clip to domain
-            x_start = np.clip(x_start, 0, X_max)
-            x_end = np.clip(x_end, 0, X_max)
-
-            # Style by wave type
             if wtype < 0.5:
-                # Shock
-                color = "red"
-                linestyle = "-"
-                linewidth = 2.0
+                # --- Shock: single line ---
+                _draw_linear_wave(
+                    ax, ox, ot, left_sp, T_max, X_max,
+                    color="red", linestyle="-", linewidth=2.0,
+                    alpha=min(1.0, activity),
+                )
             elif wtype < 1.5:
-                # Rarefaction
-                color = "deepskyblue"
-                linestyle = "-"
-                linewidth = 1.0
+                # --- Rarefaction: two diverging edges with fill ---
+                t_pts = np.linspace(ot, T_max, 100)
+                x_left = ox + left_sp * (t_pts - ot)
+                x_right = ox + right_sp * (t_pts - ot)
+
+                # Clip to domain
+                x_left = np.clip(x_left, 0, X_max)
+                x_right = np.clip(x_right, 0, X_max)
+
+                ax.fill_betweenx(
+                    t_pts, x_left, x_right,
+                    alpha=0.15 * min(1.0, activity),
+                    color="deepskyblue",
+                )
+                ax.plot(
+                    x_left, t_pts,
+                    color="deepskyblue", linestyle="-", linewidth=1.0,
+                    alpha=min(1.0, activity),
+                )
+                ax.plot(
+                    x_right, t_pts,
+                    color="deepskyblue", linestyle="-", linewidth=1.0,
+                    alpha=min(1.0, activity),
+                )
             else:
-                # Spawned
-                color = "lime"
-                linestyle = "--"
-                linewidth = 1.5
+                # --- Bent shock: polynomial curve ---
+                c2 = float(wave_c2[b, w]) if wave_c2 is not None else 0.0
+                c3 = float(wave_c3[b, w]) if wave_c3 is not None else 0.0
+                dur = float(wave_dur[b, w]) if wave_dur is not None else 0.0
 
-            ax.plot(
-                [x_start, x_end],
-                [t_start, t_end],
-                color=color,
-                linestyle=linestyle,
-                linewidth=linewidth,
-                alpha=min(1.0, activity),
-            )
+                t_pts = np.linspace(ot, T_max, 200)
+                dt_pts = t_pts - ot
+                c1 = left_sp
 
-            # Mark collision points (spawned waves with origin_t > 0)
+                # Curved portion
+                pos_curved = ox + c1 * dt_pts + c2 * dt_pts**2 + c3 * dt_pts**3
+
+                if dur > 1e-8:
+                    # After curved portion: linear continuation
+                    exit_speed = c1 + 2.0 * c2 * dur + 3.0 * c3 * dur**2
+                    pos_at_dur = ox + c1 * dur + c2 * dur**2 + c3 * dur**3
+                    pos_after = pos_at_dur + exit_speed * (dt_pts - dur)
+                    in_curve = dt_pts <= dur
+                    x_pts = np.where(in_curve, pos_curved, pos_after)
+                else:
+                    x_pts = pos_curved
+
+                x_pts = np.clip(x_pts, 0, X_max)
+
+                ax.plot(
+                    x_pts, t_pts,
+                    color="lime", linestyle="-", linewidth=1.5,
+                    alpha=min(1.0, activity),
+                )
+
+            # Mark collision points (waves with origin_t > 0)
             if ot > 1e-6:
                 collision_xs.append(ox)
                 collision_ts.append(ot)
@@ -169,3 +193,28 @@ def plot_wave_pattern(
         figures.append((f"wave_pattern_sample_{b + 1}", fig))
 
     return figures
+
+
+def _draw_linear_wave(
+    ax, ox: float, ot: float, speed: float,
+    T_max: float, X_max: float,
+    **plot_kwargs,
+) -> None:
+    """Draw a linear wave line clipped to the domain."""
+    t_start = ot
+    t_end = T_max
+
+    if abs(speed) > 1e-8:
+        t_at_x0 = ot + (0.0 - ox) / speed
+        t_at_xmax = ot + (X_max - ox) / speed
+        t_bounds = sorted([t_at_x0, t_at_xmax])
+        t_start = max(t_start, t_bounds[0])
+        t_end = min(t_end, t_bounds[1])
+
+    if t_end <= t_start:
+        return
+
+    x_start = np.clip(ox + speed * (t_start - ot), 0, X_max)
+    x_end = np.clip(ox + speed * (t_end - ot), 0, X_max)
+
+    ax.plot([x_start, x_end], [t_start, t_end], **plot_kwargs)
