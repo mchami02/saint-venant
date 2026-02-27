@@ -64,6 +64,9 @@ wavefront_learning/
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
+│       ├── wave_builder.py          # build_initial_waves (initial wave construction with STE)
+│       ├── wave_reconstructor.py    # reconstruct_grid (type-aware: shock/rarefaction/bent shock)
+│       ├── collision_processor.py   # process_collisions (type-aware collision loop)
 │       ├── characteristic_features.py  # SegmentPhysicsEncoder, DiscontinuityPhysicsEncoder, CharacteristicFeatureComputer
 │       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias, compute_discontinuity_characteristic_bias
 │       ├── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
@@ -236,6 +239,9 @@ wavefront_learning/
 - **cross_decoder.py** — `CrossDecoderLayer`, `CrossDecoder`
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
+- **wave_builder.py** — `build_initial_waves()` (STE-based initial wave construction from discontinuity predictions)
+- **wave_reconstructor.py** — `reconstruct_grid()` (type-aware grid reconstruction for shocks, rarefaction fans, bent shocks)
+- **collision_processor.py** — `process_collisions()` (type-aware collision loop: shock-shock, rar-rar, shock-rar→bent shock)
 - **characteristic_features.py** — `SegmentPhysicsEncoder`, `DiscontinuityPhysicsEncoder`, `CharacteristicFeatureComputer`
 - **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
 - **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)

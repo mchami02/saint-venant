@@ -27,6 +27,20 @@ class Flux(nn.Module):
         """Compute flux derivative f'(rho) = characteristic speed."""
         raise NotImplementedError
 
+    def inverse_derivative(self, xi: torch.Tensor) -> torch.Tensor:
+        """Compute (f')^{-1}(xi) — density from similarity variable.
+
+        Used by the entropy solution to reconstruct density inside
+        a rarefaction fan: rho(x/t) = (f')^{-1}(x/t).
+
+        Args:
+            xi: Similarity variable x/t values.
+
+        Returns:
+            Density values with same shape as input.
+        """
+        raise NotImplementedError
+
     def shock_speed(
         self, rho_L: torch.Tensor, rho_R: torch.Tensor
     ) -> torch.Tensor:
@@ -60,6 +74,10 @@ class GreenshieldsFlux(Flux):
 
     def derivative(self, rho: torch.Tensor) -> torch.Tensor:
         return 1.0 - 2.0 * rho
+
+    def inverse_derivative(self, xi: torch.Tensor) -> torch.Tensor:
+        # f'(rho) = 1 - 2*rho => rho = (1 - xi) / 2
+        return (1.0 - xi) / 2.0
 
     def shock_speed(
         self, rho_L: torch.Tensor, rho_R: torch.Tensor
