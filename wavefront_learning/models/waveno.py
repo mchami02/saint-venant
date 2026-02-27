@@ -720,6 +720,11 @@ def build_waveno_disc(args: dict) -> WaveNO:
     return _build_waveno_base(args, use_discontinuities=True)
 
 
+def build_waveno_base(args: dict) -> WaveNO:
+    """WaveNO without trajectory prediction (grid-only output)."""
+    return _build_waveno_base(args, predict_trajectories=False)
+
+
 def build_shock_aware_waveno(args: dict) -> WaveNO:
     """WaveNO with shock proximity prediction head."""
     return _build_waveno_base(args, predict_proximity=True)

@@ -1931,6 +1931,7 @@ loss = get_loss("pde_shocks", loss_kwargs={
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
 | WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
+| WaveNOBase | IC segments (xs, ks) + coordinates | Full grid + characteristic bias | WaveNO without trajectory prediction (no breakpoint evolution, no boundary features) |
 | WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
 | TransformerSeg | IC segments (xs, ks) + coordinates | Full grid | Segment-based encoding + cross-attention density decoder, no trajectory prediction |
@@ -1986,6 +1987,7 @@ Six ablation models isolate which architectural component drives the performance
 
 | Model | Flag | Change |
 |-------|------|--------|
+| `WaveNOBase` | `predict_trajectories=False` | Removes stages 3-4 (breakpoint evolution + boundary computation); query encoder uses only (t, x) without boundary features. Grid-only output, no trajectory prediction. Ablation baseline. |
 | `WaveNOCls` | `with_classifier=True` | Adds classifier head on breakpoint embeddings to filter breakpoints in `compute_boundaries` |
 | `WaveNOLocal` | `local_features=False` | Removes cumulative mass $N_k$ from `SegmentPhysicsEncoder` (3 scalar features instead of 4) |
 | `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
