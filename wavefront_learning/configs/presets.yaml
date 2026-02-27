@@ -73,6 +73,7 @@ model_transform:
   CVAEDeepONet: ToGridInput
   ShockAwareDeepONet: ToGridInput
   NeuralFVSolver: ToGridNoCoords
+  LNO: ToGridNoCoords
 
 # Loss presets.
 # Each preset is a list of entries with name, weight, and optional kwargs.

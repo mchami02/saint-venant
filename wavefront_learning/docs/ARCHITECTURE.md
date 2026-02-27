@@ -16,6 +16,7 @@ This document describes the neural network architectures and loss functions used
    - [WaveNO](#waveno)
    - [LatentDiffusionDeepONet](#latentdiffusiondeeponet)
    - [NeuralFVSolver](#neuralfvsolver)
+   - [LNO](#lno)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -1322,6 +1323,66 @@ For t = 0..rollout_steps-1:
 | `noise_decay_fraction` | 0.75 | Epochs for noise decay |
 
 Uses `ToGridNoCoords` transform, `mse_wasserstein` loss preset, `grid_residual` plot preset.
+
+---
+
+### LNO
+
+**Location**: `models/lno.py`
+
+**Concept**: A dual-branch neural operator that replaces FNO's Fourier branch with a characteristic-aligned Lagrangian transform. The Lagrangian branch uses the known LWR flux function to compute characteristic speeds, pushes grid points along characteristics using differentiable `F.grid_sample`, processes in the Lagrangian frame via 1D convolution, and interpolates back. This physically aligns the learned convolution with the wave propagation direction.
+
+**Outer wrapper (LNO)** — autoregressive time stepping:
+```
+grid_input (1, nt, nx), dt (scalar)
+state = grid_input[:, 0, :]                         -> (1, nx)
+for t in 1..nt-1:
+    lno_input = [state, dt_channel]                  -> (2, nx)
+    state = clamp(state + LNO1d(lno_input, dt), 0, 1)
+output_grid = stack(states)                          -> (1, nt, nx)
+```
+
+**Core (LNO1d)**:
+```
+(2, nx) -> Lifting Conv1d(2, C, 1) -> (C, nx)
+-> [LNO1dBlock] x L -> (C, nx)
+-> Projection Conv1d(C, 1, 1) -> (1, nx)
+```
+
+**Per layer (LNO1dBlock)** — three parallel branches:
+```
+h (C, nx) --+--> Skip: Conv1d(C, C, 1) -----------------------------> sum -> GELU -> (C, nx)
+             +--> Eulerian: Conv1d(C,C,1) -> GELU -> Conv1d(C,C,1) ---^
+             +--> Lagrangian: -----------------------------------------^
+```
+
+**Lagrangian branch detail**:
+1. $\hat\rho = \text{Conv1d}(C, 1, 1)(h)$ — project to density estimate
+2. $c = f'(\hat\rho) = 1 - 2\hat\rho$ — characteristic speed (Greenshields)
+3. $d = \text{clamp}(c \cdot \alpha \cdot \Delta t,\; -d_{\max},\; +d_{\max})$ — scaled, clamped displacement
+4. $x_{\text{lag}} = x_{\text{eul}} + d \cdot (n_x - 1)$ — forward Lagrangian grid
+5. $h_{\text{lag}} = \text{grid\_sample\_1d}(h, x_{\text{lag}})$ — warp to Lagrangian frame
+6. $h_{\text{lag}} = \text{Conv1d}(C, C, k)(h_{\text{lag}})$ — process in Lagrangian frame
+7. $x_{\text{inv}} = x_{\text{eul}} - d \cdot (n_x - 1)$ — first-order inverse mapping
+8. $\text{result} = \text{grid\_sample\_1d}(h_{\text{lag}}, x_{\text{inv}})$ — warp back to Eulerian frame
+
+**Key details**:
+- **Displacement clamping**: $|d| \leq d_{\max}$ (default 0.1). Prevents multi-valued Lagrangian grid at shocks.
+- **Inverse mapping**: First-order approximation $x_{\text{inv}} = x_{\text{eul}} - d$. $O(\Delta t^2)$ accurate for small dt.
+- **Learnable scale**: Per-layer `nn.Parameter` $\alpha$ scales the physical displacement.
+- **Density clamp**: `state.clamp(0, 1)` after each autoregressive step (Greenshields bounds).
+- **grid_sample_1d**: Wraps `F.grid_sample` for 1D by adding a degenerate spatial dimension (y=0).
+
+**Default configuration**:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_channels` | 32 | Hidden channel width C |
+| `n_layers` | 4 | Number of LNO1dBlock layers |
+| `kernel_size` | 5 | Lagrangian conv kernel size |
+| `max_displacement` | 0.1 | Displacement clamp (fraction of domain) |
+
+Uses `ToGridNoCoords` transform, default `mse` loss preset, `grid_residual` plot preset.
 
 ---
 
