@@ -44,6 +44,7 @@ class AutoregressiveFNO(nn.Module):
         super().__init__()
         self.fno = FNO(**fno_kwargs)
         self.teacher_forcing_ratio = 0.0
+        self.noise_std = 0.0
 
     def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         grid_input = x["grid_input"]  # (B, 1, nt, nx)
@@ -53,7 +54,7 @@ class AutoregressiveFNO(nn.Module):
         state = grid_input[:, :, 0, :]  # (B, 1, nx) — initial condition
         dt_channel = dt.view(B, 1, 1).expand(B, 1, nx)
 
-        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        tf_ratio = self.teacher_forcing_ratio
         target_grid = x.get("target_grid") if tf_ratio > 0 else None
 
         outputs = [state]
@@ -61,7 +62,10 @@ class AutoregressiveFNO(nn.Module):
             fno_input = torch.cat([state, dt_channel], dim=1)  # (B, 2, nx)
             state = state + self.fno(fno_input)  # (B, 1, nx)
             outputs.append(state)
-            # Replace input to NEXT step with GT stochastically
+            # Pushforward noise: perturb input to next step (training only)
+            if self.training and self.noise_std > 0:
+                state = (state + torch.randn_like(state) * self.noise_std).clamp(0.0, 1.0)
+            # Teacher forcing: replace input to NEXT step with GT
             if target_grid is not None and torch.rand(1).item() < tf_ratio:
                 state = target_grid[:, :, t + 1, :]
 
@@ -206,6 +210,7 @@ class AutoregressiveRealFNO(nn.Module):
         super().__init__()
         self.fno = RealFNO1d(**fno_kwargs)
         self.teacher_forcing_ratio = 0.0
+        self.noise_std = 0.0
 
     def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         grid_input = x["grid_input"]  # (B, 1, nt, nx)
@@ -215,7 +220,7 @@ class AutoregressiveRealFNO(nn.Module):
         state = grid_input[:, :, 0, :]  # (B, 1, nx) — initial condition
         dt_channel = dt.view(B, 1, 1).expand(B, 1, nx)
 
-        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        tf_ratio = self.teacher_forcing_ratio
         target_grid = x.get("target_grid") if tf_ratio > 0 else None
 
         outputs = [state]
@@ -223,7 +228,10 @@ class AutoregressiveRealFNO(nn.Module):
             fno_input = torch.cat([state, dt_channel], dim=1)  # (B, 2, nx)
             state = state + self.fno(fno_input)  # (B, 1, nx)
             outputs.append(state)
-            # Replace input to NEXT step with GT stochastically
+            # Pushforward noise: perturb input to next step (training only)
+            if self.training and self.noise_std > 0:
+                state = (state + torch.randn_like(state) * self.noise_std).clamp(0.0, 1.0)
+            # Teacher forcing: replace input to NEXT step with GT
             if target_grid is not None and torch.rand(1).item() < tf_ratio:
                 state = target_grid[:, :, t + 1, :]
 

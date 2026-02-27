@@ -212,16 +212,38 @@ def parse_args() -> argparse.Namespace:
         help="Dropout probability for WaveNO",
     )
 
-    # Teacher forcing for autoregressive models
+    # Teacher forcing for autoregressive models (2-phase)
     parser.add_argument(
         "--teacher_forcing",
         type=float,
-        help="Initial teacher forcing ratio for autoregressive models",
+        help="(Deprecated, ignored) 2-phase TF is now automatic for AR models",
     )
     parser.add_argument(
         "--tf_decay_fraction",
         type=float,
-        help="Fraction of total epochs over which teacher forcing decays to 0",
+        help="(Deprecated, ignored) 2-phase TF replaces linear decay",
+    )
+    parser.add_argument(
+        "--tf_phase1_epochs",
+        type=int,
+        default=None,
+        help="Phase 1 (TF=1.0) epochs for AR models (default: --epochs)",
+    )
+    parser.add_argument(
+        "--tf_phase2_epochs",
+        type=int,
+        default=None,
+        help="Phase 2 (TF=phase2_ratio) epochs for AR models (default: --epochs)",
+    )
+    parser.add_argument(
+        "--tf_phase2_ratio",
+        type=float,
+        help="Teacher forcing ratio during phase 2 (default: 0.3)",
+    )
+    parser.add_argument(
+        "--ar_noise_std",
+        type=float,
+        help="Pushforward noise std for all AR models (default: 0.01)",
     )
 
     # ShockAwareDeepONet parameters
@@ -251,21 +273,6 @@ def parse_args() -> argparse.Namespace:
         "--flux_n_layers",
         type=int,
         help="Number of layers in NeuralFVSolver flux network",
-    )
-    parser.add_argument(
-        "--curriculum_fraction",
-        type=float,
-        help="Fraction of epochs to reach full rollout for NeuralFVSolver",
-    )
-    parser.add_argument(
-        "--initial_noise_std",
-        type=float,
-        help="Initial pushforward noise std for NeuralFVSolver",
-    )
-    parser.add_argument(
-        "--noise_decay_fraction",
-        type=float,
-        help="Fraction of epochs for noise decay in NeuralFVSolver",
     )
 
     # Cell sampling
@@ -338,5 +345,27 @@ def parse_args() -> argparse.Namespace:
         args.ld_phase1_epochs = max(1, args.epochs * 2 // 3)
     if args.ld_phase2_epochs is None:
         args.ld_phase2_epochs = max(1, args.epochs - args.ld_phase1_epochs)
+
+    # Default phase epoch splits for 2-phase TF (AR models)
+    if args.tf_phase1_epochs is None:
+        args.tf_phase1_epochs = args.epochs
+    if args.tf_phase2_epochs is None:
+        args.tf_phase2_epochs = args.epochs
+
+    # Deprecation warnings
+    import warnings
+
+    if args.teacher_forcing and args.teacher_forcing > 0:
+        warnings.warn(
+            "--teacher_forcing is deprecated; 2-phase TF is now automatic for AR models.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if hasattr(args, "tf_decay_fraction") and args.tf_decay_fraction != 0.25:
+        warnings.warn(
+            "--tf_decay_fraction is deprecated; 2-phase TF replaces linear decay.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     return args

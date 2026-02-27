@@ -86,39 +86,6 @@ def train_model(
 
         callbacks.append(_kl_callback)
 
-    # Teacher forcing decay for autoregressive models
-    tf_initial = getattr(args, "teacher_forcing", 0.0)
-    if tf_initial > 0 and hasattr(model, "teacher_forcing_ratio"):
-        decay_epochs = max(1, int(args.tf_decay_fraction * args.epochs))
-
-        def _tf_callback(epoch):
-            ratio = tf_initial * max(0.0, 1.0 - epoch / decay_epochs)
-            model.teacher_forcing_ratio = ratio
-            logger.log_metrics({"train/teacher_forcing_ratio": ratio})
-
-        callbacks.append(_tf_callback)
-
-    # Curriculum + noise decay for NeuralFVSolver
-    if args.model == "NeuralFVSolver" and hasattr(model, "max_rollout_steps"):
-        total_rollout = args.nt - 1
-        curriculum_epochs = max(1, int(args.curriculum_fraction * args.epochs))
-        noise_decay_epochs = max(1, int(args.noise_decay_fraction * args.epochs))
-        initial_noise = args.initial_noise_std
-
-        def _curriculum_callback(epoch):
-            progress = min(1.0, (epoch + 1) / curriculum_epochs)
-            model.max_rollout_steps = max(1, int(progress * total_rollout))
-            noise_progress = min(1.0, (epoch + 1) / noise_decay_epochs)
-            model.noise_std = initial_noise * max(0.0, 1.0 - noise_progress)
-            logger.log_metrics(
-                {
-                    "train/max_rollout_steps": model.max_rollout_steps,
-                    "train/noise_std": model.noise_std,
-                }
-            )
-
-        callbacks.append(_curriculum_callback)
-
     # Compose callbacks into a single function
     epoch_callback = None
     if callbacks:
@@ -145,6 +112,124 @@ def train_model(
 
     model = load_model(args.save_path, device, vars(args))
     print(f"\nTraining complete. Best val loss: {best_val_loss:.6f}")
+    return model
+
+
+def train_model_two_phase_tf(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    args,
+    logger: WandbLogger,
+    grid_config: dict | None = None,
+) -> nn.Module:
+    """Two-phase teacher forcing training for autoregressive models.
+
+    Phase 1: TF ratio = 1.0 (full teacher forcing).
+    Phase 2: TF ratio = tf_phase2_ratio (partial, default 0.3).
+
+    Both phases use constant pushforward noise (ar_noise_std).
+
+    Args:
+        model: Autoregressive model with teacher_forcing_ratio attribute.
+        train_loader: Training data loader.
+        val_loader: Validation data loader.
+        args: Training arguments.
+        logger: W&B logger.
+        grid_config: Dict with {nx, nt, dx, dt} for plotting.
+
+    Returns:
+        Trained model (best checkpoint from phase 2).
+    """
+    if grid_config is None:
+        grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+
+    phase1_save = args.save_path.replace(".pth", "_phase1.pth")
+    config = vars(args)
+    noise_std = getattr(args, "ar_noise_std", 0.01)
+
+    # ── Phase 1: Full teacher forcing (TF = 1.0) ──
+    print(f"\n{'=' * 60}")
+    print(f"Phase 1: TF=1.0 ({args.tf_phase1_epochs} epochs, noise={noise_std})")
+    print(f"{'=' * 60}")
+
+    model.teacher_forcing_ratio = 1.0
+    model.noise_std = noise_std
+
+    loss_fn = create_loss_from_args(args)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=TRAINING_DEFAULTS.scheduler_factor,
+        patience=TRAINING_DEFAULTS.scheduler_patience,
+        threshold=TRAINING_DEFAULTS.scheduler_threshold,
+    )
+
+    best = _run_training_loop(
+        model,
+        train_loader,
+        val_loader,
+        loss_fn,
+        optimizer,
+        scheduler,
+        args.tf_phase1_epochs,
+        phase1_save,
+        config,
+        logger,
+        grid_config,
+        args.plot,
+        description="Phase 1 (TF=1.0)",
+        extra_log={"train/teacher_forcing_ratio": 1.0, "train/noise_std": noise_std},
+    )
+
+    model = load_model(phase1_save, device, config)
+    print(f"\nPhase 1 complete. Best val loss: {best:.6f}")
+
+    # ── Phase 2: Partial teacher forcing (TF = tf_phase2_ratio) ──
+    tf2 = getattr(args, "tf_phase2_ratio", 0.3)
+    print(f"\n{'=' * 60}")
+    print(f"Phase 2: TF={tf2} ({args.tf_phase2_epochs} epochs, noise={noise_std})")
+    print(f"{'=' * 60}")
+
+    model.train()
+    model.teacher_forcing_ratio = tf2
+    model.noise_std = noise_std
+
+    loss_fn = create_loss_from_args(args)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
+    )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=TRAINING_DEFAULTS.scheduler_factor,
+        patience=TRAINING_DEFAULTS.scheduler_patience,
+        threshold=TRAINING_DEFAULTS.scheduler_threshold,
+    )
+
+    best = _run_training_loop(
+        model,
+        train_loader,
+        val_loader,
+        loss_fn,
+        optimizer,
+        scheduler,
+        args.tf_phase2_epochs,
+        args.save_path,
+        config,
+        logger,
+        grid_config,
+        args.plot,
+        description=f"Phase 2 (TF={tf2})",
+        epoch_offset=args.tf_phase1_epochs,
+        extra_log={"train/teacher_forcing_ratio": tf2, "train/noise_std": noise_std},
+    )
+
+    model = load_model(args.save_path, device, config)
+    print(f"\nPhase 2 complete. Best val loss: {best:.6f}")
     return model
 
 
@@ -378,10 +463,20 @@ def main():
             model = train_model_two_phase(
                 model, train_loader, val_loader, args, logger, grid_config
             )
+        elif hasattr(model, "teacher_forcing_ratio"):
+            model = train_model_two_phase_tf(
+                model, train_loader, val_loader, args, logger, grid_config
+            )
         else:
             model = train_model(
                 model, train_loader, val_loader, args, logger, grid_config
             )
+
+    # Set TF=0 for final test (full rollout, no noise)
+    if hasattr(model, "teacher_forcing_ratio"):
+        model.teacher_forcing_ratio = 0.0
+    if hasattr(model, "noise_std"):
+        model.noise_std = 0.0
 
     # Final test (standard + high-res)
     print("\nRunning final evaluation on test set...")

@@ -251,6 +251,7 @@ class LNO(nn.Module):
         super().__init__()
         self.lno = LNO1d(**lno_kwargs)
         self.teacher_forcing_ratio = 0.0
+        self.noise_std = 0.0
 
     def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         grid_input = x["grid_input"]  # (B, 1, nt, nx)
@@ -260,7 +261,7 @@ class LNO(nn.Module):
         state = grid_input[:, :, 0, :]  # (B, 1, nx) — initial condition
         dt_channel = dt.view(B, 1, 1).expand(B, 1, nx)
 
-        tf_ratio = self.teacher_forcing_ratio if self.training else 0.0
+        tf_ratio = self.teacher_forcing_ratio
         target_grid = x.get("target_grid") if tf_ratio > 0 else None
 
         outputs = [state]
@@ -269,6 +270,9 @@ class LNO(nn.Module):
             state = state + self.lno(lno_input, dt)  # (B, 1, nx)
             state = state.clamp(0.0, 1.0)  # Greenshields density bounds
             outputs.append(state)
+            # Pushforward noise: perturb input to next step (training only)
+            if self.training and self.noise_std > 0:
+                state = (state + torch.randn_like(state) * self.noise_std).clamp(0.0, 1.0)
             # Teacher forcing: replace input to NEXT step with GT
             if target_grid is not None and torch.rand(1).item() < tf_ratio:
                 state = target_grid[:, :, t + 1, :]
