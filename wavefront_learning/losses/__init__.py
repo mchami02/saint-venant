@@ -7,6 +7,7 @@ Base:
 
 Grid Losses:
 - MSELoss: Mean squared error for grid predictions
+- MSEShockLoss: MSE on non-shock cells (shock detection via Lax entropy condition)
 - ICLoss: Initial condition matching at t=0
 
 Trajectory Losses:
@@ -42,6 +43,7 @@ from .flux import compute_shock_speed, greenshields_flux, greenshields_flux_deri
 from .ic import ICLoss
 from .kl_divergence import KLDivergenceLoss
 from .mse import MSELoss
+from .mse_shock import MSEShockLoss
 from .pde_residual import (
     PDEResidualLoss,
     PDEShockResidualLoss,
@@ -63,6 +65,7 @@ __all__ = [
     "BaseLoss",
     # Grid losses
     "MSELoss",
+    "MSEShockLoss",
     "CellAverageMSELoss",
     "ICLoss",
     # Trajectory losses

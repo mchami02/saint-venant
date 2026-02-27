@@ -114,6 +114,9 @@ loss_presets:
       weight: 1.0
     - name: wasserstein
       weight: 0.1
+  mse_shock:
+    - name: mse_shock
+      weight: 1.0
 
 # Plot presets.
 # Each preset lists which plots to generate.

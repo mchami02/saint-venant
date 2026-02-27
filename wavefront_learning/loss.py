@@ -22,6 +22,7 @@ from losses.flow_matching import FlowMatchingLoss
 from losses.ic import ICLoss
 from losses.kl_divergence import KLDivergenceLoss
 from losses.mse import MSELoss
+from losses.mse_shock import MSEShockLoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
@@ -41,6 +42,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "pde_residual": PDEResidualLoss,
     "pde_shock_residual": PDEShockResidualLoss,
     "entropy": EntropyConditionLoss,
+    "mse_shock": MSEShockLoss,
     "boundary": BoundaryLoss,
     "collision": CollisionLoss,
     "ic_anchoring": ICAnchoringLoss,
@@ -308,6 +310,10 @@ def create_loss_from_args(args) -> nn.Module:
             "dx": args.dx,
         }
         loss_kwargs["entropy"] = {
+            "dx": args.dx,
+            "min_component_size": getattr(args, "min_component_size", 5),
+        }
+        loss_kwargs["mse_shock"] = {
             "dx": args.dx,
             "min_component_size": getattr(args, "min_component_size", 5),
         }
