@@ -1,0 +1,173 @@
+# Preset mappings for wavefront learning.
+# Loaded by configs/loader.py and exposed via configs/presets.py.
+
+# Model -> loss preset (auto-selected when --loss is default "mse").
+# Models not listed here default to "mse".
+model_loss_preset:
+  CVAEDeepONet: cvae
+  TrajTransformer: traj_regularized
+  ShockAwareDeepONet: shock_proximity
+  ShockAwareWaveNO: shock_proximity
+  AutoregressiveWaveNO: traj_regularized
+  NeuralFVSolver: mse_wasserstein
+
+# Model -> plot preset (auto-selected when --plot is None).
+# Models not listed here default to "grid_residual".
+model_plot_preset:
+  TrajDeepONet: traj_residual
+  TrajTransformer: traj_residual
+  WaveNO: traj_residual
+  WaveNOLocal: traj_residual
+  WaveNOIndepTraj: traj_residual
+  WaveNODisc: traj_residual
+  ClassifierTrajTransformer: traj_existence
+  ClassifierAllTrajTransformer: traj_existence
+  BiasedClassifierTrajTransformer: traj_existence
+  WaveNOCls: traj_existence
+  CTTBiased: traj_existence
+  CTTSegPhysics: traj_existence
+  CTTFiLM: traj_existence
+  CTTSeg: traj_existence
+  CharNO: charno
+  TransformerSeg: grid_minimal
+  WaveFrontModel: wavefront
+  CVAEDeepONet: cvae
+  ECARZ: ecarz
+  ShockAwareDeepONet: shock_proximity
+  ShockAwareWaveNO: traj_residual
+  AutoregressiveWaveNO: traj_residual
+  NeuralFVSolver: grid_residual
+
+# Model -> input transform.
+# String key into TRANSFORMS registry in data/transforms.py.
+# Models not listed here default to null (no transform).
+model_transform:
+  FNO: ToGridNoCoords
+  AutoregressiveFNO: ToGridNoCoords
+  AutoregressiveRealFNO: ToGridNoCoords
+  AutoregressiveWaveNO: ToGridNoCoords
+  DeepONet: ToGridInput
+  EncoderDecoder: ToGridInput
+  EncoderDecoderCross: ToGridInput
+  ECARZ: ToGridInput
+  TrajTransformer: null
+  ClassifierTrajTransformer: null
+  ClassifierAllTrajTransformer: null
+  BiasedClassifierTrajTransformer: null
+  NoTrajTransformer: null
+  CharNO: null
+  WaveNO: null
+  WaveNOBase: null
+  WaveNOCls: null
+  WaveNOLocal: null
+  WaveNOIndepTraj: null
+  WaveNODisc: null
+  ShockAwareWaveNO: null
+  CTTBiased: null
+  CTTSegPhysics: null
+  CTTFiLM: null
+  CTTSeg: null
+  TransformerSeg: null
+  WaveFrontModel: null
+  LDDeepONet: LDDeepONet
+  CVAEDeepONet: ToGridInput
+  ShockAwareDeepONet: ToGridInput
+  NeuralFVSolver: ToGridNoCoords
+
+# Loss presets.
+# Each preset is a list of entries with name, weight, and optional kwargs.
+loss_presets:
+  mse:
+    - name: mse
+      weight: 1.0
+  pde_shocks:
+    - name: mse
+      weight: 1.0
+    - name: pde_shock_residual
+      weight: 1.0
+  cell_avg_mse:
+    - name: cell_avg_mse
+      weight: 1.0
+  traj_regularized:
+    - name: mse
+      weight: 1.0
+    - name: ic_anchoring
+      weight: 0.1
+    - name: boundary
+      weight: 1.0
+    - name: regularize_traj
+      weight: 0.1
+  cvae:
+    - name: mse
+      weight: 1.0
+    - name: kl_divergence
+      weight: 1.0
+      kwargs:
+        free_bits: 0.01
+  shock_proximity:
+    - name: mse
+      weight: 1.0
+    - name: shock_proximity
+      weight: 0.1
+  mse_wasserstein:
+    - name: mse
+      weight: 1.0
+    - name: wasserstein
+      weight: 0.1
+
+# Plot presets.
+# Each preset lists which plots to generate.
+plot_presets:
+  traj_residual:
+    - ground_truth
+    - gt_traj
+    - pred_traj
+    - pred
+    - mse_error
+    - pde_residual
+  grid_residual:
+    - ground_truth
+    - pred
+    - mse_error
+    - pde_residual
+  traj_existence:
+    - ground_truth
+    - gt_traj
+    - pred_traj
+    - pred
+    - mse_error
+    - existence
+  grid_minimal:
+    - ground_truth
+    - pred
+    - mse_error
+  charno:
+    - ground_truth
+    - pred
+    - mse_error
+    - pde_residual
+    - charno_decomposition
+    - selection_weights
+    - winning_segment
+    - selection_entropy
+    - local_densities
+  wavefront:
+    - ground_truth
+    - wave_pattern
+    - pred
+    - mse_error
+  cvae:
+    - ground_truth
+    - pred
+    - mse_error
+    - cvae_uncertainty
+    - cvae_samples
+  ecarz:
+    - arz_ground_truth
+    - arz_pred
+    - arz_mse_error
+  shock_proximity:
+    - ground_truth
+    - pred
+    - mse_error
+    - shock_proximity

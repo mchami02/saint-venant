@@ -1,0 +1,87 @@
+# Training configuration for wavefront learning.
+# Loaded by configs/loader.py and exposed via configs/training_defaults.py and configs/cli.py.
+
+# Training hyperparameters (used by training_loop.py and train.py).
+training_defaults:
+  weight_decay: 0.0001
+  scheduler_factor: 0.5
+  scheduler_patience: 5
+  scheduler_threshold: 0.01
+  early_stopping_patience: 15
+  early_stopping_threshold: 0.99
+  grad_clip_max_norm: 1.0
+  kl_warmup_fraction: 0.2
+  plot_every_n_epochs: 5
+
+# Default CLI argument values.
+# Priority: CLI flags > these YAML defaults > hardcoded argparse defaults.
+# Add new keys here for on-the-fly experimentation via --key value.
+cli_defaults:
+  # Model / equation
+  model: shock_net
+  equation: LWR
+  gamma: 1.0
+  flux_type: hll
+  reconstruction: weno5
+  bc_type: zero_gradient
+
+  # Loss
+  loss: mse
+
+  # Training
+  epochs: 100
+  batch_size: 8
+  lr: 0.001
+
+  # Data
+  n_samples: 1000
+  nx: 50
+  nt: 250
+  dx: 0.02
+  dt: 0.004
+  only_shocks: false
+  max_steps: 4
+  max_test_steps: 10
+  max_high_res: 5
+
+  # Latent Diffusion DeepONet
+  ld_latent_dim: 32
+  ld_num_basis: 64
+  ld_beta: 0.01
+  ld_beta_warmup: 10
+  ld_num_ode_steps: 100
+  ld_condition_dim: 64
+
+  # CVAE DeepONet
+  latent_dim: 32
+  condition_dim: 64
+  kl_beta: 1.0
+  n_cvae_samples: 10
+
+  # Model-specific
+  initial_damping_sharpness: 5.0
+  dropout: 0.05
+
+  # Teacher forcing
+  teacher_forcing: 0.0
+  tf_decay_fraction: 0.25
+
+  # ShockAwareDeepONet
+  proximity_sigma: 0.05
+  min_component_size: 5
+
+  # NeuralFVSolver
+  stencil_k: 3
+  flux_hidden_dim: 64
+  flux_n_layers: 3
+  curriculum_fraction: 0.5
+  initial_noise_std: 0.01
+  noise_decay_fraction: 0.75
+
+  # Cell sampling
+  cell_sampling_k: 0
+
+  # Output
+  save_path: wavefront_model.pth
+  no_wandb: false
+  profile: false

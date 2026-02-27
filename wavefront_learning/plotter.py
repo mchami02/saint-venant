@@ -2,7 +2,7 @@
 
 This module provides:
 - PLOTS: Registry of available plot functions
-- PLOT_PRESETS: Pre-configured plot combinations for common use cases
+- PLOT_PRESETS: Pre-configured plot combinations (defined in configs/presets.py)
 - plot(): Main entry point that runs plots based on preset
 
 Each plot function signature:
@@ -13,6 +13,7 @@ centrally by plot().
 """
 
 import matplotlib.pyplot as plt
+from configs.presets import PLOT_PRESETS
 from plotting import (
     _log_figure,
     plot_arz_ground_truth,
@@ -35,8 +36,8 @@ from plotting import (
     plot_region_weights,
     plot_selection_entropy,
     plot_selection_weights,
-    plot_trajectory_vs_analytical,
     plot_shock_proximity,
+    plot_trajectory_vs_analytical,
     plot_wave_pattern,
     plot_winning_segment,
 )
@@ -68,73 +69,6 @@ PLOTS: dict[str, callable] = {
     "arz_pred": plot_arz_pred,
     "arz_mse_error": plot_arz_mse_error,
     "shock_proximity": plot_shock_proximity,
-}
-
-# Presets for common configurations
-# Each preset lists which plots to generate
-PLOT_PRESETS: dict[str, list[str]] = {
-    "traj_residual": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "grid_residual": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "pde_residual",
-    ],
-    "traj_existence": [
-        "ground_truth",
-        "gt_traj",
-        "pred_traj",
-        "pred",
-        "mse_error",
-        "existence",
-    ],
-    "grid_minimal": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-    ],
-    "charno": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "pde_residual",
-        "charno_decomposition",
-        "selection_weights",
-        "winning_segment",
-        "selection_entropy",
-        "local_densities",
-    ],
-    "wavefront": [
-        "ground_truth",
-        "wave_pattern",
-        "pred",
-        "mse_error",
-    ],
-    "cvae": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "cvae_uncertainty",
-        "cvae_samples",
-    ],
-    "ecarz": [
-        "arz_ground_truth",
-        "arz_pred",
-        "arz_mse_error",
-    ],
-    "shock_proximity": [
-        "ground_truth",
-        "pred",
-        "mse_error",
-        "shock_proximity",
-    ],
 }
 
 
