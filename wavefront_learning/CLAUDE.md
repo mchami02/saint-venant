@@ -163,27 +163,38 @@ LOSSES = {
     "my_loss": MyLoss,
 }
 ```
-4. Export it in `losses/__init__.py`
-5. Update `ARCHITECTURE.md` with the mathematical formula and configuration
+4. If you want a preset combining multiple losses, add it to `configs/presets.yaml` under `loss_presets`
+5. Export it in `losses/__init__.py`
+6. Update `ARCHITECTURE.md` with the mathematical formula and configuration
 
 ## Adding a New Model
 
 1. Implement your model class in `models/` with a `build_*` factory function
 2. Register it in `model.py`:
    - Add to `MODELS` dict (name → builder function)
-   - Add to `MODEL_TRANSFORM` dict (name → transform string or `None`)
-3. If the model needs a non-default loss, add it to `MODEL_LOSS_PRESET` in `train.py`
-4. If the model needs a non-default plot preset, add it to `MODEL_PLOT_PRESET` in `train.py`
+3. Add transform mapping in `configs/presets.yaml` under `model_transform`
+4. If the model needs a non-default loss, add it to `model_loss_preset` in `configs/presets.yaml`
+5. If the model needs a non-default plot preset, add it to `model_plot_preset` in `configs/presets.yaml`
 
 ```python
 # model.py
 from models.my_model import build_my_model
 MODELS = { ..., "MyModel": build_my_model }
-MODEL_TRANSFORM = { ..., "MyModel": None }  # or "ToGridInput", "FlattenDiscontinuities"
+```
 
-# train.py — only if model needs non-default presets
-MODEL_LOSS_PRESET = { ..., "MyModel": "traj_regularized" }  # default is "mse"
-MODEL_PLOT_PRESET = { ..., "MyModel": "traj_residual" }     # default is "grid_residual"
+```yaml
+# configs/presets.yaml
+model_transform:
+  # ...
+  MyModel: null  # or "ToGridInput", "ToGridNoCoords"
+
+model_loss_preset:
+  # ...
+  MyModel: traj_regularized  # omit if default "mse" is fine
+
+model_plot_preset:
+  # ...
+  MyModel: traj_residual  # omit if default "grid_residual" is fine
 ```
 
 ## Testing / Verification
@@ -202,6 +213,19 @@ Do **not** rely on a `--model_path` for quick verification.
 - **No for loops over space/time in forward passes**: Never iterate over spatial or temporal dimensions in `forward()`. All operations must be fully vectorized. If peak memory is too large, this is a model design problem — fix the architecture, not the implementation. (Iterating over layers in a `ModuleList` is fine.)
 - **Minimal analytical contribution after the initial conditions**: Models should use the pluggable `Flux` interface (characteristic speeds, shock speeds) for IC-level physics features, but must NOT hard-code flux-specific analytical solutions (e.g., Legendre transforms, explicit rarefaction profiles). All post-IC solution structure must be learned, not computed analytically. This ensures easy extensibility to other equations (systems of conservation laws, non-convex flux, etc.).
 
+## Configuration (YAML)
+
+All configuration lives in `configs/` as YAML files with thin Python wrappers:
+
+- **`configs/presets.yaml`** — Model-to-loss, model-to-plot, model-to-transform mappings, loss presets, plot presets. Edit this file to add/modify presets.
+- **`configs/training.yaml`** — Training hyperparameter defaults (`training_defaults` section) and CLI argument defaults (`cli_defaults` section). Edit `cli_defaults` to change default values without touching Python code.
+- **`configs/loader.py`** — YAML loading and type conversion (Python-only, not meant to be edited for config changes).
+- **`configs/presets.py`**, **`configs/training_defaults.py`** — Thin wrappers that load from YAML and expose the same Python API.
+
+**Priority for CLI defaults**: CLI flags > `cli_defaults` in `training.yaml` > hardcoded argparse defaults.
+
+**Unknown arg passthrough**: Any `--key value` pair not defined in argparse is automatically captured into the args namespace. This allows on-the-fly experimentation without modifying Python code (e.g., `--my_custom_param 42`).
+
 ## Dependencies
 
 Uses the same environment as `operator_learning/` with:
@@ -209,3 +233,4 @@ Uses the same environment as `operator_learning/` with:
 - `nfv` package for data generation (Lax-Hopf solver)
 - Weights & Biases for logging
 - matplotlib for plotting
+- PyYAML for configuration loading

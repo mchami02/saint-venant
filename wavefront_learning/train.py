@@ -6,19 +6,17 @@ This is a standalone script that can be run with:
 Minimal arguments are required - sensible defaults are provided for all parameters.
 """
 
-import argparse
-
 import torch
 import torch.nn as nn
+from configs.cli import parse_args
+from configs.presets import MODEL_LOSS_PRESET, MODEL_PLOT_PRESET
+from configs.training_defaults import TRAINING_DEFAULTS
 from data import collate_wavefront_batch, get_wavefront_datasets
-from data.transforms import TRANSFORMS
-from logger import WandbLogger, init_logger, log_values
-from loss import LOSS_PRESETS, LOSSES, create_loss_from_args
+from logger import WandbLogger, init_logger
+from loss import create_loss_from_args
 from losses.flow_matching import FlowMatchingLoss
 from losses.vae_reconstruction import VAEReconstructionLoss
-from metrics import cell_average_prediction, compute_metrics, extract_grid_prediction
-from model import MODELS, get_model, load_model, save_model
-from plotter import PLOT_PRESETS, plot
+from model import MODELS, get_model, load_model
 from testing import (
     run_profiler,
     run_sanity_check,
@@ -36,286 +34,11 @@ device = torch.device(
 )
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments.
-
-    Minimal set of arguments - most have sensible defaults.
-    """
-    parser = argparse.ArgumentParser(description="Train wavefront prediction model")
-
-    # Model selection
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="shock_net",
-        choices=list(MODELS.keys()) if MODELS else ["fno"],
-        help="Model architecture",
-    )
-
-    # Equation selection
-    parser.add_argument(
-        "--equation",
-        type=str,
-        default="LWR",
-        choices=["LWR", "ARZ"],
-        help="Equation system (LWR = scalar traffic, ARZ = 2-component density+velocity)",
-    )
-    parser.add_argument(
-        "--gamma", type=float, default=1.0, help="ARZ pressure exponent (default: 1.0)"
-    )
-    parser.add_argument(
-        "--flux_type",
-        type=str,
-        default="hll",
-        choices=["hll", "rusanov"],
-        help="ARZ numerical flux type (default: hll)",
-    )
-    parser.add_argument(
-        "--reconstruction",
-        type=str,
-        default="weno5",
-        choices=["constant", "weno5"],
-        help="ARZ reconstruction scheme (default: weno5)",
-    )
-    parser.add_argument(
-        "--bc_type",
-        type=str,
-        default="zero_gradient",
-        help="ARZ boundary condition type (default: zero_gradient)",
-    )
-
-    # Loss selection
-    parser.add_argument(
-        "--loss",
-        type=str,
-        default="mse",
-        choices=list(LOSSES.keys()) + list(LOSS_PRESETS.keys()),
-        help="Loss function or preset (default: mse, auto-selected per model)",
-    )
-
-    # Training parameters
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-
-    # Data parameters
-    parser.add_argument("--n_samples", type=int, default=1000, help="Number of samples")
-    parser.add_argument("--nx", type=int, default=50, help="Spatial grid points")
-    parser.add_argument("--nt", type=int, default=250, help="Time steps")
-    parser.add_argument("--dx", type=float, default=0.02, help="Spatial step size")
-    parser.add_argument("--dt", type=float, default=0.004, help="Time step size")
-    parser.add_argument(
-        "--only_shocks",
-        action="store_true",
-        help="Generate only shock waves (no rarefactions)",
-    )
-    parser.add_argument(
-        "--max_steps",
-        type=int,
-        default=4,
-        help="Max pieces in piecewise constant IC; samples drawn uniformly from {2,...,max_steps} (default: 3)",
-    )
-    parser.add_argument(
-        "--max_test_steps",
-        type=int,
-        default=10,
-        help="Max steps for step-count generalization test (default: same as max_steps)",
-    )
-    parser.add_argument(
-        "--max_high_res",
-        type=int,
-        default=5,
-        help="Max resolution multiplier for high-res generalization test (default: 5)",
-    )
-
-    # Latent Diffusion DeepONet parameters
-    parser.add_argument(
-        "--ld_latent_dim", type=int, default=32, help="Latent space dimension for LDDeepONet"
-    )
-    parser.add_argument(
-        "--ld_num_basis", type=int, default=64, help="Number of DeepONet basis functions"
-    )
-    parser.add_argument(
-        "--ld_beta", type=float, default=0.01, help="KL weight for VAE loss"
-    )
-    parser.add_argument(
-        "--ld_beta_warmup", type=int, default=10, help="Epochs for beta warmup"
-    )
-    parser.add_argument(
-        "--ld_phase1_epochs",
-        type=int,
-        default=None,
-        help="Phase 1 (VAE) epochs (default: 2/3 of --epochs)",
-    )
-    parser.add_argument(
-        "--ld_phase2_epochs",
-        type=int,
-        default=None,
-        help="Phase 2 (flow matching) epochs (default: 1/3 of --epochs)",
-    )
-    parser.add_argument(
-        "--ld_num_ode_steps", type=int, default=100, help="Heun ODE steps at inference"
-    )
-    parser.add_argument(
-        "--ld_condition_dim", type=int, default=64, help="Condition embedding dimension"
-    )
-
-    # CVAE DeepONet parameters
-    parser.add_argument(
-        "--latent_dim", type=int, default=32, help="Latent space dimension for CVAEDeepONet"
-    )
-    parser.add_argument(
-        "--condition_dim", type=int, default=64, help="Condition embedding dimension for CVAEDeepONet"
-    )
-    parser.add_argument(
-        "--kl_beta", type=float, default=1.0, help="Target KL beta for CVAEDeepONet"
-    )
-    parser.add_argument(
-        "--n_cvae_samples", type=int, default=10, help="Number of z-samples for CVAE evaluation"
-    )
-
-    # Model-specific parameters
-    parser.add_argument(
-        "--initial_damping_sharpness",
-        type=float,
-        default=5.0,
-        help="Initial sharpness for collision-time bias damping in WaveNO (default: 5.0)",
-    )
-    parser.add_argument(
-        "--dropout",
-        type=float,
-        default=0.05,
-        help="Dropout probability for WaveNO (default: 0.05)",
-    )
-
-    # Teacher forcing for autoregressive models
-    parser.add_argument(
-        "--teacher_forcing",
-        type=float,
-        default=0.0,
-        help="Initial teacher forcing ratio for autoregressive models (default: 0.0)",
-    )
-    parser.add_argument(
-        "--tf_decay_fraction",
-        type=float,
-        default=0.25,
-        help="Fraction of total epochs over which teacher forcing decays to 0 (default: 0.25)",
-    )
-
-    # ShockAwareDeepONet parameters
-    parser.add_argument(
-        "--proximity_sigma",
-        type=float,
-        default=0.05,
-        help="Length scale for shock proximity decay (default: 0.05)",
-    )
-    parser.add_argument(
-        "--min_component_size",
-        type=int,
-        default=5,
-        help="Min connected component size for shock detection (0 to disable)",
-    )
-
-    # NeuralFVSolver parameters
-    parser.add_argument(
-        "--stencil_k", type=int, default=3, help="Stencil half-width for NeuralFVSolver (default: 3)"
-    )
-    parser.add_argument(
-        "--flux_hidden_dim",
-        type=int,
-        default=64,
-        help="Hidden dimension for NeuralFVSolver flux network (default: 64)",
-    )
-    parser.add_argument(
-        "--flux_n_layers",
-        type=int,
-        default=3,
-        help="Number of layers in NeuralFVSolver flux network (default: 3)",
-    )
-    parser.add_argument(
-        "--curriculum_fraction",
-        type=float,
-        default=0.5,
-        help="Fraction of epochs to reach full rollout for NeuralFVSolver (default: 0.5)",
-    )
-    parser.add_argument(
-        "--initial_noise_std",
-        type=float,
-        default=0.01,
-        help="Initial pushforward noise std for NeuralFVSolver (default: 0.01)",
-    )
-    parser.add_argument(
-        "--noise_decay_fraction",
-        type=float,
-        default=0.75,
-        help="Fraction of epochs for noise decay in NeuralFVSolver (default: 0.75)",
-    )
-
-    # Cell sampling
-    parser.add_argument(
-        "--cell_sampling_k",
-        type=int,
-        default=0,
-        help="Number of random query points per FV cell (0 = disabled)",
-    )
-
-    # Transform override
-    parser.add_argument(
-        "--transform",
-        type=str,
-        default=None,
-        choices=list(TRANSFORMS.keys()),
-        help="Override the model's default transform (default: use MODEL_TRANSFORM)",
-    )
-
-    # Resume training
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        default=None,
-        help="Path to a saved model checkpoint to resume training from",
-    )
-
-    # Output
-    parser.add_argument(
-        "--save_path", type=str, default="wavefront_model.pth", help="Model save path"
-    )
-    parser.add_argument("--no_wandb", action="store_true", help="Disable W&B logging")
-    parser.add_argument("--run_name", type=str, default=None, help="W&B run name")
-
-    # Debugging/profiling
-    parser.add_argument(
-        "--profile", action="store_true", help="Run profiler before training"
-    )
-
-    # Plot preset
-    parser.add_argument(
-        "--plot",
-        type=str,
-        default=None,
-        choices=list(PLOT_PRESETS.keys()),
-        help="Plot preset (default: auto-detect based on model)",
-    )
-
-    args = parser.parse_args()
-
-    if args.max_test_steps is None:
-        args.max_test_steps = args.max_steps
-
-    # Default phase epoch splits for LDDeepONet
-    if args.ld_phase1_epochs is None:
-        args.ld_phase1_epochs = max(1, args.epochs * 2 // 3)
-    if args.ld_phase2_epochs is None:
-        args.ld_phase2_epochs = max(1, args.epochs - args.ld_phase1_epochs)
-
-    return args
-
-
 def train_model(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    args: argparse.Namespace,
+    args,
     logger: WandbLogger,
     grid_config: dict | None = None,
 ) -> nn.Module:
@@ -336,9 +59,15 @@ def train_model(
         grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
 
     loss_fn = create_loss_from_args(args)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
+    )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
+        optimizer,
+        mode="min",
+        factor=TRAINING_DEFAULTS.scheduler_factor,
+        patience=TRAINING_DEFAULTS.scheduler_patience,
+        threshold=TRAINING_DEFAULTS.scheduler_threshold,
     )
 
     # Build list of per-epoch callbacks
@@ -346,7 +75,9 @@ def train_model(
 
     # KL annealing callback for CVAE models
     if hasattr(loss_fn, "set_kl_beta"):
-        kl_warmup_epochs = max(1, int(0.2 * args.epochs))
+        kl_warmup_epochs = max(
+            1, int(TRAINING_DEFAULTS.kl_warmup_fraction * args.epochs)
+        )
         kl_beta_target = getattr(args, "kl_beta", 1.0)
 
         def _kl_callback(epoch):
@@ -379,10 +110,12 @@ def train_model(
             model.max_rollout_steps = max(1, int(progress * total_rollout))
             noise_progress = min(1.0, (epoch + 1) / noise_decay_epochs)
             model.noise_std = initial_noise * max(0.0, 1.0 - noise_progress)
-            logger.log_metrics({
-                "train/max_rollout_steps": model.max_rollout_steps,
-                "train/noise_std": model.noise_std,
-            })
+            logger.log_metrics(
+                {
+                    "train/max_rollout_steps": model.max_rollout_steps,
+                    "train/noise_std": model.noise_std,
+                }
+            )
 
         callbacks.append(_curriculum_callback)
 
@@ -395,10 +128,18 @@ def train_model(
                 cb(epoch)
 
     best_val_loss = _run_training_loop(
-        model, train_loader, val_loader,
-        loss_fn, optimizer, scheduler,
-        args.epochs, args.save_path, vars(args),
-        logger, grid_config, args.plot,
+        model,
+        train_loader,
+        val_loader,
+        loss_fn,
+        optimizer,
+        scheduler,
+        args.epochs,
+        args.save_path,
+        vars(args),
+        logger,
+        grid_config,
+        args.plot,
         epoch_callback=epoch_callback,
     )
 
@@ -411,7 +152,7 @@ def train_model_two_phase(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
-    args: argparse.Namespace,
+    args,
     logger: WandbLogger,
     grid_config: dict | None = None,
 ) -> nn.Module:
@@ -438,24 +179,38 @@ def train_model_two_phase(
     config = vars(args)
 
     # ── Phase 1: VAE training ──
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Phase 1: VAE training ({args.ld_phase1_epochs} epochs)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     model.set_phase(1)
     vae_loss = VAEReconstructionLoss(
         beta=args.ld_beta, beta_warmup_epochs=args.ld_beta_warmup
     )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
+    )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
+        optimizer,
+        mode="min",
+        factor=TRAINING_DEFAULTS.scheduler_factor,
+        patience=TRAINING_DEFAULTS.scheduler_patience,
+        threshold=TRAINING_DEFAULTS.scheduler_threshold,
     )
 
     best = _run_training_loop(
-        model, train_loader, val_loader,
-        vae_loss, optimizer, scheduler,
-        args.ld_phase1_epochs, phase1_save, config,
-        logger, grid_config, args.plot,
+        model,
+        train_loader,
+        val_loader,
+        vae_loss,
+        optimizer,
+        scheduler,
+        args.ld_phase1_epochs,
+        phase1_save,
+        config,
+        logger,
+        grid_config,
+        args.plot,
         description="Phase 1 (VAE)",
         epoch_callback=vae_loss.set_epoch,
         extra_log={"phase": 1},
@@ -465,9 +220,9 @@ def train_model_two_phase(
     print(f"\nPhase 1 complete. Best VAE val loss: {best:.6f}")
 
     # ── Phase 2: Flow matching training ──
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Phase 2: Flow matching ({args.ld_phase2_epochs} epochs)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     model.train()
     model.set_phase(2)
@@ -476,17 +231,29 @@ def train_model_two_phase(
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr,
-        weight_decay=1e-4,
+        weight_decay=TRAINING_DEFAULTS.weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, threshold=0.01
+        optimizer,
+        mode="min",
+        factor=TRAINING_DEFAULTS.scheduler_factor,
+        patience=TRAINING_DEFAULTS.scheduler_patience,
+        threshold=TRAINING_DEFAULTS.scheduler_threshold,
     )
 
     best = _run_training_loop(
-        model, train_loader, val_loader,
-        fm_loss, optimizer, scheduler,
-        args.ld_phase2_epochs, args.save_path, config,
-        logger, grid_config, args.plot,
+        model,
+        train_loader,
+        val_loader,
+        fm_loss,
+        optimizer,
+        scheduler,
+        args.ld_phase2_epochs,
+        args.save_path,
+        config,
+        logger,
+        grid_config,
+        args.plot,
         description="Phase 2 (Flow)",
         epoch_offset=args.ld_phase1_epochs,
         extra_log={"phase": 2},
@@ -496,42 +263,6 @@ def train_model_two_phase(
     model.set_phase(0)
     print(f"\nPhase 2 complete. Best flow matching val loss: {best:.6f}")
     return model
-
-
-MODEL_LOSS_PRESET: dict[str, str] = {
-    "CVAEDeepONet": "cvae",
-    "TrajTransformer": "traj_regularized",
-    "ShockAwareDeepONet": "shock_proximity",
-    "ShockAwareWaveNO": "shock_proximity",
-    "AutoregressiveWaveNO": "traj_regularized",
-    "NeuralFVSolver": "mse_wasserstein",
-}
-
-MODEL_PLOT_PRESET: dict[str, str] = {
-    "TrajDeepONet": "traj_residual",
-    "TrajTransformer": "traj_residual",
-    "WaveNO": "traj_residual",
-    "WaveNOLocal": "traj_residual",
-    "WaveNOIndepTraj": "traj_residual",
-    "WaveNODisc": "traj_residual",
-    "ClassifierTrajTransformer": "traj_existence",
-    "ClassifierAllTrajTransformer": "traj_existence",
-    "BiasedClassifierTrajTransformer": "traj_existence",
-    "WaveNOCls": "traj_existence",
-    "CTTBiased": "traj_existence",
-    "CTTSegPhysics": "traj_existence",
-    "CTTFiLM": "traj_existence",
-    "CTTSeg": "traj_existence",
-    "CharNO": "charno",
-    "TransformerSeg": "grid_minimal",
-    "WaveFrontModel": "wavefront",
-    "CVAEDeepONet": "cvae",
-    "ECARZ": "ecarz",
-    "ShockAwareDeepONet": "shock_proximity",
-    "ShockAwareWaveNO": "traj_residual",
-    "AutoregressiveWaveNO": "traj_residual",
-    "NeuralFVSolver": "grid_residual",
-}
 
 
 def main():
@@ -648,7 +379,9 @@ def main():
                 model, train_loader, val_loader, args, logger, grid_config
             )
         else:
-            model = train_model(model, train_loader, val_loader, args, logger, grid_config)
+            model = train_model(
+                model, train_loader, val_loader, args, logger, grid_config
+            )
 
     # Final test (standard + high-res)
     print("\nRunning final evaluation on test set...")

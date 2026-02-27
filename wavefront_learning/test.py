@@ -11,10 +11,10 @@ Functions are organized into submodules:
 import argparse
 
 import torch
+from configs.presets import PLOT_PRESETS
 from data import collate_wavefront_batch, get_wavefront_datasets
 from logger import init_logger
 from model import load_model
-from plotter import PLOT_PRESETS
 from testing import test_model
 from torch.utils.data import DataLoader
 

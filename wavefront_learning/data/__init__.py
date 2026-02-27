@@ -140,7 +140,7 @@ def get_wavefront_datasets(
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset).
     """
-    from model import MODEL_TRANSFORM
+    from configs.presets import MODEL_TRANSFORM
 
     nx = grid_config["nx"]
     nt = grid_config["nt"]
