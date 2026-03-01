@@ -68,7 +68,7 @@ wavefront_learning/
 │       ├── wave_reconstructor.py    # reconstruct_grid (type-aware: shock/rarefaction/bent shock)
 │       ├── collision_processor.py   # process_collisions (type-aware collision loop)
 │       ├── characteristic_features.py  # SegmentPhysicsEncoder, DiscontinuityPhysicsEncoder, CharacteristicFeatureComputer
-│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, compute_characteristic_bias, compute_discontinuity_characteristic_bias
+│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, CollisionTimeHead, compute_characteristic_bias, compute_discontinuity_characteristic_bias
 │       ├── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
 │       ├── vae_encoder.py             # VAEEncoder (2D conv encoder for latent diffusion)
 │       ├── deeponet_decoder.py        # DeepONetDecoder (resolution-invariant branch-trunk decoder)
@@ -243,7 +243,7 @@ wavefront_learning/
 - **wave_reconstructor.py** — `reconstruct_grid()` (type-aware grid reconstruction for shocks, rarefaction fans, bent shocks)
 - **collision_processor.py** — `process_collisions()` (type-aware collision loop: shock-shock, rar-rar, shock-rar→bent shock)
 - **characteristic_features.py** — `SegmentPhysicsEncoder`, `DiscontinuityPhysicsEncoder`, `CharacteristicFeatureComputer`
-- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
+- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `CollisionTimeHead`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
 - **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)
 - **vae_encoder.py** — `VAEEncoder` (2D conv encoder mapping solution grid to latent Gaussian)
 - **deeponet_decoder.py** — `DeepONetDecoder` (resolution-invariant branch-trunk decoder)
