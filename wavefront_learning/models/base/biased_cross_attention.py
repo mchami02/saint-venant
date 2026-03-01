@@ -2,6 +2,7 @@
 
 Contains:
 - BiasedCrossDecoderLayer: CrossDecoderLayer with additive attention bias (attn_mask).
+- CollisionTimeHead: Learned per-token validity horizon for characteristic bias damping.
 - compute_characteristic_bias: Backward-characteristic attention bias from IC geometry.
 """
 
@@ -74,6 +75,46 @@ class BiasedCrossDecoderLayer(nn.Module):
         return x
 
 
+class CollisionTimeHead(nn.Module):
+    """Learned per-token validity horizon for characteristic bias damping.
+
+    Replaces the analytical collision time ``t_coll = gap / |Δλ|`` with a
+    learned estimate.  After self-attention, token embeddings have full IC
+    context, so the head can learn both simple first-collision and complex
+    multi-collision patterns.
+
+    Architecture: Linear → ReLU → Linear → softplus (guarantees t_coll > 0).
+
+    Args:
+        hidden_dim: Input embedding dimension.
+    """
+
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+        # Initialize last layer so softplus(bias) ≈ 0.3 (reasonable default)
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.constant_(self.mlp[-1].bias, 0.3)
+
+    def forward(self, token_emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Predict per-token collision time.
+
+        Args:
+            token_emb: (B, N, H) token embeddings (segments or discontinuities).
+            mask: (B, N) validity mask (1 = valid, 0 = padded).
+
+        Returns:
+            (B, N) positive collision times.
+        """
+        raw = self.mlp(token_emb).squeeze(-1)  # (B, N)
+        t_coll = F.softplus(raw) * mask  # positive, zeroed for padded tokens
+        return t_coll
+
+
 def compute_characteristic_bias(
     t_coords: torch.Tensor,
     x_coords: torch.Tensor,
@@ -83,6 +124,7 @@ def compute_characteristic_bias(
     flux: Flux,
     scale: nn.Parameter,
     damping_sharpness: nn.Parameter | None = None,
+    t_coll: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute backward-characteristic attention bias.
 
@@ -109,6 +151,10 @@ def compute_characteristic_bias(
         scale: Learnable scale parameter (initialized ~10).
         damping_sharpness: Learnable sharpness for collision-time damping.
             None = no damping (backward compat).
+        t_coll: (B, K) learned collision times from CollisionTimeHead.
+            When provided AND damping_sharpness is not None, skips
+            analytical computation and uses this tensor directly.
+            None = analytical collision time (backward compat).
 
     Returns:
         Attention bias (B, nt, nx, K), negative values suppress attention.
@@ -139,26 +185,28 @@ def compute_characteristic_bias(
 
     # Collision-time damping: fade bias after estimated wave collision
     if damping_sharpness is not None:
-        widths = xs[:, 1:] - xs[:, :-1]  # (B, K)
+        if t_coll is None:
+            # Analytical collision time (backward compat)
+            widths = xs[:, 1:] - xs[:, :-1]  # (B, K)
 
-        # Left-neighbor collision time
-        lam_left = F.pad(lambda_k_flat[:, :-1], (1, 0))
-        lam_left[:, 0] = lambda_k_flat[:, 0]
-        dx_left = F.pad(widths[:, :-1], (1, 0))
-        dx_left[:, 0] = widths[:, 0]
-        speed_diff_left = (lam_left - lambda_k_flat).abs().clamp(min=1e-3)
+            # Left-neighbor collision time
+            lam_left = F.pad(lambda_k_flat[:, :-1], (1, 0))
+            lam_left[:, 0] = lambda_k_flat[:, 0]
+            dx_left = F.pad(widths[:, :-1], (1, 0))
+            dx_left[:, 0] = widths[:, 0]
+            speed_diff_left = (lam_left - lambda_k_flat).abs().clamp(min=1e-3)
 
-        # Right-neighbor collision time
-        lam_right = F.pad(lambda_k_flat[:, 1:], (0, 1))
-        lam_right[:, -1] = lambda_k_flat[:, -1]
-        dx_right = F.pad(widths[:, 1:], (0, 1))
-        dx_right[:, -1] = widths[:, -1]
-        speed_diff_right = (lambda_k_flat - lam_right).abs().clamp(min=1e-3)
+            # Right-neighbor collision time
+            lam_right = F.pad(lambda_k_flat[:, 1:], (0, 1))
+            lam_right[:, -1] = lambda_k_flat[:, -1]
+            dx_right = F.pad(widths[:, 1:], (0, 1))
+            dx_right[:, -1] = widths[:, -1]
+            speed_diff_right = (lambda_k_flat - lam_right).abs().clamp(min=1e-3)
 
-        t_coll = torch.minimum(
-            dx_left / speed_diff_left,
-            dx_right / speed_diff_right,
-        )  # (B, K)
+            t_coll = torch.minimum(
+                dx_left / speed_diff_left,
+                dx_right / speed_diff_right,
+            )  # (B, K)
 
         t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
         t_exp_broad = t_coords.unsqueeze(-1)  # (B, nt, nx, 1)
@@ -185,6 +233,7 @@ def compute_discontinuity_characteristic_bias(
     flux: Flux,
     scale: nn.Parameter,
     damping_sharpness: nn.Parameter | None = None,
+    t_coll: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Backward-characteristic attention bias for discontinuity-based models.
 
@@ -212,6 +261,10 @@ def compute_discontinuity_characteristic_bias(
         scale: Learnable scale parameter (initialized ~5).
         damping_sharpness: Learnable sharpness for collision-time damping.
             None = no damping (backward compat).
+        t_coll: (B, D) learned collision times from CollisionTimeHead.
+            When provided AND damping_sharpness is not None, skips
+            analytical computation and uses this tensor directly.
+            None = analytical collision time (backward compat).
 
     Returns:
         Attention bias (B, nt, nx, D), negative values suppress attention.
@@ -246,31 +299,33 @@ def compute_discontinuity_characteristic_bias(
 
     # Collision-time damping: fade bias after adjacent discs' waves interact
     if damping_sharpness is not None:
-        # Compute raw gaps between consecutive discontinuities
-        raw_gap = disc_positions[:, 1:] - disc_positions[:, :-1]  # (B, D-1)
-        # Gaps involving padded discs are meaningless; replace with 1.0
-        pair_mask = disc_mask[:, :-1] * disc_mask[:, 1:]  # (B, D-1)
-        raw_gap = raw_gap * pair_mask + (1.0 - pair_mask) * 1.0
+        if t_coll is None:
+            # Analytical collision time (backward compat)
+            # Compute raw gaps between consecutive discontinuities
+            raw_gap = disc_positions[:, 1:] - disc_positions[:, :-1]  # (B, D-1)
+            # Gaps involving padded discs are meaningless; replace with 1.0
+            pair_mask = disc_mask[:, :-1] * disc_mask[:, 1:]  # (B, D-1)
+            raw_gap = raw_gap * pair_mask + (1.0 - pair_mask) * 1.0
 
-        # Right collision: disc d's zone right edge meets disc (d+1)'s zone left edge
-        # t_coll = (x_{d+1} - x_d) / (v_max_d - v_min_{d+1})
-        gap_right = F.pad(raw_gap, (0, 1))  # (B, D)
-        gap_right[:, -1] = 1.0  # large gap for rightmost disc
-        v_min_right_neighbor = F.pad(v_min[:, 1:], (0, 1))
-        v_min_right_neighbor[:, -1] = v_min[:, -1]  # self-pad
-        speed_diff_right = (v_max - v_min_right_neighbor).clamp(min=1e-3)
-        t_coll_right = gap_right / speed_diff_right
+            # Right collision: disc d's zone right edge meets disc (d+1)'s zone left edge
+            # t_coll = (x_{d+1} - x_d) / (v_max_d - v_min_{d+1})
+            gap_right = F.pad(raw_gap, (0, 1))  # (B, D)
+            gap_right[:, -1] = 1.0  # large gap for rightmost disc
+            v_min_right_neighbor = F.pad(v_min[:, 1:], (0, 1))
+            v_min_right_neighbor[:, -1] = v_min[:, -1]  # self-pad
+            speed_diff_right = (v_max - v_min_right_neighbor).clamp(min=1e-3)
+            t_coll_right = gap_right / speed_diff_right
 
-        # Left collision: disc (d-1)'s zone right edge meets disc d's zone left edge
-        # t_coll = (x_d - x_{d-1}) / (v_max_{d-1} - v_min_d)
-        gap_left = F.pad(raw_gap, (1, 0))  # (B, D)
-        gap_left[:, 0] = 1.0  # large gap for leftmost disc
-        v_max_left_neighbor = F.pad(v_max[:, :-1], (1, 0))
-        v_max_left_neighbor[:, 0] = v_max[:, 0]  # self-pad
-        speed_diff_left = (v_max_left_neighbor - v_min).clamp(min=1e-3)
-        t_coll_left = gap_left / speed_diff_left
+            # Left collision: disc (d-1)'s zone right edge meets disc d's zone left edge
+            # t_coll = (x_d - x_{d-1}) / (v_max_{d-1} - v_min_d)
+            gap_left = F.pad(raw_gap, (1, 0))  # (B, D)
+            gap_left[:, 0] = 1.0  # large gap for leftmost disc
+            v_max_left_neighbor = F.pad(v_max[:, :-1], (1, 0))
+            v_max_left_neighbor[:, 0] = v_max[:, 0]  # self-pad
+            speed_diff_left = (v_max_left_neighbor - v_min).clamp(min=1e-3)
+            t_coll_left = gap_left / speed_diff_left
 
-        t_coll = torch.minimum(t_coll_left, t_coll_right).clamp(min=0.0)  # (B, D)
+            t_coll = torch.minimum(t_coll_left, t_coll_right).clamp(min=0.0)  # (B, D)
 
         t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, D)
         t_exp_broad = t_coords.unsqueeze(-1)  # (B, nt, nx, 1)

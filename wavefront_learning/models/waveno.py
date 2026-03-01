@@ -35,6 +35,7 @@ import torch.nn as nn
 
 from .base.biased_cross_attention import (
     BiasedCrossDecoderLayer,
+    CollisionTimeHead,
     compute_characteristic_bias,
     compute_discontinuity_characteristic_bias,
 )
@@ -102,6 +103,10 @@ class WaveNO(nn.Module):
         predict_proximity: If True, add a second MLP head that predicts
             a sigmoid-activated shock proximity field from the same
             cross-attention features as the density head.
+        learned_collision_time: If True, replace the analytical collision
+            time with a learned MLP head on token embeddings. The head
+            predicts a per-token "validity horizon" for the characteristic
+            bias damping. Default False (backward compat).
     """
 
     def __init__(
@@ -128,6 +133,7 @@ class WaveNO(nn.Module):
         independent_traj: bool = False,
         use_discontinuities: bool = False,
         predict_proximity: bool = False,
+        learned_collision_time: bool = False,
         dropout: float = 0.05,
     ):
         super().__init__()
@@ -139,8 +145,13 @@ class WaveNO(nn.Module):
         self.independent_traj = independent_traj
         self.use_discontinuities = use_discontinuities
         self.predict_proximity = predict_proximity
+        self.learned_collision_time = learned_collision_time
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
+
+        # === Learned collision time head ===
+        if learned_collision_time:
+            self.collision_time_head = CollisionTimeHead(hidden_dim)
 
         # === Stage 1: Token encoder ===
         if use_discontinuities:
@@ -344,6 +355,11 @@ class WaveNO(nn.Module):
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
         seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
 
+        # Learned collision time (after self-attention has full IC context)
+        seg_t_coll = None
+        if self.learned_collision_time:
+            seg_t_coll = self.collision_time_head(seg_emb, pieces_mask)  # (B, K)
+
         # === Stage 2: Time-conditioned segment evolution ===
         t_unique = t_coords[:, :, 0]  # (B, nt)
         if self.time_condition:
@@ -439,6 +455,7 @@ class WaveNO(nn.Module):
             self.flux,
             self.bias_scale,
             damping_sharpness=self.damping_sharpness,
+            t_coll=seg_t_coll,
         )  # (B, nt, nx, K)
 
         # === Stage 7: Per-time-step biased cross-attention ===
@@ -521,6 +538,11 @@ class WaveNO(nn.Module):
             emb = layer(emb, key_padding_mask=key_padding_mask)
         emb = emb * disc_mask.unsqueeze(-1)  # re-zero padded
 
+        # Learned collision time (after self-attention has full IC context)
+        disc_t_coll = None
+        if self.learned_collision_time:
+            disc_t_coll = self.collision_time_head(emb, disc_mask)  # (B, D)
+
         # === Stage 2: Time-conditioned disc evolution ===
         t_unique = t_coords[:, :, 0]  # (B, nt)
         if self.time_condition:
@@ -591,6 +613,7 @@ class WaveNO(nn.Module):
             self.flux,
             self.bias_scale,
             damping_sharpness=self.damping_sharpness,
+            t_coll=disc_t_coll,
         )  # (B, nt, nx, D)
 
         # === Stage 7: Per-time-step biased cross-attention ===
@@ -669,6 +692,7 @@ def build_waveno(args: dict) -> WaveNO:
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
         num_freq_bound=args.get("num_freq_bound", 8),
+        learned_collision_time=args.get("learned_collision_time", False),
         dropout=args.get("dropout", 0.05),
     )
 
@@ -694,6 +718,7 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
         num_freq_bound=args.get("num_freq_bound", 8),
+        learned_collision_time=args.get("learned_collision_time", False),
         dropout=args.get("dropout", 0.05),
     )
     kwargs.update(overrides)

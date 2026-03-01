@@ -756,6 +756,10 @@ $$\gamma(t, d) = \sigma\left(|\beta| \cdot (t_{coll,d} - t)\right)$$
 
 **Final bias**: $\text{bias}(t, x, d) = \text{bias}_{raw}(t, x, d) \cdot \gamma(t, d)$
 
+###### Learned Collision Time (`--learned_collision_time`)
+
+When `learned_collision_time=True`, $t_{coll,d}$ is predicted by a small MLP (`CollisionTimeHead`) from the contextualized discontinuity embeddings (after self-attention) instead of being computed analytically. The head outputs `softplus(MLP(emb))` per token, guaranteeing positivity. This handles multi-collision cascades and rarefaction interactions where the analytical first-pairwise estimate is inaccurate.
+
 ##### Why This Improves Resolution Generalization
 
 At training resolution, standard cross-attention learns which discontinuity embeddings to attend to for each coordinate region. At higher resolutions, the query grid becomes denser with interpolated coordinate values. Without physics bias, the attention patterns must generalize purely from learned Fourier features. With characteristic bias, the backward characteristic foot correctly identifies relevant discontinuities at **any** resolution, providing a resolution-invariant inductive bias.
@@ -970,6 +974,10 @@ where $\beta$ is a learnable sharpness parameter (initialized at 5.0). This give
 **Final bias**:
 
 $$\text{bias}(t, x, k) = \text{bias}_{raw}(t, x, k) \cdot \gamma(t, k)$$
+
+###### Learned Collision Time (`--learned_collision_time`)
+
+When `learned_collision_time=True`, $t_{coll,k}$ is predicted by a small MLP (`CollisionTimeHead`) from the contextualized segment embeddings (after self-attention) instead of being computed analytically. The head outputs `softplus(MLP(emb))` per token, guaranteeing positivity. This handles multi-collision cascades and rarefaction interactions where the analytical first-pairwise estimate is inaccurate.
 
 ##### BreakpointEvolution
 

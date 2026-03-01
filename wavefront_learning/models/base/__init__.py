@@ -13,7 +13,11 @@ This module contains reusable components used by main models:
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
-from .biased_cross_attention import BiasedCrossDecoderLayer, compute_characteristic_bias
+from .biased_cross_attention import (
+    BiasedCrossDecoderLayer,
+    CollisionTimeHead,
+    compute_characteristic_bias,
+)
 from .blocks import ResidualBlock
 from .boundaries import compute_boundaries
 from .breakpoint_evolution import BreakpointEvolution
@@ -50,6 +54,7 @@ __all__ = [
     "BaseWavefrontModel",
     # Biased cross-attention
     "BiasedCrossDecoderLayer",
+    "CollisionTimeHead",
     "compute_characteristic_bias",
     # Boundaries
     "compute_boundaries",
