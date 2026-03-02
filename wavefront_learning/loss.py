@@ -311,7 +311,6 @@ def create_loss_from_args(args) -> nn.Module:
         }
         loss_kwargs["entropy"] = {
             "dx": args.dx,
-            "min_component_size": getattr(args, "min_component_size", 5),
         }
         loss_kwargs["mse_shock"] = {
             "dx": args.dx,

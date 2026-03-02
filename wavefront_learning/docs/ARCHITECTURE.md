@@ -2201,20 +2201,21 @@ Used via the `shock_proximity` preset: `mse` (weight 1.0) + `shock_proximity` (w
 
 #### EntropyConditionLoss
 
-Uses the Lax entropy condition on the GT grid as a threshold-free shock detector. Penalizes missed shocks (entropy-detected shocks far from predictions) and false positives (predictions far from shocks).
+Uses a continuous entropy strength measure derived from the Lax entropy condition on the GT grid. Provides smooth gradients that pull trajectories toward shocks from a distance, unlike a binary shock mask.
 
-Shock detection:
-1. For each cell interface: $\lambda_L = 1 - 2\rho_j$, $\lambda_R = 1 - 2\rho_{j+1}$, $s = 1 - \rho_j - \rho_{j+1}$
-2. Interface is a shock if $\lambda_L > s > \lambda_R$ (Lax entropy condition)
-3. Small isolated components (< `min_component_size` cells) are removed via connected component filtering (`scipy.ndimage.label`)
+Entropy strength at each cell interface:
+1. Compute margins: $m_L = \lambda_L - s$, $m_R = s - \lambda_R$ where $\lambda_L = 1 - 2\rho_j$, $\lambda_R = 1 - 2\rho_{j+1}$, $s = 1 - \rho_j - \rho_{j+1}$
+2. $E = \text{ReLU}(m_L) \cdot \text{ReLU}(m_R)$
+
+For Greenshields flux: $m_L = m_R = \rho_R - \rho_L$, so $E = \text{ReLU}(\rho_R - \rho_L)^2$. Zero at rarefactions, continuously positive at shocks (proportional to jump strength squared), differentiable everywhere.
 
 Loss:
 $$\mathcal{L} = \mathcal{L}_{\text{miss}} + w_{\text{fp}} \cdot \mathcal{L}_{\text{fp}}$$
 
-- $\mathcal{L}_{\text{miss}}$: jump-weighted distance from entropy-detected shocks to nearest active prediction
-- $\mathcal{L}_{\text{fp}}$: existence-weighted distance from predictions to nearest entropy-detected shock
+- $\mathcal{L}_{\text{miss}} = \text{mean}(E \cdot d_{\min\text{pred}})$: entropy-weighted distance from interfaces to nearest active prediction
+- $\mathcal{L}_{\text{fp}} = \text{mean}(c \cdot (d / (E + \epsilon))_{\min})$: existence-weighted distance from predictions to nearest entropy-strong interface, with weak interfaces suppressed by division
 
-Parameters: `dx` (spatial step), `fp_weight` (false-positive weight, default: 1.0), `min_component_size` (default: 5, 0 to disable).
+Parameters: `dx` (spatial step), `fp_weight` (false-positive weight, default: 1.0).
 
 #### MSEShockLoss
 

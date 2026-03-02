@@ -1,19 +1,21 @@
 """Entropy condition loss for shock detection in LWR traffic flow.
 
-Uses the Lax entropy condition on the ground truth grid as a threshold-free
-boolean shock detector. The entropy condition checks whether characteristic
-speeds converge at a cell interface:
+Uses a continuous entropy strength measure derived from the Lax entropy
+condition on the ground truth grid. The entropy strength is:
 
-    char_left  = f'(u_j)     > shock_speed > f'(u_{j+1}) = char_right
+    margin_left  = char_left - shock_speed    (positive when left condition holds)
+    margin_right = shock_speed - char_right   (positive when right condition holds)
+    entropy_strength = relu(margin_left) * relu(margin_right)
 
-For Greenshields flux f(rho) = rho(1 - rho):
-    char_left  = 1 - 2*u_j
-    char_right = 1 - 2*u_{j+1}
-    shock_speed = 1 - u_j - u_{j+1}
+For Greenshields flux, both margins equal (rho_R - rho_L), so
+entropy_strength = relu(rho_R - rho_L)^2. This is:
+- Zero in smooth regions and at rarefactions (rho_L > rho_R)
+- Continuously positive at shock interfaces, proportional to jump strength squared
+- Differentiable everywhere
 
 The loss penalizes:
-1. Missed shocks: entropy-detected shock interfaces far from any prediction
-2. False positives: predicted trajectories far from any entropy-detected shock
+1. Missed shocks: entropy-weighted distance from interfaces to nearest prediction
+2. False positives: predicted trajectories far from entropy-strong interfaces
 """
 
 import torch
@@ -23,23 +25,21 @@ from .flux import compute_shock_speed, greenshields_flux_derivative
 
 
 class EntropyConditionLoss(BaseLoss):
-    """Loss based on the Lax entropy condition applied to the GT grid.
+    """Loss based on continuous entropy strength from the Lax condition on GT.
 
-    Detects shocks via characteristic speed convergence and penalizes
-    missed shocks and false-positive predictions.
+    Uses continuous entropy strength (product of ReLU margins from the Lax
+    entropy condition) instead of a binary shock mask. This provides smooth
+    gradients that pull trajectories toward shocks from a distance.
 
     Args:
         dx: Spatial step size (used to compute interface midpoint positions).
         fp_weight: Weight for the false-positive penalty term.
     """
 
-    def __init__(
-        self, dx: float = 0.02, fp_weight: float = 1.0, min_component_size: int = 5
-    ):
+    def __init__(self, dx: float = 0.02, fp_weight: float = 1.0):
         super().__init__()
         self.dx = dx
         self.fp_weight = fp_weight
-        self.min_component_size = min_component_size
 
     def forward(
         self,
@@ -71,7 +71,7 @@ class EntropyConditionLoss(BaseLoss):
         gt = target.squeeze(1)
         B, nt, nx = gt.shape
 
-        # --- Compute entropy condition at every interface ---
+        # --- Compute continuous entropy strength at every interface ---
         rho_left = gt[:, :, :-1]  # (B, nt, nx-1)
         rho_right = gt[:, :, 1:]  # (B, nt, nx-1)
 
@@ -79,23 +79,10 @@ class EntropyConditionLoss(BaseLoss):
         char_right = greenshields_flux_derivative(rho_right)
         shock_speed = compute_shock_speed(rho_left, rho_right)
 
-        # Lax entropy condition: char_left > shock_speed > char_right
-        is_shock = (char_left > shock_speed) & (shock_speed > char_right)  # (B, nt, nx-1)
-
-        # Remove small isolated components (noise)
-        if self.min_component_size > 0:
-            from losses.shock_utils import filter_small_components
-
-            device = is_shock.device
-            filtered = []
-            for b in range(B):
-                mask_np = is_shock[b].cpu().numpy()
-                mask_np = filter_small_components(mask_np, self.min_component_size)
-                filtered.append(torch.from_numpy(mask_np))
-            is_shock = torch.stack(filtered).to(device)
-
-        # Jump strength as weighting for miss penalty
-        jump_strength = torch.abs(rho_left - rho_right)  # (B, nt, nx-1)
+        # Continuous entropy strength: relu(margin_left) * relu(margin_right)
+        margin_left = char_left - shock_speed
+        margin_right = shock_speed - char_right
+        entropy_strength = torch.relu(margin_left) * torch.relu(margin_right)  # (B, nt, nx-1)
 
         # --- Interface midpoint x-coordinates ---
         if x_coords.dim() == 4:
@@ -118,27 +105,24 @@ class EntropyConditionLoss(BaseLoss):
 
         eps = 1.0
 
-        # --- Miss penalty: entropy-detected shocks far from predictions ---
+        # --- Miss penalty: entropy-strong interfaces far from predictions ---
         # For each interface, find nearest active predicted trajectory
         # Inactive predictions (combined ~ 0) get large score via division
         min_dist_to_pred = (
             dist / (combined.unsqueeze(-1) + eps)
         ).min(dim=1).values  # (B, nt, nx-1)
 
-        # Weight by jump strength and mask to shock interfaces only
-        is_shock_f = is_shock.float()
-        miss_loss = (jump_strength * min_dist_to_pred * is_shock_f).sum() / (
-            is_shock_f.sum() + 1.0
-        )
+        # Weight by continuous entropy strength and average
+        miss_loss = (entropy_strength * min_dist_to_pred).mean()
 
-        # --- False positive penalty: predictions far from any entropy shock ---
-        # For each predicted position, find nearest entropy-detected shock interface
-        # Non-shock interfaces (is_shock=False) get large score via division
-        fp_dist = (
-            dist / (is_shock_f.unsqueeze(1) + eps)
+        # --- False positive penalty: predictions far from entropy-strong interfaces ---
+        # For each predicted position, find nearest entropy-strong interface
+        # Weak-entropy interfaces get large score via division
+        fp_score = (
+            dist / (entropy_strength.unsqueeze(1) + eps)
         ).min(dim=-1).values  # (B, D, nt)
 
-        fp_loss = (combined * fp_dist).mean()
+        fp_loss = (combined * fp_score).mean()
 
         loss = miss_loss + self.fp_weight * fp_loss
 
