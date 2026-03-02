@@ -412,7 +412,6 @@ def main():
         shuffle=True,
         collate_fn=collate_wavefront_batch,
         num_workers=4,
-        persistent_workers=True,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -420,7 +419,6 @@ def main():
         shuffle=False,
         collate_fn=collate_wavefront_batch,
         num_workers=4,
-        persistent_workers=True,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -428,7 +426,6 @@ def main():
         shuffle=False,
         collate_fn=collate_wavefront_batch,
         num_workers=4,
-        persistent_workers=True,
     )
 
     print(
