@@ -2206,6 +2206,7 @@ Uses the Lax entropy condition on the GT grid as a binary shock detector. Contin
 Shock detection at each cell interface:
 1. $\lambda_L = 1 - 2\rho_j$, $\lambda_R = 1 - 2\rho_{j+1}$, $s = 1 - \rho_j - \rho_{j+1}$
 2. Interface is a shock if $\lambda_L > s > \lambda_R$ (Lax entropy condition)
+3. Small isolated components (< `min_component_size` cells) are removed via connected component filtering (`scipy.ndimage.label`)
 
 Loss:
 $$\mathcal{L} = \mathcal{L}_{\text{miss}} + w_{\text{fp}} \cdot \mathcal{L}_{\text{fp}}$$
@@ -2213,7 +2214,7 @@ $$\mathcal{L} = \mathcal{L}_{\text{miss}} + w_{\text{fp}} \cdot \mathcal{L}_{\te
 - $\mathcal{L}_{\text{miss}}$: for each shock interface, distance to nearest active prediction; averaged over shock interfaces
 - $\mathcal{L}_{\text{fp}}$: for each active prediction, distance to nearest shock interface (non-shock interfaces masked out); averaged over predictions
 
-Parameters: `dx` (spatial step), `fp_weight` (false-positive weight, default: 1.0).
+Parameters: `dx` (spatial step), `fp_weight` (false-positive weight, default: 1.0), `min_component_size` (default: 5, 0 to disable).
 
 #### MSEShockLoss
 
