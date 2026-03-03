@@ -2083,16 +2083,17 @@ Six ablation models isolate which architectural component drives the performance
 | `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
 | `WaveNODisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
 | `ShockAwareWaveNO` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
-| `WaveNOMinimal` | Standalone class | Strips WaveNO to the core 5-stage pipeline: no self-attention, no FiLM, no trajectories, no damping. Static segment embeddings; time enters only via queries and characteristic bias |
+| `WaveNOMinimal` | Standalone class | Strips WaveNO to a minimal pipeline: self-attention + Fourier queries + characteristic bias (no damping) + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories, no damping |
 
 #### WaveNOMinimal Architecture
 
 **Location**: `models/waveno_minimal.py`
 
-Ablation baseline that tests whether the core mechanism alone is sufficient. All "extras" are removed — segment embeddings are static and don't interact with each other or evolve with time.
+Ablation baseline that removes FiLM time conditioning, cross-segment attention, trajectory prediction, and collision-time damping. Keeps self-attention over segments so embeddings are contextualized (segments know about neighbors) but static across time.
 
 ```
-xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)   [static, no self-attn]
+xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
+seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
 
 t_coords, x_coords → Fourier(t) || Fourier(x) → MLP → query_emb: (nt, nx, H)
 
@@ -2112,6 +2113,7 @@ query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
 | `num_freq_x` | 8 |
 | `num_seg_frequencies` | 8 |
 | `num_seg_mlp_layers` | 2 |
+| `num_self_attn_layers` | 2 |
 | `num_cross_layers` | 2 |
 | `num_heads` | 4 |
 | `initial_bias_scale` | 5.0 |
