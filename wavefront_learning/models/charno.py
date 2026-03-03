@@ -23,28 +23,7 @@ from .base.characteristic_features import (
     TimeConditioner,
 )
 from .base.flux import DEFAULT_FLUX, Flux
-from .base.transformer_encoder import EncoderLayer
-
-
-class CrossSegmentAttention(nn.Module):
-    """Lightweight self-attention over the K segment dimension.
-
-    Unlike EncoderLayer, this has NO feedforward network — just attention
-    + residual + LayerNorm. This saves ~60% memory since the FFN's 4x
-    expansion on (B*Q, K, D) tensors is the main OOM culprit.
-    The downstream score/value MLPs provide sufficient nonlinear capacity.
-    """
-
-    def __init__(self, dim: int, num_heads: int = 4):
-        super().__init__()
-        self.attention = nn.MultiheadAttention(
-            dim, num_heads=num_heads, batch_first=True
-        )
-        self.norm = nn.LayerNorm(dim)
-
-    def forward(self, x, key_padding_mask=None):
-        att = self.attention(x, x, x, key_padding_mask=key_padding_mask)[0]
-        return self.norm(x + att)
+from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
 
 
 class CharNO(nn.Module):

@@ -50,6 +50,25 @@ class Encoder(nn.Module):
         return x
 
 
+class CrossSegmentAttention(nn.Module):
+    """Lightweight self-attention over the K segment dimension.
+
+    No feedforward network -- just attention + residual + LayerNorm.
+    """
+
+    def __init__(self, dim: int, num_heads: int = 4, dropout: float = 0.0):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(
+            dim, num_heads=num_heads, batch_first=True
+        )
+        self.norm = nn.LayerNorm(dim)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, key_padding_mask=None):
+        att = self.attention(x, x, x, key_padding_mask=key_padding_mask)[0]
+        return self.norm(x + self.drop(att))
+
+
 if __name__ == "__main__":
     B, S, C = 4, 50, 3
     x = torch.randn(B, S, C)

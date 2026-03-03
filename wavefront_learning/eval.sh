@@ -1,15 +1,21 @@
 #!/bin/bash
 
-# Ablation study: WaveNO vs ClassifierTrajTransformer
-# 5000 samples, 100 epochs, pde_shocks loss
+# Ablation study
+# 5000 samples, 100 epochs
 
-# === WaveNO ablations (fixing step-generalization) ===
-uv run train.py --model WaveNOCls --n_samples 5000 --epochs 100 --loss pde_shocks --plot waveno_cls
-uv run train.py --model WaveNOLocal --n_samples 5000 --epochs 100 --loss pde_shocks --plot waveno_local
-uv run train.py --model WaveNOIndepTraj --n_samples 5000 --epochs 100 --loss pde_shocks --plot waveno_indep_traj
-uv run train.py --model WaveNODisc --n_samples 5000 --epochs 100 --loss pde_shocks --plot waveno_disc
+# === WaveNO component ablation study ===
+# Cumulative progression (building up from bare minimum)
+uv run train.py --model WaveNOAblation --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNOAblationBias --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNOAblationDamp --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNOAblationFiLM --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNOAblationCrossAttn --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNOAblationFull --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
 
-# === CTT ablations (fixing resolution) ===
-uv run train.py --model CTTBiased --n_samples 5000 --epochs 100 --loss pde_shocks --plot ctt_biased
-uv run train.py --model CTTSegPhysics --n_samples 5000 --epochs 100 --loss pde_shocks --plot ctt_seg_physics
-uv run train.py --model CTTFiLM --n_samples 5000 --epochs 100 --loss pde_shocks --plot ctt_film
+# Isolated additions (each component alone on bare baseline)
+uv run train.py --model WaveNOAblationFiLMOnly --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNOAblationCrossAttnOnly --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+
+# Reference models (existing, full architectures)
+uv run train.py --model WaveNOBase --n_samples 5000 --epochs 100 --loss mse --plot grid_residual
+uv run train.py --model WaveNO --n_samples 5000 --epochs 100 --loss pde_shocks --plot traj_residual

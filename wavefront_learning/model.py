@@ -51,7 +51,17 @@ from models.waveno import (
     build_waveno_indep_traj,
     build_waveno_local,
 )
-from models.waveno_minimal import build_waveno_minimal
+from models.waveno_minimal import (
+    build_waveno_ablation,
+    build_waveno_ablation_bias,
+    build_waveno_ablation_cross_attn,
+    build_waveno_ablation_cross_attn_only,
+    build_waveno_ablation_damp,
+    build_waveno_ablation_film,
+    build_waveno_ablation_film_only,
+    build_waveno_ablation_full,
+    build_waveno_minimal,
+)
 
 # Registry of available models
 MODELS = {
@@ -82,6 +92,14 @@ MODELS = {
     "WaveNODisc": build_waveno_disc,
     "ShockAwareWaveNO": build_shock_aware_waveno,
     "WaveNOMinimal": build_waveno_minimal,
+    "WaveNOAblation": build_waveno_ablation,
+    "WaveNOAblationBias": build_waveno_ablation_bias,
+    "WaveNOAblationDamp": build_waveno_ablation_damp,
+    "WaveNOAblationFiLM": build_waveno_ablation_film,
+    "WaveNOAblationCrossAttn": build_waveno_ablation_cross_attn,
+    "WaveNOAblationFull": build_waveno_ablation_full,
+    "WaveNOAblationFiLMOnly": build_waveno_ablation_film_only,
+    "WaveNOAblationCrossAttnOnly": build_waveno_ablation_cross_attn_only,
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,

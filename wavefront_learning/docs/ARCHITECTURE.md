@@ -2084,6 +2084,14 @@ Six ablation models isolate which architectural component drives the performance
 | `WaveNODisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
 | `ShockAwareWaveNO` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
 | `WaveNOMinimal` | Standalone class | Strips WaveNO to a minimal pipeline: self-attention + Fourier queries + characteristic bias with damping + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories |
+| `WaveNOAblation` | `use_char_bias=False, use_damping=False` | Bare minimum baseline: unbiased cross-attention, no extras |
+| `WaveNOAblationBias` | `use_char_bias=True, use_damping=False` | + characteristic bias (no damping) |
+| `WaveNOAblationDamp` | `use_char_bias=True, use_damping=True` | + characteristic bias + collision-time damping (= WaveNOMinimal) |
+| `WaveNOAblationFiLM` | `+ use_film=True` | + bias + damping + FiLM time conditioning |
+| `WaveNOAblationCrossAttn` | `+ use_cross_seg_attn=True` | + bias + damping + cross-segment attention |
+| `WaveNOAblationFull` | all flags True | All components except trajectories |
+| `WaveNOAblationFiLMOnly` | `use_film=True` only | FiLM without characteristic bias |
+| `WaveNOAblationCrossAttnOnly` | `use_cross_seg_attn=True` only | Cross-segment attention without characteristic bias |
 
 #### WaveNOMinimal Architecture
 
@@ -2123,6 +2131,37 @@ query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
 
 **Output**: `{output_grid: (B,1,nt,nx), characteristic_bias: (B,nt,nx,K)}`
 **Loss preset**: default `mse`. **Plot preset**: `grid_minimal`. **Transform**: `null`.
+
+#### Ablation Toggle Flags
+
+WaveNOMinimal supports 4 boolean flags for controlled ablation experiments:
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `use_char_bias` | True | When False, `attn_mask=None` (unbiased cross-attention) |
+| `use_damping` | True | When False, `damping_sharpness=None` (bias without fade) |
+| `use_film` | False | When True, applies `TimeConditioner` FiLM on segment embeddings |
+| `use_cross_seg_attn` | False | When True, per-timestep `CrossSegmentAttention` layers |
+
+Constraint: `use_damping=True` requires `use_char_bias=True`.
+
+**Cumulative progression** (building up from minimum):
+
+| Variant | Bias | Damp | FiLM | CrossSeg |
+|---------|------|------|------|----------|
+| `WaveNOAblation` | - | - | - | - |
+| `WaveNOAblationBias` | + | - | - | - |
+| `WaveNOAblationDamp` | + | + | - | - |
+| `WaveNOAblationFiLM` | + | + | + | - |
+| `WaveNOAblationCrossAttn` | + | + | - | + |
+| `WaveNOAblationFull` | + | + | + | + |
+
+**Isolated additions** (each component alone on bare baseline):
+
+| Variant | Bias | Damp | FiLM | CrossSeg |
+|---------|------|------|------|----------|
+| `WaveNOAblationFiLMOnly` | - | - | + | - |
+| `WaveNOAblationCrossAttnOnly` | - | - | - | + |
 
 #### ShockAwareWaveNO Architecture
 
