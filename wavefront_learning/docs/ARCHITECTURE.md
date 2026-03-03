@@ -2083,13 +2083,13 @@ Six ablation models isolate which architectural component drives the performance
 | `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
 | `WaveNODisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
 | `ShockAwareWaveNO` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
-| `WaveNOMinimal` | Standalone class | Strips WaveNO to a minimal pipeline: self-attention + Fourier queries + characteristic bias (no damping) + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories, no damping |
+| `WaveNOMinimal` | Standalone class | Strips WaveNO to a minimal pipeline: self-attention + Fourier queries + characteristic bias with damping + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories |
 
 #### WaveNOMinimal Architecture
 
 **Location**: `models/waveno_minimal.py`
 
-Ablation baseline that removes FiLM time conditioning, cross-segment attention, trajectory prediction, and collision-time damping. Keeps self-attention over segments so embeddings are contextualized (segments know about neighbors) but static across time.
+Ablation baseline that removes FiLM time conditioning, cross-segment attention, and trajectory prediction. Keeps self-attention over segments (contextualized embeddings) and collision-time damping (bias fades after wave interactions). Segment embeddings are static across time.
 
 ```
 xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
@@ -2097,7 +2097,7 @@ seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
 
 t_coords, x_coords → Fourier(t) || Fourier(x) → MLP → query_emb: (nt, nx, H)
 
-(t, x, xs, ks, flux) → backward char foot (no damping) → bias: (nt, nx, K)
+(t, x, xs, ks, flux) → backward char foot + collision-time damping → bias: (nt, nx, K)
 
 seg_emb expanded to (nt, K, H)   [static across time]
 query (B*nt, nx, H), keys/values (B*nt, K, H), bias (B*nt*heads, nx, K)
@@ -2117,6 +2117,7 @@ query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
 | `num_cross_layers` | 2 |
 | `num_heads` | 4 |
 | `initial_bias_scale` | 5.0 |
+| `initial_damping_sharpness` | 5.0 |
 | `local_features` | True |
 | `dropout` | 0.05 |
 

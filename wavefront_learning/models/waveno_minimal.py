@@ -6,7 +6,7 @@ matter most:
     1. SegmentPhysicsEncoder — encode IC segments with physics features
     1b. Self-attention over segments — contextualize embeddings
     2. Fourier query encoding — FourierFeatures(t) + FourierFeatures(x) → MLP
-    3. compute_characteristic_bias — backward characteristic foot penalty, no damping
+    3. compute_characteristic_bias — backward characteristic foot penalty with damping
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
     5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
 
@@ -15,7 +15,6 @@ Removed vs WaveNO:
     - Cross-segment attention per timestep (CrossSegmentAttention)
     - Breakpoint evolution / trajectory prediction
     - Boundary extraction + boundary Fourier features
-    - Collision-time damping
     - Classifier head, proximity head, learned collision time
 
 Segment embeddings are contextualized (segments know about neighbors)
@@ -49,6 +48,7 @@ class WaveNOMinimal(nn.Module):
         num_cross_layers: Biased cross-attention layers (queries → segments).
         num_heads: Attention heads for self and cross attention.
         initial_bias_scale: Initial characteristic bias scale.
+        initial_damping_sharpness: Initial sharpness for collision-time damping.
         flux: Flux function instance.
         local_features: Include cumulative mass in segment encoder.
         dropout: Dropout rate.
@@ -65,6 +65,7 @@ class WaveNOMinimal(nn.Module):
         num_cross_layers: int = 2,
         num_heads: int = 4,
         initial_bias_scale: float = 5.0,
+        initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
         local_features: bool = True,
         dropout: float = 0.05,
@@ -106,8 +107,11 @@ class WaveNOMinimal(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        # Stage 3: Characteristic bias scale (no damping)
+        # Stage 3: Characteristic bias scale + collision-time damping
         self.bias_scale = nn.Parameter(torch.tensor(initial_bias_scale))
+        self.damping_sharpness = nn.Parameter(
+            torch.tensor(initial_damping_sharpness)
+        )
 
         # Stage 4: Biased cross-attention layers
         self.cross_attn_layers = nn.ModuleList(
@@ -176,7 +180,7 @@ class WaveNOMinimal(nn.Module):
         query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
         query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)
 
-        # Stage 3: Characteristic attention bias (no damping)
+        # Stage 3: Characteristic attention bias with collision-time damping
         char_bias = compute_characteristic_bias(
             t_coords,
             x_coords,
@@ -185,7 +189,7 @@ class WaveNOMinimal(nn.Module):
             pieces_mask,
             self.flux,
             self.bias_scale,
-            damping_sharpness=None,
+            damping_sharpness=self.damping_sharpness,
         )  # (B, nt, nx, K)
 
         # Stage 4: Per-time-step biased cross-attention
@@ -253,6 +257,7 @@ def build_waveno_minimal(args: dict) -> WaveNOMinimal:
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
         initial_bias_scale=args.get("initial_bias_scale", 5.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
     )
