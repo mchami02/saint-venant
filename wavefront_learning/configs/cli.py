@@ -310,6 +310,7 @@ def parse_args() -> argparse.Namespace:
         help="Disable W&B logging",
     )
     parser.add_argument("--run_name", type=str, default=None, help="W&B run name")
+    parser.add_argument("--exp", type=str, default=None, help="W&B experiment (group) name")
 
     # Debugging/profiling
     parser.add_argument(

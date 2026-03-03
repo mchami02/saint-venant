@@ -28,6 +28,7 @@ class WandbLogger:
         name: str | None = None,
         config: dict | Namespace | None = None,
         tags: list[str] | None = None,
+        group: str | None = None,
         enabled: bool = True,
     ):
         self.enabled = enabled
@@ -40,6 +41,7 @@ class WandbLogger:
                 name=name,
                 config=config_dict,
                 tags=tags,
+                group=group,
             )
 
             # Define epoch as the x-axis for all custom metrics.
@@ -293,12 +295,14 @@ def init_logger(args: Namespace, project: str = "wavefront-learning") -> WandbLo
     """
     tags = [args.model] if hasattr(args, "model") else []
     name = getattr(args, "run_name", None)
+    group = getattr(args, "exp", None)
 
     return WandbLogger(
         project=project,
         name=name,
         config=args,
         tags=tags,
+        group=group,
         enabled=not getattr(args, "no_wandb", False),
     )
 
