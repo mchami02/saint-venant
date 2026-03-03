@@ -51,6 +51,7 @@ from models.waveno import (
     build_waveno_indep_traj,
     build_waveno_local,
 )
+from models.waveno_minimal import build_waveno_minimal
 
 # Registry of available models
 MODELS = {
@@ -80,6 +81,7 @@ MODELS = {
     "WaveNOIndepTraj": build_waveno_indep_traj,
     "WaveNODisc": build_waveno_disc,
     "ShockAwareWaveNO": build_shock_aware_waveno,
+    "WaveNOMinimal": build_waveno_minimal,
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
