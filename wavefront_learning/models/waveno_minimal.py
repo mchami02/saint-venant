@@ -1,16 +1,16 @@
 """WaveNOMinimal: Ablation baseline for WaveNO.
 
-Strips WaveNO down to the essential 5-stage pipeline to test whether
-the core mechanism alone is sufficient:
+Strips WaveNO down to a minimal pipeline to isolate which components
+matter most:
 
     1. SegmentPhysicsEncoder — encode IC segments with physics features
+    1b. Self-attention over segments — contextualize embeddings
     2. Fourier query encoding — FourierFeatures(t) + FourierFeatures(x) → MLP
     3. compute_characteristic_bias — backward characteristic foot penalty, no damping
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
     5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
 
 Removed vs WaveNO:
-    - Self-attention over segments (EncoderLayer)
     - FiLM time conditioning (TimeConditioner)
     - Cross-segment attention per timestep (CrossSegmentAttention)
     - Breakpoint evolution / trajectory prediction
@@ -18,9 +18,9 @@ Removed vs WaveNO:
     - Collision-time damping
     - Classifier head, proximity head, learned collision time
 
-Segment embeddings are static — they don't change with time or interact
-with each other. Time dependence enters only through the query encoding
-and the characteristic bias.
+Segment embeddings are contextualized (segments know about neighbors)
+but static across time. Time dependence enters only through the query
+encoding and the characteristic bias.
 """
 
 import torch
@@ -33,6 +33,7 @@ from .base.biased_cross_attention import (
 from .base.characteristic_features import SegmentPhysicsEncoder
 from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
+from .base.transformer_encoder import EncoderLayer
 
 
 class WaveNOMinimal(nn.Module):
@@ -44,8 +45,9 @@ class WaveNOMinimal(nn.Module):
         num_freq_x: Fourier frequency bands for space in query encoder.
         num_seg_frequencies: Fourier frequency bands for segment encoder.
         num_seg_mlp_layers: MLP depth in segment encoder.
+        num_self_attn_layers: Self-attention layers for segment interaction.
         num_cross_layers: Biased cross-attention layers (queries → segments).
-        num_heads: Attention heads for cross-attention.
+        num_heads: Attention heads for self and cross attention.
         initial_bias_scale: Initial characteristic bias scale.
         flux: Flux function instance.
         local_features: Include cumulative mass in segment encoder.
@@ -59,6 +61,7 @@ class WaveNOMinimal(nn.Module):
         num_freq_x: int = 8,
         num_seg_frequencies: int = 8,
         num_seg_mlp_layers: int = 2,
+        num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
         num_heads: int = 4,
         initial_bias_scale: float = 5.0,
@@ -72,7 +75,7 @@ class WaveNOMinimal(nn.Module):
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
-        # Stage 1: Segment encoder (static, no self-attention)
+        # Stage 1: Segment encoder + self-attention
         self.segment_encoder = SegmentPhysicsEncoder(
             hidden_dim=hidden_dim,
             num_frequencies=num_seg_frequencies,
@@ -80,6 +83,12 @@ class WaveNOMinimal(nn.Module):
             flux=flux,
             include_cumulative_mass=local_features,
             dropout=dropout,
+        )
+        self.self_attn_layers = nn.ModuleList(
+            [
+                EncoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
+                for _ in range(num_self_attn_layers)
+            ]
         )
 
         # Stage 2: Query encoder (Fourier + MLP)
@@ -146,8 +155,17 @@ class WaveNOMinimal(nn.Module):
         B, nt, nx = t_coords.shape
         K = ks.shape[1]
 
-        # Stage 1: Encode segments (static — no self-attention)
+        # Stage 1: Encode segments + self-attention
         seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+
+        key_padding_mask = ~pieces_mask.bool()  # True = padded
+        all_masked = key_padding_mask.all(dim=1)
+        if all_masked.any():
+            key_padding_mask = key_padding_mask.clone()
+            key_padding_mask[all_masked] = False
+        for layer in self.self_attn_layers:
+            seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
+        seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
 
         # Stage 2: Query encoding
         t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
@@ -231,6 +249,7 @@ def build_waveno_minimal(args: dict) -> WaveNOMinimal:
         num_freq_x=args.get("num_freq_x", 8),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
+        num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
         initial_bias_scale=args.get("initial_bias_scale", 5.0),
