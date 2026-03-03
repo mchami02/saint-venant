@@ -29,6 +29,7 @@ model_plot_preset:
   CTTFiLM: traj_existence
   CTTSeg: traj_existence
   CharNO: charno
+  WaveNOMinimal: grid_minimal
   TransformerSeg: grid_minimal
   WaveFrontModel: wavefront
   CVAEDeepONet: cvae
@@ -63,6 +64,7 @@ model_transform:
   WaveNOIndepTraj: null
   WaveNODisc: null
   ShockAwareWaveNO: null
+  WaveNOMinimal: null
   CTTBiased: null
   CTTSegPhysics: null
   CTTFiLM: null

@@ -45,6 +45,7 @@ wavefront_learning/
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
+│   ├── waveno_minimal.py         # WaveNOMinimal: Stripped-down WaveNO ablation baseline (5-stage core only)
 │   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
 │   ├── shock_aware_deeponet.py      # ShockAwareDeepONet: dual-head DeepONet (solution + shock proximity)
@@ -214,6 +215,8 @@ wavefront_learning/
   - `CharNO`, `build_charno()`
 - **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
   - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`, `build_shock_aware_waveno()`
+- **waveno_minimal.py** — Stripped-down WaveNO ablation baseline (core 5-stage pipeline only).
+  - `WaveNOMinimal`, `build_waveno_minimal()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
   - `WaveFrontModel`, `build_wavefront_model()`
 - **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.
