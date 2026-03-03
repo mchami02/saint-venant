@@ -49,27 +49,7 @@ from .base.characteristic_features import (
 from .base.decoders import TrajectoryDecoderTransformer
 from .base.feature_encoders import DiscontinuityEncoder, FourierFeatures, TimeEncoder
 from .base.flux import DEFAULT_FLUX, Flux
-from .base.transformer_encoder import EncoderLayer
-
-
-class CrossSegmentAttention(nn.Module):
-    """Lightweight self-attention over the K segment dimension.
-
-    No feedforward network -- just attention + residual + LayerNorm.
-    Identical to CharNO's CrossSegmentAttention.
-    """
-
-    def __init__(self, dim: int, num_heads: int = 4, dropout: float = 0.0):
-        super().__init__()
-        self.attention = nn.MultiheadAttention(
-            dim, num_heads=num_heads, batch_first=True
-        )
-        self.norm = nn.LayerNorm(dim)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, x, key_padding_mask=None):
-        att = self.attention(x, x, x, key_padding_mask=key_padding_mask)[0]
-        return self.norm(x + self.drop(att))
+from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
 
 
 class WaveNO(nn.Module):

@@ -30,6 +30,14 @@ model_plot_preset:
   CTTSeg: traj_existence
   CharNO: charno
   WaveNOMinimal: grid_minimal
+  WaveNOAblation: grid_minimal
+  WaveNOAblationBias: grid_minimal
+  WaveNOAblationDamp: grid_minimal
+  WaveNOAblationFiLM: grid_minimal
+  WaveNOAblationCrossAttn: grid_minimal
+  WaveNOAblationFull: grid_minimal
+  WaveNOAblationFiLMOnly: grid_minimal
+  WaveNOAblationCrossAttnOnly: grid_minimal
   TransformerSeg: grid_minimal
   WaveFrontModel: wavefront
   CVAEDeepONet: cvae
@@ -65,6 +73,14 @@ model_transform:
   WaveNODisc: null
   ShockAwareWaveNO: null
   WaveNOMinimal: null
+  WaveNOAblation: null
+  WaveNOAblationBias: null
+  WaveNOAblationDamp: null
+  WaveNOAblationFiLM: null
+  WaveNOAblationCrossAttn: null
+  WaveNOAblationFull: null
+  WaveNOAblationFiLMOnly: null
+  WaveNOAblationCrossAttnOnly: null
   CTTBiased: null
   CTTSegPhysics: null
   CTTFiLM: null
