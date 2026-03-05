@@ -41,8 +41,8 @@ class LWRBias(nn.Module):
 
     def __init__(
         self,
-        scale: float = 50.0,
-        damping_sharpness: float | None = 5.0,
+        scale: float = 100.0,
+        damping_sharpness: float | None = 3.0,
         flux: Flux | None = None,
     ):
         super().__init__()
