@@ -202,19 +202,14 @@ def parse_args() -> argparse.Namespace:
 
     # Model-specific parameters
     parser.add_argument(
-        "--bias_margin",
+        "--initial_bias_scale",
         type=float,
-        help="LWRBias margin (constant offset at boundary) for WaveNO",
+        help="Initial scale for LWRBias quadratic penalty (learnable)",
     )
     parser.add_argument(
-        "--bias_growth_rate",
+        "--initial_damping_sharpness",
         type=float,
-        help="LWRBias growth rate (distance scale) for WaveNO",
-    )
-    parser.add_argument(
-        "--bias_time_spread",
-        type=float,
-        help="LWRBias time spread (exponential decay rate) for WaveNO",
+        help="Initial sharpness for LWRBias collision-time damping (learnable)",
     )
     parser.add_argument(
         "--dropout",

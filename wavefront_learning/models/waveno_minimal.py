@@ -49,9 +49,10 @@ class WaveNOMinimal(nn.Module):
         num_self_attn_layers: Self-attention layers for segment interaction.
         num_cross_layers: Biased cross-attention layers (queries → segments).
         num_heads: Attention heads for self and cross attention.
-        bias_margin: LWRBias margin (constant offset at boundary).
-        bias_growth_rate: LWRBias growth rate (distance scale).
-        bias_time_spread: LWRBias time spread (exponential decay rate).
+        initial_bias_scale: Initial scale for LWRBias quadratic penalty
+            (learnable).
+        initial_damping_sharpness: Initial sharpness for LWRBias
+            collision-time damping (learnable).
         flux: Flux function instance.
         local_features: Include cumulative mass in segment encoder.
         dropout: Dropout rate.
@@ -73,9 +74,8 @@ class WaveNOMinimal(nn.Module):
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
         num_heads: int = 4,
-        bias_margin: float = 0.0,
-        bias_growth_rate: float = 100.0,
-        bias_time_spread: float = 3.0,
+        initial_bias_scale: float = 5.0,
+        initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
         local_features: bool = True,
         dropout: float = 0.05,
@@ -146,9 +146,8 @@ class WaveNOMinimal(nn.Module):
         # Stage 3: LWR attention bias (conditional)
         if use_char_bias:
             self.lwr_bias = LWRBias(
-                margin=bias_margin,
-                growth_rate=bias_growth_rate,
-                time_spread=bias_time_spread,
+                initial_scale=initial_bias_scale,
+                initial_damping_sharpness=initial_damping_sharpness,
                 flux=flux,
             )
 
@@ -318,9 +317,8 @@ def build_waveno_minimal(args: dict) -> WaveNOMinimal:
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
-        bias_margin=args.get("bias_margin", 0.0),
-        bias_growth_rate=args.get("bias_growth_rate", 100.0),
-        bias_time_spread=args.get("bias_time_spread", 3.0),
+        initial_bias_scale=args.get("initial_bias_scale", 5.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
     )
@@ -340,9 +338,8 @@ def _build_ablation(args: dict, **flag_overrides) -> WaveNOMinimal:
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
-        bias_margin=args.get("bias_margin", 0.0),
-        bias_growth_rate=args.get("bias_growth_rate", 100.0),
-        bias_time_spread=args.get("bias_time_spread", 3.0),
+        initial_bias_scale=args.get("initial_bias_scale", 5.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),

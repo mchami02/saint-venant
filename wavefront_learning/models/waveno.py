@@ -66,9 +66,10 @@ class WaveNO(nn.Module):
         num_heads: Attention heads (both self and cross).
         num_cross_segment_layers: Cross-segment attention per timestep.
         time_condition: Enable FiLM time conditioning.
-        bias_margin: LWRBias margin (constant offset at boundary).
-        bias_growth_rate: LWRBias growth rate (distance scale).
-        bias_time_spread: LWRBias time spread (exponential decay rate).
+        initial_bias_scale: Initial scale for LWRBias quadratic penalty
+            (learnable).
+        initial_damping_sharpness: Initial sharpness for LWRBias
+            collision-time damping (learnable).
         predict_trajectories: If True, predict breakpoint evolution and
             include local boundary features (x_left, x_right) in queries.
             This makes the model K-invariant for generalization.
@@ -99,9 +100,8 @@ class WaveNO(nn.Module):
         num_heads: int = 4,
         num_cross_segment_layers: int = 1,
         time_condition: bool = True,
-        bias_margin: float = 0.0,
-        bias_growth_rate: float = 100.0,
-        bias_time_spread: float = 3.0,
+        initial_bias_scale: float = 5.0,
+        initial_damping_sharpness: float = 5.0,
         predict_trajectories: bool = True,
         num_traj_cross_layers: int = 2,
         num_time_layers: int = 2,
@@ -130,9 +130,8 @@ class WaveNO(nn.Module):
 
         # === LWR-aware attention bias (segment-based path) ===
         self.lwr_bias = LWRBias(
-            margin=bias_margin,
-            growth_rate=bias_growth_rate,
-            time_spread=bias_time_spread,
+            initial_scale=initial_bias_scale,
+            initial_damping_sharpness=initial_damping_sharpness,
             flux=flux,
         )
 
@@ -660,9 +659,8 @@ def build_waveno(args: dict) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        bias_margin=args.get("bias_margin", 0.0),
-        bias_growth_rate=args.get("bias_growth_rate", 100.0),
-        bias_time_spread=args.get("bias_time_spread", 3.0),
+        initial_bias_scale=args.get("initial_bias_scale", 5.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
@@ -687,9 +685,8 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        bias_margin=args.get("bias_margin", 0.0),
-        bias_growth_rate=args.get("bias_growth_rate", 100.0),
-        bias_time_spread=args.get("bias_time_spread", 3.0),
+        initial_bias_scale=args.get("initial_bias_scale", 5.0),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),

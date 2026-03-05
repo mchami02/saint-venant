@@ -12,9 +12,9 @@ interface dynamics:
   leaving the interior of the fan unpenalized (both segments attend).
 
 The bias at each query point is:
-``-(margin + growth_rate * relu(dist)) * exp(-time_spread * t)``.
-The exponential damping smoothly fades the bias from full strength
-near t=0 toward zero at later times.
+``-|scale| * relu(dist)² * sigmoid(damping_sharpness * (t_coll - t))``.
+Per-segment collision-time damping fades the bias after estimated wave
+collision so that learned attention takes over.
 """
 
 import torch
@@ -28,41 +28,35 @@ class LWRBias(nn.Module):
     """Per-segment attention bias from LWR interface dynamics.
 
     For each interface between segments k and k+1 the module classifies
-    the wave (shock vs rarefaction) and computes a one-sided penalty on
-    each adjacent segment.  Penalties are accumulated across all
-    interfaces so that each segment's bias is the sum of contributions
+    the wave (shock vs rarefaction) and computes a one-sided quadratic
+    penalty on each adjacent segment.  Penalties are accumulated across
+    all interfaces so that each segment's bias is the sum of contributions
     from its left and right boundaries.
 
     The bias for a segment at query point (t, x) is::
 
-        bias = -(margin + growth_rate * relu(dist)) * exp(-time_spread * t)
+        bias = -|scale| * relu(dist)² * σ(damping * (t_coll - t))
 
-    where ``dist`` is the one-sided distance past the boundary
-    trajectory.  The exponential damping is 1 at t=0 (full bias)
-    and smoothly fades toward 0 at later times.
+    where ``dist`` is the one-sided distance past the boundary trajectory
+    and ``t_coll`` is the per-segment analytical collision time.
 
     Args:
-        margin: Constant offset applied at the boundary (dist=0).
-            ``0.0`` means zero penalty right at the shock/fan edge.
-        growth_rate: Scale for the distance-proportional term.
-        time_spread: Decay rate for exponential time damping.  Higher
-            values give faster decay; ``0.0`` disables damping
-            entirely (exp(0)=1).
+        initial_scale: Initial scale for the quadratic penalty (learnable).
+        initial_damping_sharpness: Initial sharpness of the sigmoid
+            collision-time damping (learnable).
         flux: ``Flux`` instance for characteristic / shock speeds.
             Defaults to ``GreenshieldsFlux()``.
     """
 
     def __init__(
         self,
-        margin: float = 0.0,
-        growth_rate: float = 100.0,
-        time_spread: float = 3.0,
+        initial_scale: float = 5.0,
+        initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
     ):
         super().__init__()
-        self.margin = margin
-        self.growth_rate = growth_rate
-        self.time_spread = time_spread
+        self.scale = nn.Parameter(torch.tensor(initial_scale))
+        self.damping_sharpness = nn.Parameter(torch.tensor(initial_damping_sharpness))
         self.flux = flux if flux is not None else GreenshieldsFlux()
 
     def forward(
@@ -124,18 +118,16 @@ class LWRBias(nn.Module):
         t_exp = t_coords.unsqueeze(-1)  # (B, *spatial, 1)
         x_exp = x_coords.unsqueeze(-1)  # (B, *spatial, 1)
 
-        # -- time damping (exponential decay) ------------------------------------
-        # exp(-time_spread * t) → 1 at t=0, smoothly fades toward 0
-        damping = torch.exp(-self.time_spread * t_exp)  # (B, *spatial, 1)
-
-        # -- one-sided penalties at each interface ----------------------------
+        # -- one-sided quadratic penalties at each interface -------------------
         boundary_right = x_d + speed_right * t_exp  # (B, *spatial, K-1)
-        dist_left = torch.relu(x_exp - boundary_right)  # (B, *spatial, K-1)
-        penalty_left_seg = (self.margin + self.growth_rate * dist_left) * damping
+        penalty_left_seg = self.scale.abs() * torch.relu(
+            x_exp - boundary_right
+        ).pow(2)
 
         boundary_left = x_d + speed_left * t_exp  # (B, *spatial, K-1)
-        dist_right = torch.relu(boundary_left - x_exp)  # (B, *spatial, K-1)
-        penalty_right_seg = (self.margin + self.growth_rate * dist_right) * damping
+        penalty_right_seg = self.scale.abs() * torch.relu(
+            boundary_left - x_exp
+        ).pow(2)
 
         # -- accumulate onto K segments with F.pad ----------------------------
         # penalty_left_seg  affects segments 0..K-2 → pad right by 1
@@ -144,6 +136,15 @@ class LWRBias(nn.Module):
             F.pad(penalty_left_seg, (0, 1)) + F.pad(penalty_right_seg, (1, 0))
         )  # (B, *spatial, K)
 
+        # -- per-segment collision-time damping --------------------------------
+        t_coll = self._compute_collision_times(xs, ks, lam, K)  # (B, K)
+        for _ in range(n_expand):
+            t_coll = t_coll.unsqueeze(1)  # (B, 1, ..., 1, K)
+        damping = torch.sigmoid(
+            self.damping_sharpness.abs() * (t_coll - t_exp)
+        )  # (B, *spatial, K) — ~1 before collision, ~0 after
+        bias = bias * damping
+
         # -- mask padded segments ---------------------------------------------
         mask = pieces_mask
         for _ in range(n_expand):
@@ -151,3 +152,51 @@ class LWRBias(nn.Module):
         bias = bias * mask + (~mask.bool()).float() * (-1e9)
 
         return bias
+
+    @staticmethod
+    def _compute_collision_times(
+        xs: torch.Tensor,
+        ks: torch.Tensor,
+        lam: torch.Tensor,
+        K: int,
+    ) -> torch.Tensor:
+        """Analytical collision time per segment.
+
+        ``t_coll[k] = min(width_left / |λ_{k-1} - λ_k|,
+                          width_right / |λ_k - λ_{k+1}|)``
+
+        At domain edges the segment's own width and speed difference are
+        reused so that edge segments get a finite (non-zero) collision
+        time.
+
+        Args:
+            xs: (B, K+1) breakpoint positions.
+            ks: (B, K) segment densities (unused, kept for API clarity).
+            lam: (B, K) characteristic speeds.
+            K: Number of segments.
+
+        Returns:
+            (B, K) positive collision times.
+        """
+        widths = xs[:, 1:] - xs[:, :-1]  # (B, K)
+
+        # Left-neighbor collision
+        lam_left = F.pad(lam[:, :-1], (1, 0))
+        lam_left[:, 0] = lam[:, 0]
+        dx_left = F.pad(widths[:, :-1], (1, 0))
+        dx_left[:, 0] = widths[:, 0]
+        speed_diff_left = (lam_left - lam).abs().clamp(min=1e-3)
+
+        # Right-neighbor collision
+        lam_right = F.pad(lam[:, 1:], (0, 1))
+        lam_right[:, -1] = lam[:, -1]
+        dx_right = F.pad(widths[:, 1:], (0, 1))
+        dx_right[:, -1] = widths[:, -1]
+        speed_diff_right = (lam - lam_right).abs().clamp(min=1e-3)
+
+        t_coll = torch.minimum(
+            dx_left / speed_diff_left,
+            dx_right / speed_diff_right,
+        )  # (B, K)
+
+        return t_coll

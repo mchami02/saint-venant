@@ -59,9 +59,8 @@ cli_defaults:
   n_cvae_samples: 10
 
   # Model-specific
-  bias_margin: 0.0
-  bias_growth_rate: 100.0
-  bias_time_spread: 3.0
+  initial_bias_scale: 5.0
+  initial_damping_sharpness: 5.0
   dropout: 0.05
 
   # Teacher forcing (2-phase)
