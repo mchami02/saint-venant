@@ -36,9 +36,9 @@ import torch.nn as nn
 from .base.biased_cross_attention import (
     BiasedCrossDecoderLayer,
     CollisionTimeHead,
-    compute_characteristic_bias,
     compute_discontinuity_characteristic_bias,
 )
+from .base.lwr_bias import LWRBias
 from .base.boundaries import compute_boundaries
 from .base.breakpoint_evolution import BreakpointEvolution
 from .base.characteristic_features import (
@@ -66,11 +66,9 @@ class WaveNO(nn.Module):
         num_heads: Attention heads (both self and cross).
         num_cross_segment_layers: Cross-segment attention per timestep.
         time_condition: Enable FiLM time conditioning.
-        initial_bias_scale: Initial characteristic bias scale.
-        initial_damping_sharpness: Initial sharpness for collision-time
-            damping of characteristic bias. Controls how quickly the bias
-            fades after estimated wave collision time. Higher = sharper
-            transition. Default 5.0.
+        bias_margin: LWRBias margin (constant offset at boundary).
+        bias_growth_rate: LWRBias growth rate (distance scale).
+        bias_time_spread: LWRBias time spread (exponential decay rate).
         predict_trajectories: If True, predict breakpoint evolution and
             include local boundary features (x_left, x_right) in queries.
             This makes the model K-invariant for generalization.
@@ -101,8 +99,9 @@ class WaveNO(nn.Module):
         num_heads: int = 4,
         num_cross_segment_layers: int = 1,
         time_condition: bool = True,
-        initial_bias_scale: float = 5.0,
-        initial_damping_sharpness: float = 5.0,
+        bias_margin: float = 0.0,
+        bias_growth_rate: float = 100.0,
+        bias_time_spread: float = 3.0,
         predict_trajectories: bool = True,
         num_traj_cross_layers: int = 2,
         num_time_layers: int = 2,
@@ -128,6 +127,14 @@ class WaveNO(nn.Module):
         self.learned_collision_time = learned_collision_time
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
+
+        # === LWR-aware attention bias (segment-based path) ===
+        self.lwr_bias = LWRBias(
+            margin=bias_margin,
+            growth_rate=bias_growth_rate,
+            time_spread=bias_time_spread,
+            flux=flux,
+        )
 
         # === Learned collision time head ===
         if learned_collision_time:
@@ -246,11 +253,10 @@ class WaveNO(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        # === Stage 6: Characteristic bias scale + collision-time damping ===
-        self.bias_scale = nn.Parameter(torch.tensor(initial_bias_scale))
-        self.damping_sharpness = nn.Parameter(
-            torch.tensor(initial_damping_sharpness)
-        )
+        # === Stage 6: Attention bias (disc path still uses characteristic bias) ===
+        if use_discontinuities:
+            self.bias_scale = nn.Parameter(torch.tensor(5.0))
+            self.damping_sharpness = nn.Parameter(torch.tensor(5.0))
 
         # === Stage 7: Biased cross-attention layers ===
         self.cross_attn_layers = nn.ModuleList(
@@ -334,11 +340,6 @@ class WaveNO(nn.Module):
         for layer in self.self_attn_layers:
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
         seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
-
-        # Learned collision time (after self-attention has full IC context)
-        seg_t_coll = None
-        if self.learned_collision_time:
-            seg_t_coll = self.collision_time_head(seg_emb, pieces_mask)  # (B, K)
 
         # === Stage 2: Time-conditioned segment evolution ===
         t_unique = t_coords[:, :, 0]  # (B, nt)
@@ -425,17 +426,10 @@ class WaveNO(nn.Module):
         query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
         query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)  # (B, nt, nx, H)
 
-        # === Stage 6: Characteristic attention bias ===
-        char_bias = compute_characteristic_bias(
-            t_coords,
-            x_coords,
-            xs,
-            ks,
-            pieces_mask,
-            self.flux,
-            self.bias_scale,
-            damping_sharpness=self.damping_sharpness,
-            t_coll=seg_t_coll,
+        # === Stage 6: LWR attention bias ===
+        ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
+        char_bias = self.lwr_bias(
+            ic_data, (t_coords, x_coords)
         )  # (B, nt, nx, K)
 
         # === Stage 7: Per-time-step biased cross-attention ===
@@ -666,8 +660,9 @@ def build_waveno(args: dict) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        initial_bias_scale=args.get("initial_bias_scale", 5.0),
-        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
+        bias_margin=args.get("bias_margin", 0.0),
+        bias_growth_rate=args.get("bias_growth_rate", 100.0),
+        bias_time_spread=args.get("bias_time_spread", 3.0),
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
@@ -692,8 +687,9 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        initial_bias_scale=args.get("initial_bias_scale", 5.0),
-        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
+        bias_margin=args.get("bias_margin", 0.0),
+        bias_growth_rate=args.get("bias_growth_rate", 100.0),
+        bias_time_spread=args.get("bias_time_spread", 3.0),
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),

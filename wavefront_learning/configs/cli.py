@@ -202,9 +202,19 @@ def parse_args() -> argparse.Namespace:
 
     # Model-specific parameters
     parser.add_argument(
-        "--initial_damping_sharpness",
+        "--bias_margin",
         type=float,
-        help="Initial sharpness for collision-time bias damping in WaveNO",
+        help="LWRBias margin (constant offset at boundary) for WaveNO",
+    )
+    parser.add_argument(
+        "--bias_growth_rate",
+        type=float,
+        help="LWRBias growth rate (distance scale) for WaveNO",
+    )
+    parser.add_argument(
+        "--bias_time_spread",
+        type=float,
+        help="LWRBias time spread (exponential decay rate) for WaveNO",
     )
     parser.add_argument(
         "--dropout",
