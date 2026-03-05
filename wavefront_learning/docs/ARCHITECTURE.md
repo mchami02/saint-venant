@@ -979,6 +979,38 @@ $$\text{bias}(t, x, k) = \text{bias}_{raw}(t, x, k) \cdot \gamma(t, k)$$
 
 When `learned_collision_time=True`, $t_{coll,k}$ is predicted by a small MLP (`CollisionTimeHead`) from the contextualized segment embeddings (after self-attention) instead of being computed analytically. The head outputs `softplus(MLP(emb))` per token, guaranteeing positivity. This handles multi-collision cascades and rarefaction interactions where the analytical first-pairwise estimate is inaccurate.
 
+##### LWRBias
+
+**Location**: `models/base/lwr_bias.py`
+
+Per-segment attention bias using LWR interface dynamics (shock/rarefaction classification). Unlike `compute_characteristic_bias` which traces a single backward characteristic foot per segment, `LWRBias` uses the actual wave structure at each interface:
+
+- **Shock** ($\lambda_L > \lambda_R$): one-sided penalty from the Rankine-Hugoniot trajectory $x_d + s \cdot t$.
+- **Rarefaction** ($\lambda_L \leq \lambda_R$): one-sided penalty from the far fan edge, leaving the fan interior unpenalized.
+
+For each interface between segments $k$ and $k+1$:
+
+$$s_{right}^{(k)} = \begin{cases} s & \text{shock} \\ \lambda_R & \text{rarefaction} \end{cases}, \quad s_{left}^{(k+1)} = \begin{cases} s & \text{shock} \\ \lambda_L & \text{rarefaction} \end{cases}$$
+
+$$\text{penalty}_{left}(t, x, k) = |\alpha| \cdot \text{ReLU}(x - (x_d + s_{right}^{(k)} \cdot t))^2$$
+$$\text{penalty}_{right}(t, x, k+1) = |\alpha| \cdot \text{ReLU}((x_d + s_{left}^{(k+1)} \cdot t) - x)^2$$
+
+Penalties are accumulated across interfaces with `F.pad` (no Python loops). Supports optional collision-time damping (same formula as `compute_characteristic_bias`).
+
+```
+ic_data: {xs: (K+1), ks: (K), pieces_mask: (K)}
+query: (t_coords: (*spatial), x_coords: (*spatial))
+→ lam = flux.derivative(ks)                              → (K,)
+→ is_shock = lam[:-1] > lam[1:]                          → (K-1,)
+→ speed_right = where(is_shock, s, lam_R)                → (K-1,)
+→ penalty_left  = scale * relu(x - (x_d + speed_R * t))² → (*spatial, K-1)
+→ penalty_right = scale * relu((x_d + speed_L * t) - x)² → (*spatial, K-1)
+→ bias = -(pad(penalty_left, right=1) + pad(penalty_right, left=1))  → (*spatial, K)
+→ [optional] bias *= sigmoid(sharpness * (t_coll - t))
+→ mask padded segments with -1e9
+→ output: (*spatial, K)
+```
+
 ##### BreakpointEvolution
 
 **Location**: `models/base/breakpoint_evolution.py`

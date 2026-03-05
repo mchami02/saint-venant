@@ -65,6 +65,7 @@ wavefront_learning/
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
+│       ├── lwr_bias.py           # LWRBias: per-segment attention bias from LWR interface dynamics
 │       ├── wave_builder.py          # build_initial_waves (initial wave construction with STE)
 │       ├── wave_reconstructor.py    # reconstruct_grid (type-aware: shock/rarefaction/bent shock)
 │       ├── collision_processor.py   # process_collisions (type-aware collision loop)
@@ -243,6 +244,7 @@ wavefront_learning/
 - **cross_decoder.py** — `CrossDecoderLayer`, `CrossDecoder`
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
+- **lwr_bias.py** — `LWRBias` (per-segment attention bias using shock/rarefaction classification at IC interfaces, with optional collision-time damping)
 - **wave_builder.py** — `build_initial_waves()` (STE-based initial wave construction from discontinuity predictions)
 - **wave_reconstructor.py** — `reconstruct_grid()` (type-aware grid reconstruction for shocks, rarefaction fans, bent shocks)
 - **collision_processor.py** — `process_collisions()` (type-aware collision loop: shock-shock, rar-rar, shock-rar→bent shock)
