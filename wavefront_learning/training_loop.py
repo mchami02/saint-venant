@@ -233,20 +233,19 @@ def validate_epoch(
 
 def _log_bias_params(model: nn.Module, log_dict: dict) -> None:
     """Log learnable bias parameters (LWRBias scale / damping_sharpness)."""
-    # LWRBias on the model directly
+    # LWRBias on the model directly (segment path)
     lwr = getattr(model, "lwr_bias", None)
     if lwr is not None:
         if hasattr(lwr, "scale"):
-            log_dict["model/lwr_bias_scale"] = lwr.scale.abs().item()
+            log_dict["train/params/lwr_bias_scale"] = lwr.scale.abs().item()
         if hasattr(lwr, "damping_sharpness"):
-            log_dict["model/lwr_bias_damping"] = lwr.damping_sharpness.abs().item()
-        return
+            log_dict["train/params/lwr_bias_damping"] = lwr.damping_sharpness.abs().item()
 
-    # Characteristic bias parameters (legacy)
+    # Characteristic bias parameters (disc path — may coexist with lwr_bias)
     if hasattr(model, "bias_scale"):
-        log_dict["model/bias_scale"] = model.bias_scale.abs().item()
-    if hasattr(model, "damping_sharpness"):
-        log_dict["model/damping_sharpness"] = model.damping_sharpness.abs().item()
+        log_dict["train/params/bias_scale"] = model.bias_scale.abs().item()
+    if isinstance(getattr(model, "damping_sharpness", None), nn.Parameter):
+        log_dict["train/params/damping_sharpness"] = model.damping_sharpness.abs().item()
 
 
 def _run_training_loop(
