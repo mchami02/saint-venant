@@ -118,9 +118,8 @@ class CollisionTimeHead(nn.Module):
 def compute_characteristic_bias(
     t_coords: torch.Tensor,
     x_coords: torch.Tensor,
-    xs: torch.Tensor,
-    ks: torch.Tensor,
-    pieces_mask: torch.Tensor,
+    segments: torch.Tensor,
+    segments_mask: torch.Tensor,
     flux: Flux,
     scale: nn.Parameter,
     damping_sharpness: nn.Parameter | None = None,
@@ -130,7 +129,7 @@ def compute_characteristic_bias(
 
     For each query (t, x) and segment k, traces the backward characteristic
     foot y* = x - f'(rho_k) * t and measures how far y* falls outside
-    segment k's interval [x_k, x_{k+1}]. Queries in k's characteristic
+    segment k's interval [x_start, x_end]. Queries in k's characteristic
     cone get bias=0 (full attention); distant queries get large negative
     bias (suppressed attention).
 
@@ -144,38 +143,39 @@ def compute_characteristic_bias(
     Args:
         t_coords: (B, nt, nx) time coordinates.
         x_coords: (B, nt, nx) space coordinates.
-        xs: (B, K+1) breakpoint positions.
-        ks: (B, K) piece values.
-        pieces_mask: (B, K) validity mask.
+        segments: (B, S, 3) segment features [x_start, x_end, rho].
+        segments_mask: (B, S) validity mask.
         flux: Flux instance.
         scale: Learnable scale parameter (initialized ~10).
         damping_sharpness: Learnable sharpness for collision-time damping.
             None = no damping (backward compat).
-        t_coll: (B, K) learned collision times from CollisionTimeHead.
+        t_coll: (B, S) learned collision times from CollisionTimeHead.
             When provided AND damping_sharpness is not None, skips
             analytical computation and uses this tensor directly.
             None = analytical collision time (backward compat).
 
     Returns:
-        Attention bias (B, nt, nx, K), negative values suppress attention.
+        Attention bias (B, nt, nx, S), negative values suppress attention.
     """
     B, nt, nx = t_coords.shape
-    K = ks.shape[1]
+    S = segments.shape[1]
 
-    # Characteristic speed per segment: (B, K) and (B, 1, 1, K)
-    lambda_k_flat = flux.derivative(ks)  # (B, K)
+    rho = segments[:, :, 2]  # (B, S)
+
+    # Characteristic speed per segment: (B, S) and (B, 1, 1, S)
+    lambda_k_flat = flux.derivative(rho)  # (B, S)
     lambda_k = lambda_k_flat.unsqueeze(1).unsqueeze(1)
 
     # Query coordinates: (B, nt, nx, 1)
     t_exp = t_coords.unsqueeze(-1)
     x_exp = x_coords.unsqueeze(-1)
 
-    # Segment boundaries: (B, 1, 1, K)
-    x_left = xs[:, :-1].unsqueeze(1).unsqueeze(1)
-    x_right = xs[:, 1:].unsqueeze(1).unsqueeze(1)
+    # Segment boundaries: (B, 1, 1, S)
+    x_left = segments[:, :, 0].unsqueeze(1).unsqueeze(1)
+    x_right = segments[:, :, 1].unsqueeze(1).unsqueeze(1)
 
     # Backward characteristic foot: y* = x - f'(rho_k) * t
-    y_star = x_exp - lambda_k * t_exp  # (B, nt, nx, K)
+    y_star = x_exp - lambda_k * t_exp  # (B, nt, nx, S)
 
     # Distance outside segment k's interval
     d_outside = torch.relu(x_left - y_star) + torch.relu(y_star - x_right)
@@ -187,7 +187,7 @@ def compute_characteristic_bias(
     if damping_sharpness is not None:
         if t_coll is None:
             # Analytical collision time (backward compat)
-            widths = xs[:, 1:] - xs[:, :-1]  # (B, K)
+            widths = segments[:, :, 1] - segments[:, :, 0]  # (B, S)
 
             # Left-neighbor collision time
             lam_left = F.pad(lambda_k_flat[:, :-1], (1, 0))
@@ -206,21 +206,21 @@ def compute_characteristic_bias(
             t_coll = torch.minimum(
                 dx_left / speed_diff_left,
                 dx_right / speed_diff_right,
-            )  # (B, K)
+            )  # (B, S)
 
-        t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+        t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, S)
         t_exp_broad = t_coords.unsqueeze(-1)  # (B, nt, nx, 1)
         damping = torch.sigmoid(
             damping_sharpness.abs() * (t_coll_exp - t_exp_broad)
-        )  # (B, nt, nx, K) — ~1 before collision, ~0 after
+        )  # (B, nt, nx, S) — ~1 before collision, ~0 after
 
         bias = bias * damping
 
     # Mask padded segments with large negative value
-    mask = pieces_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+    mask = segments_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, S)
     bias = bias * mask + (~mask.bool()).float() * (-1e9)
 
-    return bias  # (B, nt, nx, K)
+    return bias  # (B, nt, nx, S)
 
 
 def compute_discontinuity_characteristic_bias(

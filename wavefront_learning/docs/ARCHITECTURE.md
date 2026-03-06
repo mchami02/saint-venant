@@ -796,7 +796,7 @@ cat(seg_emb_expanded, char_feat) → ValueMLP → sigmoid → local_rho: (B, Q, 
 
 **Location**: `models/base/characteristic_features.py`
 
-Encodes IC segments with physics-augmented features. For each constant piece $k$ with value $\rho_k$ on $[x_k, x_{k+1})$:
+Encodes IC segments with physics-augmented features. Input is a `segments` tensor $(S, 3)$ with `[x_start, x_end, rho]` per segment (created by `ToSegmentTransform`). For each segment $k$:
 
 | Feature | Formula | Physical meaning |
 |---------|---------|-----------------|

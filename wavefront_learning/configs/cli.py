@@ -58,7 +58,6 @@ def parse_args() -> argparse.Namespace:
     is captured and injected into the returned namespace.
     """
     # Lazy imports to avoid circular dependencies
-    from data.transforms import TRANSFORMS
     from loss import LOSSES
     from model import MODELS
 
@@ -287,8 +286,15 @@ def parse_args() -> argparse.Namespace:
         "--transform",
         type=str,
         default=None,
-        choices=list(TRANSFORMS.keys()),
-        help="Override the model's default transform (default: use MODEL_TRANSFORM)",
+        help="Override the model's default transform (default: use MODEL_TRANSFORM). "
+        "Use '+' to compose transforms, e.g. 'ToSegment+ToGridNoCoords'.",
+    )
+
+    # Segment splitting
+    parser.add_argument(
+        "--split_segments",
+        type=int,
+        help="Sub-segments per original piece for ToSegment transform (default: 1)",
     )
 
     # Resume training

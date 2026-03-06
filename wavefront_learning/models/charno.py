@@ -150,7 +150,7 @@ class CharNO(nn.Module):
         nn.init.zeros_(self.value_mlp[-1].weight)
         nn.init.zeros_(self.value_mlp[-1].bias)
 
-    def _compute_analytical_bias(self, t_coords, x_coords, xs, ks, pieces_mask):
+    def _compute_analytical_bias(self, t_coords, x_coords, segments, segments_mask):
         """Score bias from backward characteristic geometry. Uses Flux interface only.
 
         Computes the backward characteristic foot y_star = x - f'(rho_k) * t
@@ -158,20 +158,22 @@ class CharNO(nn.Module):
         falls inside get zero bias; others get penalty proportional to d_outside^2.
         """
         B, nt, nx = t_coords.shape
-        K = ks.shape[1]
+        S = segments.shape[1]
         Q = nt * nx
+
+        rho = segments[:, :, 2]  # (B, S)
 
         t_flat = t_coords.reshape(B, Q).unsqueeze(2)  # (B, Q, 1)
         x_flat = x_coords.reshape(B, Q).unsqueeze(2)  # (B, Q, 1)
-        lambda_k = self.flux.derivative(ks).unsqueeze(1)  # (B, 1, K)
-        x_left = xs[:, :-1].unsqueeze(1)  # (B, 1, K)
-        x_right = xs[:, 1:].unsqueeze(1)  # (B, 1, K)
+        lambda_k = self.flux.derivative(rho).unsqueeze(1)  # (B, 1, S)
+        x_left = segments[:, :, 0].unsqueeze(1)  # (B, 1, S)
+        x_right = segments[:, :, 1].unsqueeze(1)  # (B, 1, S)
 
-        y_star = x_flat - lambda_k * t_flat  # (B, Q, K)
+        y_star = x_flat - lambda_k * t_flat  # (B, Q, S)
         d_outside = torch.relu(x_left - y_star) + torch.relu(y_star - x_right)
 
         bias = self.analytical_bias_scale.abs() * d_outside.pow(2)
-        return bias * pieces_mask.unsqueeze(1)  # (B, Q, K)
+        return bias * segments_mask.unsqueeze(1)  # (B, Q, S)
 
     def forward(
         self,
@@ -192,21 +194,20 @@ class CharNO(nn.Module):
                 - 'output_grid': (B, 1, nt, nx) predicted density
                 - 'selection_weights': (B, nt, nx, K) segment weights
         """
-        xs = batch_input["xs"]
-        ks = batch_input["ks"]
-        pieces_mask = batch_input["pieces_mask"]
+        segments = batch_input["segments"]  # (B, S, 3)
+        segments_mask = batch_input["segments_mask"]  # (B, S)
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
         B, nt, nx = t_coords.shape
-        K = ks.shape[1]
+        S = segments.shape[1]
         Q = nt * nx
 
         # === Stage 1: Encode segments ===
-        seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+        seg_emb = self.segment_encoder(segments, segments_mask)  # (B, S, H)
 
         # Self-attention over segments
-        key_padding_mask = ~pieces_mask.bool()  # True = padded
+        key_padding_mask = ~segments_mask.bool()  # True = padded
         # Handle fully-masked batches
         all_masked = key_padding_mask.all(dim=1)
         if all_masked.any():
@@ -214,56 +215,56 @@ class CharNO(nn.Module):
             key_padding_mask[all_masked] = False
         for layer in self.self_attn_layers:
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
-        seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
+        seg_emb = seg_emb * segments_mask.unsqueeze(-1)  # re-zero padded
 
         # === Stage 2: Characteristic features ===
         char_feat = self.char_features(
-            t_coords, x_coords, xs, ks, pieces_mask
-        )  # (B, Q, K, H_char)
+            t_coords, x_coords, segments, segments_mask
+        )  # (B, Q, S, H_char)
 
         # === Stage 2.5: Time-conditioned segment embeddings ===
         t_unique = t_coords[:, :, 0]  # (B, nt) — same t for all x
         if self.time_condition:
-            seg_emb_t = self.time_conditioner(seg_emb, t_unique)  # (B, nt, K, H)
+            seg_emb_t = self.time_conditioner(seg_emb, t_unique)  # (B, nt, S, H)
         else:
-            seg_emb_t = seg_emb.unsqueeze(1).expand(B, nt, K, self.hidden_dim)
+            seg_emb_t = seg_emb.unsqueeze(1).expand(B, nt, S, self.hidden_dim)
 
         # === Stage 2.75: Cross-segment attention per time step ===
-        # Operates on (B*nt, K, H) — 50x cheaper than (B*Q, K, H+H_char)
+        # Operates on (B*nt, S, H) — 50x cheaper than (B*Q, S, H+H_char)
         if len(self.cross_segment_layers) > 0:
-            seg_flat = seg_emb_t.reshape(B * nt, K, -1)  # (B*nt, K, H)
-            cs_mask = (~pieces_mask.bool()).unsqueeze(1).expand(
-                B, nt, K
-            ).reshape(B * nt, K)
+            seg_flat = seg_emb_t.reshape(B * nt, S, -1)  # (B*nt, S, H)
+            cs_mask = (~segments_mask.bool()).unsqueeze(1).expand(
+                B, nt, S
+            ).reshape(B * nt, S)
             all_masked_cs = cs_mask.all(dim=1)
             if all_masked_cs.any():
                 cs_mask = cs_mask.clone()
                 cs_mask[all_masked_cs] = False
             for layer in self.cross_segment_layers:
                 seg_flat = layer(seg_flat, key_padding_mask=cs_mask)
-            seg_emb_t = seg_flat.reshape(B, nt, K, self.hidden_dim)
-            seg_emb_t = seg_emb_t * pieces_mask.unsqueeze(1).unsqueeze(-1)
+            seg_emb_t = seg_flat.reshape(B, nt, S, self.hidden_dim)
+            seg_emb_t = seg_emb_t * segments_mask.unsqueeze(1).unsqueeze(-1)
 
-        # Expand to full query grid: (B, nt, K, H) → (B, Q, K, H)
+        # Expand to full query grid: (B, nt, S, H) → (B, Q, S, H)
         seg_emb_exp = (
             seg_emb_t.unsqueeze(2)
             .expand(-1, -1, nx, -1, -1)
-            .reshape(B, Q, K, self.hidden_dim)
+            .reshape(B, Q, S, self.hidden_dim)
         )
 
         # Concatenate with characteristic features
         combined = torch.cat(
             [seg_emb_exp, char_feat], dim=-1
-        )  # (B, Q, K, H + H_char)
+        )  # (B, Q, S, H + H_char)
 
         # === Stage 3: Score network ===
         # Compute scores
-        scores = self.score_mlp(combined).squeeze(-1)  # (B, Q, K)
+        scores = self.score_mlp(combined).squeeze(-1)  # (B, Q, S)
 
         # Add analytical bias from backward characteristic geometry
         analytical_bias = self._compute_analytical_bias(
-            t_coords, x_coords, xs, ks, pieces_mask
-        )  # (B, Q, K)
+            t_coords, x_coords, segments, segments_mask
+        )  # (B, Q, S)
         scores = scores + analytical_bias
 
         # Softmin: softmax of negated scores / temperature
@@ -271,16 +272,16 @@ class CharNO(nn.Module):
         # Mask padded segments with large score so they get ~0 weight
         # Use large finite value instead of inf to avoid NaN on MPS/softmax
         scores = scores.masked_fill(
-            ~pieces_mask.unsqueeze(1).bool(), 1e9
+            ~segments_mask.unsqueeze(1).bool(), 1e9
         )
-        weights = torch.softmax(-scores / temperature, dim=-1)  # (B, Q, K)
+        weights = torch.softmax(-scores / temperature, dim=-1)  # (B, Q, S)
 
         # === Stage 4: Value network ===
         # Skip connection: rho_k as base value + learned correction delta
         # At init, delta ≈ 0 (last layer zeros), so output ≈ rho_k
-        delta = self.value_mlp(combined).squeeze(-1)  # (B, Q, K)
-        rho_k_base = ks.unsqueeze(1).expand(B, Q, K)  # (B, Q, K)
-        local_rho = (rho_k_base + delta).clamp(0.0, 1.0)  # (B, Q, K)
+        delta = self.value_mlp(combined).squeeze(-1)  # (B, Q, S)
+        rho_k_base = segments[:, :, 2].unsqueeze(1).expand(B, Q, S)  # (B, Q, S)
+        local_rho = (rho_k_base + delta).clamp(0.0, 1.0)  # (B, Q, S)
 
         # === Stage 5: Output assembly ===
         # Weighted sum over segments
@@ -290,17 +291,17 @@ class CharNO(nn.Module):
         output_grid = rho.reshape(B, 1, nt, nx)
 
         # Selection weights for interpretability
-        selection_weights = weights.reshape(B, nt, nx, K)
+        selection_weights = weights.reshape(B, nt, nx, S)
 
         # Local densities per segment for diagnostics
-        local_rho_grid = local_rho.reshape(B, nt, nx, K)
+        local_rho_grid = local_rho.reshape(B, nt, nx, S)
 
         return {
             "output_grid": output_grid,
             "selection_weights": selection_weights,
             "local_rho": local_rho_grid,
             "temperature": temperature,
-            "analytical_bias": analytical_bias.reshape(B, nt, nx, K),
+            "analytical_bias": analytical_bias.reshape(B, nt, nx, S),
         }
 
 

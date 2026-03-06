@@ -80,6 +80,9 @@ cli_defaults:
   # Cell sampling
   cell_sampling_k: 0
 
+  # Segment splitting
+  split_segments: 1
+
   # Output
   save_path: wavefront_model.pth
   no_wandb: false

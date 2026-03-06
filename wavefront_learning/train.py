@@ -404,6 +404,7 @@ def main():
         transform_override=args.transform,
         proximity_sigma=args.proximity_sigma,
         min_component_size=args.min_component_size,
+        split_segments=args.split_segments,
     )
 
     train_loader = DataLoader(
