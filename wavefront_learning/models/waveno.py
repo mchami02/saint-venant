@@ -290,9 +290,8 @@ class WaveNO(nn.Module):
 
         Args:
             batch_input: Dict containing:
-                - 'xs': (B, K+1) breakpoint positions
-                - 'ks': (B, K) piece values
-                - 'pieces_mask': (B, K) validity mask
+                - 'segments': (B, S, 3) segment features [x_start, x_end, rho]
+                - 'segments_mask': (B, S) segment validity mask
                 - 'disc_mask': (B, D) discontinuity validity mask
                 - 'discontinuities': (B, D, 3) discontinuity features
                 - 't_coords': (B, 1, nt, nx) time coordinates
@@ -301,7 +300,7 @@ class WaveNO(nn.Module):
         Returns:
             Dict containing:
                 - 'output_grid': (B, 1, nt, nx) predicted density
-                - 'characteristic_bias': (B, nt, nx, K_or_D) physics bias
+                - 'characteristic_bias': (B, nt, nx, S_or_D) physics bias
                 - 'positions': (B, D, nt) breakpoint positions (when predict_trajectories)
         """
         if self.use_discontinuities:
@@ -313,48 +312,47 @@ class WaveNO(nn.Module):
         batch_input: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
         """Segment-based forward pass (original WaveNO)."""
-        xs = batch_input["xs"]
-        ks = batch_input["ks"]
-        pieces_mask = batch_input["pieces_mask"]
+        segments = batch_input["segments"]  # (B, S, 3)
+        segments_mask = batch_input["segments_mask"]  # (B, S)
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
         B, nt, nx = t_coords.shape
-        K = ks.shape[1]
+        S = segments.shape[1]
 
         # === Stage 1: Encode segments ===
-        seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+        seg_emb = self.segment_encoder(segments, segments_mask)  # (B, S, H)
 
         # Self-attention over segments
-        key_padding_mask = ~pieces_mask.bool()  # True = padded
+        key_padding_mask = ~segments_mask.bool()  # True = padded
         all_masked = key_padding_mask.all(dim=1)
         if all_masked.any():
             key_padding_mask = key_padding_mask.clone()
             key_padding_mask[all_masked] = False
         for layer in self.self_attn_layers:
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
-        seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
+        seg_emb = seg_emb * segments_mask.unsqueeze(-1)  # re-zero padded
 
         # Learned collision time (after self-attention has full IC context)
         seg_t_coll = None
         if self.learned_collision_time:
-            seg_t_coll = self.collision_time_head(seg_emb, pieces_mask)  # (B, K)
+            seg_t_coll = self.collision_time_head(seg_emb, segments_mask)  # (B, S)
 
         # === Stage 2: Time-conditioned segment evolution ===
         t_unique = t_coords[:, :, 0]  # (B, nt)
         if self.time_condition:
-            seg_emb_t = self.time_conditioner(seg_emb, t_unique)  # (B, nt, K, H)
+            seg_emb_t = self.time_conditioner(seg_emb, t_unique)  # (B, nt, S, H)
         else:
-            seg_emb_t = seg_emb.unsqueeze(1).expand(B, nt, K, self.hidden_dim)
+            seg_emb_t = seg_emb.unsqueeze(1).expand(B, nt, S, self.hidden_dim)
 
         # Cross-segment attention per time step
         if len(self.cross_segment_layers) > 0:
-            seg_flat = seg_emb_t.reshape(B * nt, K, -1)
+            seg_flat = seg_emb_t.reshape(B * nt, S, -1)
             cs_mask = (
-                (~pieces_mask.bool())
+                (~segments_mask.bool())
                 .unsqueeze(1)
-                .expand(B, nt, K)
-                .reshape(B * nt, K)
+                .expand(B, nt, S)
+                .reshape(B * nt, S)
             )
             all_masked_cs = cs_mask.all(dim=1)
             if all_masked_cs.any():
@@ -362,8 +360,8 @@ class WaveNO(nn.Module):
                 cs_mask[all_masked_cs] = False
             for layer in self.cross_segment_layers:
                 seg_flat = layer(seg_flat, key_padding_mask=cs_mask)
-            seg_emb_t = seg_flat.reshape(B, nt, K, self.hidden_dim)
-            seg_emb_t = seg_emb_t * pieces_mask.unsqueeze(1).unsqueeze(-1)
+            seg_emb_t = seg_flat.reshape(B, nt, S, self.hidden_dim)
+            seg_emb_t = seg_emb_t * segments_mask.unsqueeze(1).unsqueeze(-1)
 
         # === Stage 3 & 4: Breakpoint evolution + boundary extraction ===
         positions = None
@@ -429,34 +427,33 @@ class WaveNO(nn.Module):
         char_bias = compute_characteristic_bias(
             t_coords,
             x_coords,
-            xs,
-            ks,
-            pieces_mask,
+            segments,
+            segments_mask,
             self.flux,
             self.bias_scale,
             damping_sharpness=self.damping_sharpness,
             t_coll=seg_t_coll,
-        )  # (B, nt, nx, K)
+        )  # (B, nt, nx, S)
 
         # === Stage 7: Per-time-step biased cross-attention ===
         # Reshape for batched per-timestep attention
         q = query_emb.reshape(B * nt, nx, self.hidden_dim)  # (B*nt, nx, H)
-        kv = seg_emb_t.reshape(B * nt, K, self.hidden_dim)  # (B*nt, K, H)
-        bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
+        kv = seg_emb_t.reshape(B * nt, S, self.hidden_dim)  # (B*nt, S, H)
+        bias_flat = char_bias.reshape(B * nt, nx, S)  # (B*nt, nx, S)
 
-        # Expand bias for multi-head: (B*nt, nx, K) -> (B*nt*heads, nx, K)
+        # Expand bias for multi-head: (B*nt, nx, S) -> (B*nt*heads, nx, S)
         attn_mask = (
             bias_flat.unsqueeze(1)
             .expand(-1, self.num_heads, -1, -1)
-            .reshape(B * nt * self.num_heads, nx, K)
+            .reshape(B * nt * self.num_heads, nx, S)
         )
 
-        # Key padding mask: (B, K) -> (B*nt, K)
+        # Key padding mask: (B, S) -> (B*nt, S)
         kv_padding_mask = (
-            (~pieces_mask.bool())
+            (~segments_mask.bool())
             .unsqueeze(1)
-            .expand(B, nt, K)
-            .reshape(B * nt, K)
+            .expand(B, nt, S)
+            .reshape(B * nt, S)
         )
         all_masked_kv = kv_padding_mask.all(dim=1)
         if all_masked_kv.any():

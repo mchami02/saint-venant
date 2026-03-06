@@ -71,6 +71,8 @@ Use `--no_wandb` flag to disable logging.
 - `FlattenDiscontinuitiesTransform`: Converts dict input to flat tensor for simple MLPs
 - `ToGridInputTransform`: Reconstructs discretized IC from discontinuities (for grid-based models like FNO)
 - `DiscretizeICTransform`: Evaluates IC at evenly-spaced points, stores as "discontinuities" for model compatibility
+- `ToSegmentTransform`: Creates explicit `segments (S, 3)` and `segments_mask (S,)` from piecewise IC. Supports `split_segments` param for sub-segmentation. Used by all segment-based models (WaveNO, CharNO, CTTSeg, etc.)
+- Composite transforms: Use `+` to chain transforms, e.g. `ToSegment+ToGridNoCoords` for AutoregressiveWaveNO
 
 ## Implementation Status
 

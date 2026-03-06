@@ -54,7 +54,7 @@ model_transform:
   FNO: ToGridNoCoords
   AutoregressiveFNO: ToGridNoCoords
   AutoregressiveRealFNO: ToGridNoCoords
-  AutoregressiveWaveNO: ToGridNoCoords
+  AutoregressiveWaveNO: ToSegment+ToGridNoCoords
   DeepONet: ToGridInput
   EncoderDecoder: ToGridInput
   EncoderDecoderCross: ToGridInput
@@ -64,28 +64,28 @@ model_transform:
   ClassifierAllTrajTransformer: null
   BiasedClassifierTrajTransformer: null
   NoTrajTransformer: null
-  CharNO: null
-  WaveNO: null
-  WaveNOBase: null
-  WaveNOCls: null
-  WaveNOLocal: null
-  WaveNOIndepTraj: null
+  CharNO: ToSegment
+  WaveNO: ToSegment
+  WaveNOBase: ToSegment
+  WaveNOCls: ToSegment
+  WaveNOLocal: ToSegment
+  WaveNOIndepTraj: ToSegment
   WaveNODisc: null
-  ShockAwareWaveNO: null
-  WaveNOMinimal: null
-  WaveNOAblation: null
-  WaveNOAblationBias: null
-  WaveNOAblationDamp: null
-  WaveNOAblationFiLM: null
-  WaveNOAblationCrossAttn: null
-  WaveNOAblationFull: null
-  WaveNOAblationFiLMOnly: null
-  WaveNOAblationCrossAttnOnly: null
+  ShockAwareWaveNO: ToSegment
+  WaveNOMinimal: ToSegment
+  WaveNOAblation: ToSegment
+  WaveNOAblationBias: ToSegment
+  WaveNOAblationDamp: ToSegment
+  WaveNOAblationFiLM: ToSegment
+  WaveNOAblationCrossAttn: ToSegment
+  WaveNOAblationFull: ToSegment
+  WaveNOAblationFiLMOnly: ToSegment
+  WaveNOAblationCrossAttnOnly: ToSegment
   CTTBiased: null
   CTTSegPhysics: null
   CTTFiLM: null
-  CTTSeg: null
-  TransformerSeg: null
+  CTTSeg: ToSegment
+  TransformerSeg: ToSegment
   WaveFrontModel: null
   LDDeepONet: LDDeepONet
   CVAEDeepONet: ToGridInput

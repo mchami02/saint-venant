@@ -113,6 +113,7 @@ def get_wavefront_datasets(
     transform_override: str | None = None,
     proximity_sigma: float | None = None,
     min_component_size: int = 5,
+    split_segments: int = 1,
 ) -> tuple[WavefrontDataset, WavefrontDataset, WavefrontDataset]:
     """Get train, val, and test datasets for wavefront learning.
 
@@ -173,13 +174,31 @@ def get_wavefront_datasets(
     else:
         transform_name = MODEL_TRANSFORM.get(model_name)
     model_transform = None
+    transform_kwargs = {**grid_config, "split_segments": split_segments}
     if transform_name is not None:
-        if transform_name not in TRANSFORMS:
-            raise ValueError(
-                f"Transform '{transform_name}' not found. "
-                f"Available: {list(TRANSFORMS.keys())}"
-            )
-        model_transform = TRANSFORMS[transform_name](**grid_config)
+        if "+" in transform_name:
+            # Composite transform: "A+B" applies A then B
+            parts = [p.strip() for p in transform_name.split("+")]
+            for p in parts:
+                if p not in TRANSFORMS:
+                    raise ValueError(
+                        f"Transform '{p}' not found. "
+                        f"Available: {list(TRANSFORMS.keys())}"
+                    )
+            sub_transforms = [TRANSFORMS[p](**transform_kwargs) for p in parts]
+
+            def model_transform(input_data, target_grid, _transforms=sub_transforms):
+                for t in _transforms:
+                    input_data, target_grid = t(input_data, target_grid)
+                return input_data, target_grid
+
+        else:
+            if transform_name not in TRANSFORMS:
+                raise ValueError(
+                    f"Transform '{transform_name}' not found. "
+                    f"Available: {list(TRANSFORMS.keys())}"
+                )
+            model_transform = TRANSFORMS[transform_name](**transform_kwargs)
 
     # Compose CellSamplingTransform if requested
     cell_sampling_transform = None

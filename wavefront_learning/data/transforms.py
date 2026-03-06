@@ -238,6 +238,49 @@ class CellSamplingTransform:
         return result, target_grid
 
 
+class ToSegmentTransform:
+    """Creates explicit segment tensors from piecewise constant IC.
+
+    Each segment is [x_start, x_end, rho_value]. With split_segments > 1,
+    each original piece is divided into equal sub-segments.
+
+    Args:
+        split_segments: Sub-segments per original piece (default 1).
+        **kwargs: Absorbs grid_config keys.
+    """
+
+    def __init__(self, split_segments: int = 1, **kwargs):
+        self.split_segments = split_segments
+
+    def __call__(self, input_data: dict, target_grid):
+        xs = input_data["xs"]  # (max_pieces+1,)
+        ks = input_data["ks"]  # (max_pieces,)
+        mask = input_data["pieces_mask"]  # (max_pieces,)
+
+        max_pieces = ks.shape[0]
+        n_pieces = int(mask.sum().item())
+        S = max_pieces * self.split_segments
+
+        segments = torch.zeros(S, 3, dtype=torch.float32)
+        segments_mask = torch.zeros(S, dtype=torch.float32)
+
+        for i in range(n_pieces):
+            x_left = xs[i].item()
+            x_right = xs[i + 1].item()
+            width = (x_right - x_left) / self.split_segments
+            for j in range(self.split_segments):
+                idx = i * self.split_segments + j
+                segments[idx, 0] = x_left + j * width
+                segments[idx, 1] = x_left + (j + 1) * width
+                segments[idx, 2] = ks[i]
+                segments_mask[idx] = 1.0
+
+        result = dict(input_data)
+        result["segments"] = segments
+        result["segments_mask"] = segments_mask
+        return result, target_grid
+
+
 # Registry of available transforms (string name -> class)
 TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
@@ -246,4 +289,5 @@ TRANSFORMS = {
     "DiscretizeIC": DiscretizeICTransform,
     "LDDeepONet": LDDeepONetTransform,
     "CellSampling": CellSamplingTransform,
+    "ToSegment": ToSegmentTransform,
 }

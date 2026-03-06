@@ -129,25 +129,24 @@ class CTTSeg(nn.Module):
         Returns:
             Dict with positions, output_grid, and existence.
         """
-        xs = batch_input["xs"]
-        ks = batch_input["ks"]
-        pieces_mask = batch_input["pieces_mask"]
+        segments = batch_input["segments"]  # (B, S, 3)
+        segments_mask = batch_input["segments_mask"]  # (B, S)
         disc_mask = batch_input["disc_mask"]
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
         # === SEGMENT ENCODING ===
-        seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+        seg_emb = self.segment_encoder(segments, segments_mask)  # (B, S, H)
 
         # === SELF-ATTENTION over segment tokens ===
-        key_padding_mask = ~pieces_mask.bool()
+        key_padding_mask = ~segments_mask.bool()
         all_masked = key_padding_mask.all(dim=1)
         if all_masked.any():
             key_padding_mask = key_padding_mask.clone()
             key_padding_mask[all_masked] = False
         for layer in self.disc_interaction:
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
-        seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
+        seg_emb = seg_emb * segments_mask.unsqueeze(-1)  # re-zero padded
 
         # === TRAJECTORY via BreakpointEvolution ===
         t_unique = t_coords[:, :, 0]  # (B, nt)
@@ -173,7 +172,7 @@ class CTTSeg(nn.Module):
             x_coords,
             left_bound,
             right_bound,
-            pieces_mask,
+            segments_mask,
         )  # (B, nt, nx)
 
         output_grid = density.unsqueeze(1)  # (B, 1, nt, nx)

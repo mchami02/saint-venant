@@ -73,59 +73,61 @@ class SegmentPhysicsEncoder(nn.Module):
 
     def forward(
         self,
-        xs: torch.Tensor,
-        ks: torch.Tensor,
-        pieces_mask: torch.Tensor,
+        segments: torch.Tensor,
+        segments_mask: torch.Tensor,
     ) -> torch.Tensor:
         """Encode IC segments.
 
         Args:
-            xs: Breakpoint positions (B, K+1).
-            ks: Piece values (B, K).
-            pieces_mask: Validity mask (B, K), 1 = valid.
+            segments: Segment features (B, S, 3) with [x_start, x_end, rho].
+            segments_mask: Validity mask (B, S), 1 = valid.
 
         Returns:
-            Segment embeddings (B, K, hidden_dim).
+            Segment embeddings (B, S, hidden_dim).
         """
-        B, K = ks.shape
+        B, S, _ = segments.shape
+
+        x_start = segments[:, :, 0]  # (B, S)
+        x_end = segments[:, :, 1]  # (B, S)
+        rho = segments[:, :, 2]  # (B, S)
 
         # Compute physics features
-        x_center = (xs[:, :-1] + xs[:, 1:]) / 2  # (B, K)
-        width = xs[:, 1:] - xs[:, :-1]  # (B, K)
-        lambda_k = self.flux.derivative(ks)  # (B, K)
-        flux_k = self.flux(ks)  # (B, K)
+        x_center = (x_start + x_end) / 2  # (B, S)
+        width = x_end - x_start  # (B, S)
+        lambda_k = self.flux.derivative(rho)  # (B, S)
+        flux_k = self.flux(rho)  # (B, S)
 
         # Fourier encode spatial features
         x_center_enc = self.fourier_x(
             x_center.reshape(-1)
-        ).reshape(B, K, -1)  # (B, K, F)
+        ).reshape(B, S, -1)  # (B, S, F)
         width_enc = self.fourier_x(
             width.reshape(-1)
-        ).reshape(B, K, -1)  # (B, K, F)
+        ).reshape(B, S, -1)  # (B, S, F)
 
         # Concatenate all features
         if self.include_cumulative_mass:
             # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
-            rho_width = ks * width  # (B, K)
-            N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
-            total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
-            N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
+            rho_width = rho * width  # (B, S)
+            N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, S)
+            total_mass = (rho_width * segments_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+            N_k_normalized = N_k / total_mass  # (B, S) in [0, 1]
             scalar_features = torch.stack(
-                [ks, lambda_k, flux_k, N_k_normalized], dim=-1
-            )  # (B, K, 4)
+                [rho, lambda_k, flux_k, N_k_normalized], dim=-1
+            )  # (B, S, 4)
         else:
             scalar_features = torch.stack(
-                [ks, lambda_k, flux_k], dim=-1
-            )  # (B, K, 3)
+                [rho, lambda_k, flux_k], dim=-1
+            )  # (B, S, 3)
         features = torch.cat(
             [x_center_enc, width_enc, scalar_features], dim=-1
-        )  # (B, K, 2F+3/4)
+        )  # (B, S, 2F+3/4)
 
         # MLP projection
-        output = self.mlp(features)  # (B, K, H)
+        output = self.mlp(features)  # (B, S, H)
 
         # Zero out padded positions
-        output = output * pieces_mask.unsqueeze(-1)
+        output = output * segments_mask.unsqueeze(-1)
 
         return output
 
@@ -293,24 +295,22 @@ class CharacteristicFeatureComputer(nn.Module):
         self,
         t_coords: torch.Tensor,
         x_coords: torch.Tensor,
-        xs: torch.Tensor,
-        ks: torch.Tensor,
-        pieces_mask: torch.Tensor,
+        segments: torch.Tensor,
+        segments_mask: torch.Tensor,
     ) -> torch.Tensor:
         """Compute characteristic features for all (query, segment) pairs.
 
         Args:
             t_coords: Time coordinates (B, nt, nx).
             x_coords: Space coordinates (B, nt, nx).
-            xs: Breakpoint positions (B, K+1).
-            ks: Piece values (B, K).
-            pieces_mask: Validity mask (B, K).
+            segments: Segment features (B, S, 3) with [x_start, x_end, rho].
+            segments_mask: Validity mask (B, S).
 
         Returns:
-            Characteristic features (B, Q, K, hidden_dim) where Q = nt * nx.
+            Characteristic features (B, Q, S, hidden_dim) where Q = nt * nx.
         """
         B, nt, nx = t_coords.shape
-        K = ks.shape[1]
+        S = segments.shape[1]
         Q = nt * nx
 
         # Flatten spatial grid
@@ -318,21 +318,22 @@ class CharacteristicFeatureComputer(nn.Module):
         x_flat = x_coords.reshape(B, Q)  # (B, Q)
 
         # Segment properties
-        x_center = (xs[:, :-1] + xs[:, 1:]) / 2  # (B, K)
-        x_left = xs[:, :-1]  # (B, K)
-        x_right = xs[:, 1:]  # (B, K)
-        lambda_k = self.flux.derivative(ks)  # (B, K)
+        x_left = segments[:, :, 0]  # (B, S)
+        x_right = segments[:, :, 1]  # (B, S)
+        rho = segments[:, :, 2]  # (B, S)
+        x_center = (x_left + x_right) / 2  # (B, S)
+        lambda_k = self.flux.derivative(rho)  # (B, S)
 
         # === Inter-segment boundary features ===
         # Shock speeds at left/right boundaries of each segment.
         # For edge segments, pad with self-values so shock_speed(ρ,ρ) = f'(ρ).
-        ks_left_pad = F.pad(ks[:, :-1], (1, 0), value=0.0)  # (B, K)
-        ks_left_pad[:, 0] = ks[:, 0]  # leftmost: self-pad
-        ks_right_pad = F.pad(ks[:, 1:], (0, 1), value=0.0)  # (B, K)
-        ks_right_pad[:, -1] = ks[:, -1]  # rightmost: self-pad
+        rho_left_pad = F.pad(rho[:, :-1], (1, 0), value=0.0)  # (B, S)
+        rho_left_pad[:, 0] = rho[:, 0]  # leftmost: self-pad
+        rho_right_pad = F.pad(rho[:, 1:], (0, 1), value=0.0)  # (B, S)
+        rho_right_pad[:, -1] = rho[:, -1]  # rightmost: self-pad
 
-        s_left = self.flux.shock_speed(ks_left_pad, ks)  # (B, K)
-        s_right = self.flux.shock_speed(ks, ks_right_pad)  # (B, K)
+        s_left = self.flux.shock_speed(rho_left_pad, rho)  # (B, S)
+        s_right = self.flux.shock_speed(rho, rho_right_pad)  # (B, S)
 
         # Collision time proxy: time for neighboring characteristics to meet
         xc_left_pad = F.pad(x_center[:, :-1], (1, 0), value=0.0)
@@ -352,15 +353,15 @@ class CharacteristicFeatureComputer(nn.Module):
         t_coll = torch.minimum(
             dist_left_nb / speed_diff_left,
             dist_right_nb / speed_diff_right,
-        )  # (B, K)
+        )  # (B, S)
 
-        # Expand for broadcasting: (B, Q, 1) and (B, 1, K)
+        # Expand for broadcasting: (B, Q, 1) and (B, 1, S)
         t_exp = t_flat.unsqueeze(2)  # (B, Q, 1)
         x_exp = x_flat.unsqueeze(2)  # (B, Q, 1)
-        xc_exp = x_center.unsqueeze(1)  # (B, 1, K)
-        xl_exp = x_left.unsqueeze(1)  # (B, 1, K)
-        xr_exp = x_right.unsqueeze(1)  # (B, 1, K)
-        lam_exp = lambda_k.unsqueeze(1)  # (B, 1, K)
+        xc_exp = x_center.unsqueeze(1)  # (B, 1, S)
+        xl_exp = x_left.unsqueeze(1)  # (B, 1, S)
+        xr_exp = x_right.unsqueeze(1)  # (B, 1, S)
+        lam_exp = lambda_k.unsqueeze(1)  # (B, 1, S)
 
         # Compute 5 original characteristic features
         t_safe = torch.clamp(t_exp, min=self.eps)
@@ -370,7 +371,7 @@ class CharacteristicFeatureComputer(nn.Module):
         dist_right = x_exp - (xr_exp + lam_exp * t_exp)  # right boundary
         t_feat = t_exp.expand_as(xi)  # time
 
-        # Expand inter-segment features to (B, Q, K)
+        # Expand inter-segment features to (B, Q, S)
         s_left_feat = s_left.unsqueeze(1).expand_as(xi)
         s_right_feat = s_right.unsqueeze(1).expand_as(xi)
         t_coll_feat = t_coll.unsqueeze(1).expand_as(xi)
@@ -390,18 +391,18 @@ class CharacteristicFeatureComputer(nn.Module):
         # Fourier encode each feature and concatenate
         encoded_parts = []
         for feat in features:
-            flat = feat.reshape(-1)  # (B*Q*K,)
-            enc = self.fourier(flat)  # (B*Q*K, F)
-            enc = enc.reshape(B, Q, K, -1)  # (B, Q, K, F)
+            flat = feat.reshape(-1)  # (B*Q*S,)
+            enc = self.fourier(flat)  # (B*Q*S, F)
+            enc = enc.reshape(B, Q, S, -1)  # (B, Q, S, F)
             encoded_parts.append(enc)
 
-        combined = torch.cat(encoded_parts, dim=-1)  # (B, Q, K, 8*F)
+        combined = torch.cat(encoded_parts, dim=-1)  # (B, Q, S, 8*F)
 
         # MLP projection
-        output = self.mlp(combined)  # (B, Q, K, H_char)
+        output = self.mlp(combined)  # (B, Q, S, H_char)
 
         # Zero out padded segments
-        output = output * pieces_mask.unsqueeze(1).unsqueeze(-1)
+        output = output * segments_mask.unsqueeze(1).unsqueeze(-1)
 
         return output
 
