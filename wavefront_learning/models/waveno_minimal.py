@@ -5,7 +5,7 @@ matter most:
 
     1. SegmentPhysicsEncoder — encode IC segments with physics features
     1b. Self-attention over segments — contextualize embeddings
-    2. Fourier query encoding — FourierFeatures(t) + FourierFeatures(x) → MLP
+    2. Raw (t, x) query encoding — MLP on raw coordinates
     3. LWRBias — shock/rarefaction-aware attention bias with time damping
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
     5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
@@ -32,7 +32,6 @@ import torch.nn as nn
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.lwr_bias import LWRBias
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
-from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
 
@@ -42,8 +41,6 @@ class WaveNOMinimal(nn.Module):
 
     Args:
         hidden_dim: All embedding dimensions.
-        num_freq_t: Fourier frequency bands for time in query encoder.
-        num_freq_x: Fourier frequency bands for space in query encoder.
         num_seg_frequencies: Fourier frequency bands for segment encoder.
         num_seg_mlp_layers: MLP depth in segment encoder.
         num_self_attn_layers: Self-attention layers for segment interaction.
@@ -65,8 +62,6 @@ class WaveNOMinimal(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_freq_t: int = 8,
-        num_freq_x: int = 8,
         num_seg_frequencies: int = 8,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
@@ -108,16 +103,9 @@ class WaveNOMinimal(nn.Module):
             ]
         )
 
-        # Stage 2: Query encoder (Fourier + MLP)
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_freq_t, include_input=True
-        )
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_freq_x, include_input=True
-        )
-        query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        # Stage 2: Query encoder (raw coordinates + MLP)
         self.query_mlp = nn.Sequential(
-            nn.Linear(query_input_dim, hidden_dim),
+            nn.Linear(2, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
@@ -207,13 +195,11 @@ class WaveNOMinimal(nn.Module):
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
         seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
 
-        # Stage 2: Query encoding
-        t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
-        x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
-        query_features = torch.cat([t_enc, x_enc], dim=-1)
-        query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
+        # Stage 2: Query encoding (raw coordinates)
+        tx = torch.stack(
+            [t_coords.reshape(-1), x_coords.reshape(-1)], dim=-1
+        )  # (B*nt*nx, 2)
+        query_emb = self.query_mlp(tx)  # (B*nt*nx, H)
         query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)
 
         # Stage 2b: Segment evolution (FiLM + cross-segment attention)
@@ -308,8 +294,6 @@ def build_waveno_minimal(args: dict) -> WaveNOMinimal:
 
     return WaveNOMinimal(
         hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
@@ -328,8 +312,6 @@ def _build_ablation(args: dict, **flag_overrides) -> WaveNOMinimal:
 
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
