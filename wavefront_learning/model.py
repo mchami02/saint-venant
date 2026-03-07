@@ -51,6 +51,7 @@ from models.waveno import (
     build_waveno_indep_traj,
     build_waveno_local,
 )
+from models.waveno_arz import build_waveno_arz, build_waveno_arz_base
 from models.waveno_minimal import (
     build_waveno_ablation,
     build_waveno_ablation_bias,
@@ -111,6 +112,8 @@ MODELS = {
     "ShockAwareDeepONet": build_shock_aware_deeponet,
     "NeuralFVSolver": build_neural_fv_solver,
     "LNO": build_lno,
+    "WaveNOARZ": build_waveno_arz,
+    "WaveNOARZBase": build_waveno_arz_base,
 }
 
 
