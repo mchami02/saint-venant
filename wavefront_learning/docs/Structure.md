@@ -114,7 +114,8 @@ wavefront_learning/
 ├── testing/
 │   ├── __init__.py               # Re-exports all test functions
 │   ├── test_running.py           # Sanity checks, profiling, inference testing
-│   └── test_results.py           # Evaluation metrics, sample collection, high-res testing
+│   ├── test_results.py           # Evaluation metrics, sample collection, high-res testing
+│   └── test_lwr_bias.py          # Standalone pytest tests for LWRBias module
 ├── artifacts/                    # Saved model checkpoints (versioned)
 ├── wandb/                        # W&B run logs (gitignored)
 ├── ClassifierTrajDeepONet.pth    # Saved model checkpoint

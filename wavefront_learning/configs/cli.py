@@ -202,11 +202,6 @@ def parse_args() -> argparse.Namespace:
 
     # Model-specific parameters
     parser.add_argument(
-        "--initial_bias_scale",
-        type=float,
-        help="Initial scale for LWRBias quadratic penalty (learnable)",
-    )
-    parser.add_argument(
         "--initial_damping_sharpness",
         type=float,
         help="Initial sharpness for LWRBias collision-time damping (learnable)",

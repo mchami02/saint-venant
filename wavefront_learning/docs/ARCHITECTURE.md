@@ -988,23 +988,25 @@ Per-segment attention bias using LWR interface dynamics (shock/rarefaction class
 - **Shock** ($\lambda_L > \lambda_R$): one-sided penalty from the Rankine-Hugoniot trajectory $x_d + s \cdot t$.
 - **Rarefaction** ($\lambda_L \leq \lambda_R$): one-sided penalty from the far fan edge, leaving the fan interior unpenalized.
 
-**Parameters** (both learnable `nn.Parameter`):
+**Parameters**:
 
 | Parameter | Type | Default | Meaning |
 |-----------|------|---------|---------|
-| `scale` | `nn.Parameter` | `5.0` | Quadratic penalty scale (learnable) |
-| `damping_sharpness` | `nn.Parameter` | `5.0` | Collision-time sigmoid sharpness (learnable) |
+| `damping_sharpness` | `nn.Parameter` | `5.0` | Collision-time sigmoid sharpness (learnable, only when `use_damping=True`) |
+| `use_damping` | `bool` | `True` | Toggle collision-time damping |
 
 For each interface between segments $k$ and $k+1$:
 
 $$s_{right}^{(k)} = \begin{cases} s & \text{shock} \\ \lambda_R & \text{rarefaction} \end{cases}, \quad s_{left}^{(k+1)} = \begin{cases} s & \text{shock} \\ \lambda_L & \text{rarefaction} \end{cases}$$
 
-$$\text{penalty}_{left}(t, x, k) = |\alpha| \cdot \text{ReLU}(x - (x_d + s_{right}^{(k)} \cdot t))^2$$
-$$\text{penalty}_{right}(t, x, k+1) = |\alpha| \cdot \text{ReLU}((x_d + s_{left}^{(k+1)} \cdot t) - x)^2$$
+$$\text{penalty}_{left}(t, x, k) = \text{ReLU}(x - (x_d + s_{right}^{(k)} \cdot t))$$
+$$\text{penalty}_{right}(t, x, k+1) = \text{ReLU}((x_d + s_{left}^{(k+1)} \cdot t) - x)$$
 
-Per-segment collision-time damping ($t_{coll}$ computed analytically per segment):
+Optional per-segment collision-time damping (`use_damping=True`, $t_{coll}$ computed analytically per segment):
 
 $$\text{bias} = -\text{penalty} \cdot \sigma\!\big(|\beta| \cdot (t_{coll} - t)\big)$$
+
+Without damping (`use_damping=False`): $\text{bias} = -\text{penalty}$
 
 ```
 ic_data: {xs: (K+1), ks: (K), pieces_mask: (K)}
@@ -1012,11 +1014,12 @@ query: (t_coords: (*spatial), x_coords: (*spatial))
 → lam = flux.derivative(ks)                                              → (K,)
 → is_shock = lam[:-1] > lam[1:]                                          → (K-1,)
 → speed_right = where(is_shock, s, lam_R)                                 → (K-1,)
-→ penalty_left  = |scale| * relu(x - (x_d + speed_R * t))²              → (*spatial, K-1)
-→ penalty_right = |scale| * relu((x_d + speed_L * t) - x)²              → (*spatial, K-1)
+→ penalty_left  = relu(x - (x_d + speed_R * t))                          → (*spatial, K-1)
+→ penalty_right = relu((x_d + speed_L * t) - x)                          → (*spatial, K-1)
 → bias = -(pad(penalty_left, right=1) + pad(penalty_right, left=1))       → (*spatial, K)
-→ t_coll = _compute_collision_times(xs, lam)                              → (K,)
-→ bias *= σ(|damping_sharpness| * (t_coll - t))                          → (*spatial, K)
+→ if use_damping:
+→   t_coll = _compute_collision_times(xs, lam)                            → (K,)
+→   bias *= σ(|damping_sharpness| * (t_coll - t))                        → (*spatial, K)
 → mask padded segments with -1e9
 → output: (*spatial, K)
 ```
@@ -1077,7 +1080,6 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 | `num_heads` | 4 | Attention heads (both self and cross) |
 | `num_cross_segment_layers` | 1 | Cross-segment attention per timestep |
 | `time_condition` | True | FiLM time conditioning |
-| `initial_bias_scale` | 5.0 | Initial LWRBias scale (learnable) |
 | `initial_damping_sharpness` | 5.0 | Initial LWRBias damping sharpness (learnable) |
 | `predict_trajectories` | True | Enable breakpoint evolution + local boundary features |
 | `num_traj_cross_layers` | 2 | Cross-attention layers in breakpoint trajectory decoder |

@@ -11,10 +11,11 @@ interface dynamics:
 - **Rarefaction** (λ_L ≤ λ_R): one-sided penalty from the far fan edge,
   leaving the interior of the fan unpenalized (both segments attend).
 
-The bias at each query point is:
-``-|scale| * relu(dist)² * sigmoid(damping_sharpness * (t_coll - t))``.
-Per-segment collision-time damping fades the bias after estimated wave
-collision so that learned attention takes over.
+The bias at each query point is ``-relu(dist)``: zero where a segment
+has influence, negative distance elsewhere. When ``use_damping=True``,
+the bias is multiplied by a sigmoid that fades it after the estimated
+collision time:
+``-relu(dist) * sigmoid(damping_sharpness * (t_coll - t))``.
 """
 
 import torch
@@ -28,35 +29,40 @@ class LWRBias(nn.Module):
     """Per-segment attention bias from LWR interface dynamics.
 
     For each interface between segments k and k+1 the module classifies
-    the wave (shock vs rarefaction) and computes a one-sided quadratic
-    penalty on each adjacent segment.  Penalties are accumulated across
-    all interfaces so that each segment's bias is the sum of contributions
-    from its left and right boundaries.
+    the wave (shock vs rarefaction) and computes a one-sided linear
+    distance penalty on each adjacent segment.  Penalties are accumulated
+    across all interfaces so that each segment's bias is the sum of
+    contributions from its left and right boundaries.
 
     The bias for a segment at query point (t, x) is::
 
-        bias = -|scale| * relu(dist)² * σ(damping * (t_coll - t))
+        bias = -relu(dist)                           # use_damping=False
+        bias = -relu(dist) * σ(β * (t_coll - t))     # use_damping=True
 
     where ``dist`` is the one-sided distance past the boundary trajectory
     and ``t_coll`` is the per-segment analytical collision time.
 
     Args:
-        initial_scale: Initial scale for the quadratic penalty (learnable).
         initial_damping_sharpness: Initial sharpness of the sigmoid
             collision-time damping (learnable).
         flux: ``Flux`` instance for characteristic / shock speeds.
             Defaults to ``GreenshieldsFlux()``.
+        use_damping: If True, multiply the bias by a sigmoid that fades
+            it after the estimated collision time.  Default True.
     """
 
     def __init__(
         self,
-        initial_scale: float = 5.0,
         initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
+        use_damping: bool = True,
     ):
         super().__init__()
-        self.scale = nn.Parameter(torch.tensor(initial_scale))
-        self.damping_sharpness = nn.Parameter(torch.tensor(initial_damping_sharpness))
+        self.use_damping = use_damping
+        if use_damping:
+            self.damping_sharpness = nn.Parameter(
+                torch.tensor(initial_damping_sharpness)
+            )
         self.flux = flux if flux is not None else GreenshieldsFlux()
 
     def forward(
@@ -118,16 +124,12 @@ class LWRBias(nn.Module):
         t_exp = t_coords.unsqueeze(-1)  # (B, *spatial, 1)
         x_exp = x_coords.unsqueeze(-1)  # (B, *spatial, 1)
 
-        # -- one-sided quadratic penalties at each interface -------------------
+        # -- one-sided linear distance penalties at each interface --------------
         boundary_right = x_d + speed_right * t_exp  # (B, *spatial, K-1)
-        penalty_left_seg = self.scale.abs() * torch.relu(
-            x_exp - boundary_right
-        ).pow(2)
+        penalty_left_seg = torch.relu(x_exp - boundary_right)
 
         boundary_left = x_d + speed_left * t_exp  # (B, *spatial, K-1)
-        penalty_right_seg = self.scale.abs() * torch.relu(
-            boundary_left - x_exp
-        ).pow(2)
+        penalty_right_seg = torch.relu(boundary_left - x_exp)
 
         # -- accumulate onto K segments with F.pad ----------------------------
         # penalty_left_seg  affects segments 0..K-2 → pad right by 1
@@ -136,14 +138,15 @@ class LWRBias(nn.Module):
             F.pad(penalty_left_seg, (0, 1)) + F.pad(penalty_right_seg, (1, 0))
         )  # (B, *spatial, K)
 
-        # -- per-segment collision-time damping --------------------------------
-        t_coll = self._compute_collision_times(xs, ks, lam, K)  # (B, K)
-        for _ in range(n_expand):
-            t_coll = t_coll.unsqueeze(1)  # (B, 1, ..., 1, K)
-        damping = torch.sigmoid(
-            self.damping_sharpness.abs() * (t_coll - t_exp)
-        )  # (B, *spatial, K) — ~1 before collision, ~0 after
-        bias = bias * damping
+        # -- per-segment collision-time damping (optional) ---------------------
+        if self.use_damping:
+            t_coll = self._compute_collision_times(xs, ks, lam, K)  # (B, K)
+            for _ in range(n_expand):
+                t_coll = t_coll.unsqueeze(1)  # (B, 1, ..., 1, K)
+            damping = torch.sigmoid(
+                self.damping_sharpness.abs() * (t_coll - t_exp)
+            )  # (B, *spatial, K) — ~1 before collision, ~0 after
+            bias = bias * damping
 
         # -- mask padded segments ---------------------------------------------
         mask = pieces_mask

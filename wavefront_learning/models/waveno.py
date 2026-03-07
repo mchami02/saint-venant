@@ -66,8 +66,6 @@ class WaveNO(nn.Module):
         num_heads: Attention heads (both self and cross).
         num_cross_segment_layers: Cross-segment attention per timestep.
         time_condition: Enable FiLM time conditioning.
-        initial_bias_scale: Initial scale for LWRBias quadratic penalty
-            (learnable).
         initial_damping_sharpness: Initial sharpness for LWRBias
             collision-time damping (learnable).
         predict_trajectories: If True, predict breakpoint evolution and
@@ -100,7 +98,6 @@ class WaveNO(nn.Module):
         num_heads: int = 4,
         num_cross_segment_layers: int = 1,
         time_condition: bool = True,
-        initial_bias_scale: float = 5.0,
         initial_damping_sharpness: float = 5.0,
         predict_trajectories: bool = True,
         num_traj_cross_layers: int = 2,
@@ -130,7 +127,6 @@ class WaveNO(nn.Module):
 
         # === LWR-aware attention bias (segment-based path) ===
         self.lwr_bias = LWRBias(
-            initial_scale=initial_bias_scale,
             initial_damping_sharpness=initial_damping_sharpness,
             flux=flux,
         )
@@ -659,7 +655,6 @@ def build_waveno(args: dict) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        initial_bias_scale=args.get("initial_bias_scale", 5.0),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
@@ -685,7 +680,6 @@ def _build_waveno_base(args: dict, **overrides) -> WaveNO:
         num_heads=args.get("num_heads", 4),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         time_condition=args.get("time_condition", True),
-        initial_bias_scale=args.get("initial_bias_scale", 5.0),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),

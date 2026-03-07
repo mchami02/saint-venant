@@ -59,7 +59,6 @@ cli_defaults:
   n_cvae_samples: 10
 
   # Model-specific
-  initial_bias_scale: 5.0
   initial_damping_sharpness: 5.0
   dropout: 0.05
 
