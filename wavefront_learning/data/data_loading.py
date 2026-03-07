@@ -17,8 +17,8 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 api = HfApi(token=os.environ.get("HF_TOKEN"))
 
-# Wavefront uses LaxHopf solver with Greenshield flux
-DEFAULT_SOLVER = "LaxHopf"
+# Wavefront uses LaxHopfPointWise solver with Greenshield flux
+DEFAULT_SOLVER = "LaxHopfPointWise"
 DEFAULT_FLUX = "Greenshields"
 DEFAULT_REPO = "mchami/grids"
 
