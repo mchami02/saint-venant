@@ -219,7 +219,7 @@ wavefront_learning/
   - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`, `build_shock_aware_waveno()`
 - **waveno_minimal.py** — Stripped-down WaveNO ablation baseline (core 5-stage pipeline only) with toggle flags for controlled experiments.
   - `WaveNOMinimal`, `build_waveno_minimal()`
-  - Ablation builders: `build_waveno_ablation()`, `build_waveno_ablation_bias()`, `build_waveno_ablation_damp()`, `build_waveno_ablation_film()`, `build_waveno_ablation_cross_attn()`, `build_waveno_ablation_full()`, `build_waveno_ablation_film_only()`, `build_waveno_ablation_cross_attn_only()`
+  - Ablation builders: `build_waveno_ablation()`, `build_waveno_ablation_bias()`, `build_waveno_ablation_damp()`, `build_waveno_ablation_bias_film()`, `build_waveno_ablation_film()`, `build_waveno_ablation_cross_attn()`, `build_waveno_ablation_full()`, `build_waveno_ablation_film_only()`, `build_waveno_ablation_cross_attn_only()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
   - `WaveFrontModel`, `build_wavefront_model()`
 - **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.

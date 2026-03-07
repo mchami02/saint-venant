@@ -393,6 +393,13 @@ def build_waveno_ablation_film_only(args: dict) -> WaveNOMinimal:
     )
 
 
+def build_waveno_ablation_bias_film(args: dict) -> WaveNOMinimal:
+    """+ LWR bias (no damping) + FiLM time conditioning."""
+    return _build_ablation(
+        args, use_char_bias=True, use_damping=False, use_film=True, use_cross_seg_attn=False
+    )
+
+
 def build_waveno_ablation_cross_attn_only(args: dict) -> WaveNOMinimal:
     """Cross-segment attention only (no LWR bias)."""
     return _build_ablation(
