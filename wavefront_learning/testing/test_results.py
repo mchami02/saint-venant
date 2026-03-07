@@ -225,7 +225,7 @@ def eval_res(
     high_res_nt = args.nt * new_res
     high_res_dx = args.dx / new_res
     high_res_dt = args.dt / new_res
-    n_samples = max(100, args.n_samples // 10)
+    n_samples = getattr(args, "n_test_samples", 100)
 
     grid_config = {
         "nx": high_res_nx,
@@ -248,6 +248,8 @@ def eval_res(
         train_ratio=0.0,
         val_ratio=0.0,
         only_shocks=False,
+        max_steps=getattr(args, "max_steps", 3),
+        min_steps=getattr(args, "min_steps", 2),
         equation=getattr(args, "equation", "LWR"),
         equation_kwargs=_get_equation_kwargs(args),
         cell_sampling_k=cell_sampling_k,
@@ -341,7 +343,7 @@ def eval_steps(
     if grid_config is None:
         grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
 
-    n_samples = max(100, args.n_samples // 10)
+    n_samples = getattr(args, "n_test_samples", 100)
     only_shocks = getattr(args, "only_shocks", False)
 
     all_step_results = {}

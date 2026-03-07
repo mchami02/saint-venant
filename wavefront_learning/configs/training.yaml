@@ -43,6 +43,7 @@ cli_defaults:
   max_steps: 4
   max_test_steps: 10
   max_high_res: 5
+  n_test_samples: 100
 
   # Latent Diffusion DeepONet
   ld_latent_dim: 32
