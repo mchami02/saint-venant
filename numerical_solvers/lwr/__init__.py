@@ -1,4 +1,4 @@
-"""LWR traffic flow solver — functional API (nfv Lax-Hopf).
+"""LWR traffic flow solver — functional API (nfv Lax-Hopf point-wise).
 
 Public API
 ----------
@@ -11,7 +11,7 @@ import torch
 from nfv.flows import Greenshield
 from nfv.initial_conditions import PiecewiseConstant
 from nfv.problem import Problem
-from nfv.solvers import LaxHopf
+from nfv.solvers import LaxHopfPointWise
 
 from .initial_conditions import (
     PiecewiseRandom,
@@ -54,7 +54,7 @@ def generate_one(
         ic.xs = np.asarray(xs, dtype=float)
 
     problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=[ic], flow=Greenshield())
-    rho = problem.solve(LaxHopf, batch_size=1, dtype=torch.float64)
+    rho = problem.solve(LaxHopfPointWise, batch_size=1, dtype=torch.float64)
     rho = rho.squeeze(0)  # (nt, nx)
 
     x = torch.arange(nx, dtype=torch.float64) * dx
@@ -126,7 +126,7 @@ def generate_n(
 
     problem = Problem(nx=nx, nt=nt, dx=dx, dt=dt, ic=ics, flow=Greenshield())
     rho = problem.solve(
-        LaxHopf,
+        LaxHopfPointWise,
         batch_size=batch_size,
         dtype=torch.float64,
         progressbar=show_progress,

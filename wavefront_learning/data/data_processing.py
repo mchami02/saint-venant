@@ -1,7 +1,7 @@
 """Data generation and preprocessing for wavefront learning.
 
 This module handles:
-- Grid generation using the nfv Lax-Hopf solver
+- Grid generation using the nfv Lax-Hopf point-wise solver
 - Discontinuity extraction from discretized ICs
 - Data preprocessing for neural network training
 """
@@ -585,7 +585,7 @@ def get_wavefront_data(
     np.random.seed(random_seed)
 
     is_arz = equation == "ARZ"
-    solver = "ARZ" if is_arz else "LaxHopf"
+    solver = "ARZ" if is_arz else "LaxHopfPointWise"
     arz_kw = equation_kwargs or {}
 
     # Distribute samples uniformly across step counts {min_steps, ..., max_steps}

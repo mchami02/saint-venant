@@ -57,6 +57,12 @@ def parse_args() -> argparse.Namespace:
         default=5,
         help="Max resolution multiplier for high-res generalization test (default: 5)",
     )
+    parser.add_argument(
+        "--n_test_samples",
+        type=int,
+        default=100,
+        help="Samples per sub-test (high-res, step-count)",
+    )
 
     # Output arguments
     parser.add_argument(

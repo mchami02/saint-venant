@@ -143,6 +143,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Max resolution multiplier for high-res generalization test",
     )
+    parser.add_argument(
+        "--n_test_samples",
+        type=int,
+        help="Samples per sub-test (high-res, step-count)",
+    )
 
     # Latent Diffusion DeepONet parameters
     parser.add_argument(
