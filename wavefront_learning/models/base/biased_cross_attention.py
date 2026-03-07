@@ -340,3 +340,112 @@ def compute_discontinuity_characteristic_bias(
     bias = bias * mask + (~mask.bool()).float() * (-1e9)
 
     return bias  # (B, nt, nx, D)
+
+
+def compute_arz_characteristic_bias(
+    t_coords: torch.Tensor,
+    x_coords: torch.Tensor,
+    xs: torch.Tensor,
+    ks_rho: torch.Tensor,
+    ks_v: torch.Tensor,
+    pieces_mask: torch.Tensor,
+    arz_physics: "nn.Module",
+    scale: nn.Parameter,
+    damping_sharpness: nn.Parameter | None = None,
+    t_coll: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Backward-characteristic attention bias for ARZ traffic flow.
+
+    For each query (t, x) and segment k, traces two backward characteristics
+    using the ARZ eigenvalues lam1=v and lam2=v-gamma*rho^gamma. The influence
+    zone spans from the slower to the faster characteristic foot. Queries inside
+    this zone get bias=0; distant queries get large negative bias.
+
+    Args:
+        t_coords: (B, nt, nx) time coordinates.
+        x_coords: (B, nt, nx) space coordinates.
+        xs: (B, K+1) breakpoint positions.
+        ks_rho: (B, K) density piece values.
+        ks_v: (B, K) velocity piece values.
+        pieces_mask: (B, K) validity mask.
+        arz_physics: ARZPhysics instance with eigenvalues() method.
+        scale: Learnable scale parameter.
+        damping_sharpness: Learnable sharpness for collision-time damping.
+        t_coll: (B, K) learned collision times (optional).
+
+    Returns:
+        Attention bias (B, nt, nx, K), negative values suppress attention.
+    """
+    B, nt, nx = t_coords.shape
+    K = ks_rho.shape[1]
+
+    # Eigenvalues per segment: (B, K)
+    lam1, lam2 = arz_physics.eigenvalues(ks_rho, ks_v)  # lam1 > lam2
+
+    # Segment boundaries: (B, 1, 1, K)
+    x_left = xs[:, :-1].unsqueeze(1).unsqueeze(1)
+    x_right = xs[:, 1:].unsqueeze(1).unsqueeze(1)
+
+    # Query coordinates: (B, nt, nx, 1)
+    t_exp = t_coords.unsqueeze(-1)
+    x_exp = x_coords.unsqueeze(-1)
+
+    # Eigenvalues expanded: (B, 1, 1, K)
+    lam1_exp = lam1.unsqueeze(1).unsqueeze(1)
+    lam2_exp = lam2.unsqueeze(1).unsqueeze(1)
+
+    # Backward characteristic feet define an influence interval per segment.
+    # Foot of faster wave: y_fast = x - lam1 * t (lam1 >= lam2)
+    # Foot of slower wave: y_slow = x - lam2 * t
+    # The influence zone at (t,x) for segment k is [y_slow, y_fast]
+    # (since lam1 > lam2, y_fast < y_slow in backward tracing, but
+    #  x - lam2*t > x - lam1*t, so y_slow > y_fast)
+    y_fast = x_exp - lam1_exp * t_exp  # (B, nt, nx, K) — smaller
+    y_slow = x_exp - lam2_exp * t_exp  # (B, nt, nx, K) — larger
+
+    # Distance outside segment [x_left, x_right] from the influence interval
+    # If the whole interval [y_fast, y_slow] is to the left of x_left,
+    # distance = x_left - y_slow. If to the right, distance = y_fast - x_right.
+    d_outside = torch.relu(x_left - y_slow) + torch.relu(y_fast - x_right)
+
+    # Negative bias: 0 inside cone, large negative outside
+    bias = -scale.abs() * d_outside.pow(2)
+
+    # Collision-time damping
+    if damping_sharpness is not None:
+        if t_coll is None:
+            # Analytical collision time: gap / speed_diff between neighbors
+            widths = xs[:, 1:] - xs[:, :-1]  # (B, K)
+
+            # Use the fastest wave (lam1) of left neighbor vs slowest (lam2) of current
+            lam1_left = F.pad(lam1[:, :-1], (1, 0))
+            lam1_left[:, 0] = lam1[:, 0]
+            dx_left = F.pad(widths[:, :-1], (1, 0))
+            dx_left[:, 0] = widths[:, 0]
+            speed_diff_left = (lam1_left - lam2).abs().clamp(min=1e-3)
+
+            # Right neighbor: current fastest vs right slowest
+            lam2_right = F.pad(lam2[:, 1:], (0, 1))
+            lam2_right[:, -1] = lam2[:, -1]
+            dx_right = F.pad(widths[:, 1:], (0, 1))
+            dx_right[:, -1] = widths[:, -1]
+            speed_diff_right = (lam1 - lam2_right).abs().clamp(min=1e-3)
+
+            t_coll = torch.minimum(
+                dx_left / speed_diff_left,
+                dx_right / speed_diff_right,
+            )  # (B, K)
+
+        t_coll_exp = t_coll.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+        t_exp_broad = t_coords.unsqueeze(-1)  # (B, nt, nx, 1)
+        damping = torch.sigmoid(
+            damping_sharpness.abs() * (t_coll_exp - t_exp_broad)
+        )  # (B, nt, nx, K)
+
+        bias = bias * damping
+
+    # Mask padded segments with large negative value
+    mask = pieces_mask.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+    bias = bias * mask + (~mask.bool()).float() * (-1e9)
+
+    return bias  # (B, nt, nx, K)
