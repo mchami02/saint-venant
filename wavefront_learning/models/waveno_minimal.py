@@ -32,6 +32,7 @@ import torch.nn as nn
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.lwr_bias import LWRBias
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
+from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
 
