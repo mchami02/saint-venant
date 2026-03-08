@@ -107,15 +107,27 @@ class WaveNOMinimal(nn.Module):
         )
 
         # Stage 2: Query encoder (Fourier + MLP)
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_freq_t, include_input=True
-        )
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_freq_x, include_input=True
-        )
-        query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        if num_freq_t is not None:
+            self.fourier_t = FourierFeatures(
+                num_frequencies=num_freq_t, include_input=True
+            )
+            query_t_dim = self.fourier_t.output_dim
+        else:
+            self.fourier_t = None
+            query_t_dim = 1
+
+        if num_freq_x is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_freq_x, include_input=True
+            )
+            query_x_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            query_x_dim = 1
+
+        query_input_dim = query_t_dim + query_x_dim
         self.query_mlp = nn.Sequential(
-            nn.Linear(2, hidden_dim),
+            nn.Linear(query_input_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
