@@ -37,7 +37,7 @@ class SegmentPhysicsEncoder(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_frequencies: int = 8,
+        num_frequencies: int | None = 8,
         num_layers: int = 2,
         flux: Flux | None = None,
         include_cumulative_mass: bool = True,
@@ -47,15 +47,20 @@ class SegmentPhysicsEncoder(nn.Module):
         self.flux = flux or DEFAULT_FLUX()
         self.include_cumulative_mass = include_cumulative_mass
 
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_frequencies, include_input=True
-        )
+        if num_frequencies is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_frequencies, include_input=True
+            )
+            spatial_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            spatial_dim = 1  # raw scalar
 
-        # Input: fourier(x_center) + fourier(width) + scalar features
+        # Input: 2 * spatial_dim (x_center + width) + scalar features
         # With cumulative mass: [rho, lambda, flux_val, N_k_normalized] = 4
         # Without: [rho, lambda, flux_val] = 3
         num_scalars = 4 if include_cumulative_mass else 3
-        input_dim = 2 * self.fourier_x.output_dim + num_scalars
+        input_dim = 2 * spatial_dim + num_scalars
 
         layers = []
         in_dim = input_dim
@@ -95,13 +100,17 @@ class SegmentPhysicsEncoder(nn.Module):
         lambda_k = self.flux.derivative(ks)  # (B, K)
         flux_k = self.flux(ks)  # (B, K)
 
-        # Fourier encode spatial features
-        x_center_enc = self.fourier_x(
-            x_center.reshape(-1)
-        ).reshape(B, K, -1)  # (B, K, F)
-        width_enc = self.fourier_x(
-            width.reshape(-1)
-        ).reshape(B, K, -1)  # (B, K, F)
+        # Encode spatial features
+        if self.fourier_x is not None:
+            x_center_enc = self.fourier_x(
+                x_center.reshape(-1)
+            ).reshape(B, K, -1)  # (B, K, F)
+            width_enc = self.fourier_x(
+                width.reshape(-1)
+            ).reshape(B, K, -1)  # (B, K, F)
+        else:
+            x_center_enc = x_center.unsqueeze(-1)  # (B, K, 1)
+            width_enc = width.unsqueeze(-1)  # (B, K, 1)
 
         # Concatenate all features
         if self.include_cumulative_mass:
@@ -423,15 +432,20 @@ class TimeConditioner(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_time_frequencies: int = 8,
+        num_time_frequencies: int | None = 8,
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_time_frequencies, include_input=True
-        )
-        # Input: fourier(t) + seg_emb -> scale (gamma) and shift (beta)
-        input_dim = self.fourier_t.output_dim + hidden_dim
+        if num_time_frequencies is not None:
+            self.fourier_t = FourierFeatures(
+                num_frequencies=num_time_frequencies, include_input=True
+            )
+            t_dim = self.fourier_t.output_dim
+        else:
+            self.fourier_t = None
+            t_dim = 1  # raw scalar
+        # Input: t_encoding + seg_emb -> scale (gamma) and shift (beta)
+        input_dim = t_dim + hidden_dim
         self.film_net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
@@ -464,8 +478,11 @@ class TimeConditioner(nn.Module):
         B, K, H = seg_emb.shape
         nt = t_unique.shape[1]
 
-        # Fourier-encode unique times: (B, nt) -> (B, nt, F_t)
-        t_enc = self.fourier_t(t_unique.reshape(-1)).reshape(B, nt, -1)
+        # Encode unique times: (B, nt) -> (B, nt, F_t)
+        if self.fourier_t is not None:
+            t_enc = self.fourier_t(t_unique.reshape(-1)).reshape(B, nt, -1)
+        else:
+            t_enc = t_unique.unsqueeze(-1)  # (B, nt, 1)
 
         # Expand for (time, segment) pairs — much smaller than (query, segment)
         t_enc_exp = t_enc.unsqueeze(2).expand(-1, -1, K, -1)  # (B, nt, K, F_t)

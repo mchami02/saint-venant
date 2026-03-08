@@ -65,9 +65,9 @@ class WaveNOMinimal(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_freq_t: int = 8,
-        num_freq_x: int = 8,
-        num_seg_frequencies: int = 8,
+        num_freq_t: int | None = 8,
+        num_freq_x: int | None = 8,
+        num_seg_frequencies: int | None = 8,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
@@ -109,13 +109,25 @@ class WaveNOMinimal(nn.Module):
         )
 
         # Stage 2: Query encoder (Fourier + MLP)
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_freq_t, include_input=True
-        )
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_freq_x, include_input=True
-        )
-        query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        if num_freq_t is not None:
+            self.fourier_t = FourierFeatures(
+                num_frequencies=num_freq_t, include_input=True
+            )
+            query_t_dim = self.fourier_t.output_dim
+        else:
+            self.fourier_t = None
+            query_t_dim = 1
+
+        if num_freq_x is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_freq_x, include_input=True
+            )
+            query_x_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            query_x_dim = 1
+
+        query_input_dim = query_t_dim + query_x_dim
         self.query_mlp = nn.Sequential(
             nn.Linear(query_input_dim, hidden_dim),
             nn.ReLU(),
@@ -210,8 +222,8 @@ class WaveNOMinimal(nn.Module):
         # Stage 2: Query encoding
         t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
         x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
+        t_enc = self.fourier_t(t_flat) if self.fourier_t is not None else t_flat.unsqueeze(-1)
+        x_enc = self.fourier_x(x_flat) if self.fourier_x is not None else x_flat.unsqueeze(-1)
         query_features = torch.cat([t_enc, x_enc], dim=-1)
         query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
         query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)
