@@ -33,6 +33,7 @@ model_plot_preset:
   WaveNOAblation: grid_minimal
   WaveNOAblationBias: grid_minimal
   WaveNOAblationDamp: grid_minimal
+  WaveNOAblationBiasFiLM: grid_minimal
   WaveNOAblationFiLM: grid_minimal
   WaveNOAblationCrossAttn: grid_minimal
   WaveNOAblationFull: grid_minimal
@@ -76,6 +77,7 @@ model_transform:
   WaveNOAblation: null
   WaveNOAblationBias: null
   WaveNOAblationDamp: null
+  WaveNOAblationBiasFiLM: null
   WaveNOAblationFiLM: null
   WaveNOAblationCrossAttn: null
   WaveNOAblationFull: null

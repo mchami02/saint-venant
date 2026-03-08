@@ -65,6 +65,7 @@ wavefront_learning/
 │       ├── cross_decoder.py      # CrossDecoderLayer, CrossDecoder (Nadaraya-Watson)
 │       ├── shock_gnn.py          # GatedMPNNLayer, ShockGNN (optional, needs torch_geometric)
 │       ├── flux.py               # Flux interface, GreenshieldsFlux, TriangularFlux
+│       ├── lwr_bias.py           # LWRBias: per-segment attention bias from LWR interface dynamics
 │       ├── wave_builder.py          # build_initial_waves (initial wave construction with STE)
 │       ├── wave_reconstructor.py    # reconstruct_grid (type-aware: shock/rarefaction/bent shock)
 │       ├── collision_processor.py   # process_collisions (type-aware collision loop)
@@ -113,7 +114,8 @@ wavefront_learning/
 ├── testing/
 │   ├── __init__.py               # Re-exports all test functions
 │   ├── test_running.py           # Sanity checks, profiling, inference testing
-│   └── test_results.py           # Evaluation metrics, sample collection, high-res testing
+│   ├── test_results.py           # Evaluation metrics, sample collection, high-res testing
+│   └── test_lwr_bias.py          # Standalone pytest tests for LWRBias module
 ├── artifacts/                    # Saved model checkpoints (versioned)
 ├── wandb/                        # W&B run logs (gitignored)
 ├── ClassifierTrajDeepONet.pth    # Saved model checkpoint
@@ -217,7 +219,7 @@ wavefront_learning/
   - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`, `build_shock_aware_waveno()`
 - **waveno_minimal.py** — Stripped-down WaveNO ablation baseline (core 5-stage pipeline only) with toggle flags for controlled experiments.
   - `WaveNOMinimal`, `build_waveno_minimal()`
-  - Ablation builders: `build_waveno_ablation()`, `build_waveno_ablation_bias()`, `build_waveno_ablation_damp()`, `build_waveno_ablation_film()`, `build_waveno_ablation_cross_attn()`, `build_waveno_ablation_full()`, `build_waveno_ablation_film_only()`, `build_waveno_ablation_cross_attn_only()`
+  - Ablation builders: `build_waveno_ablation()`, `build_waveno_ablation_bias()`, `build_waveno_ablation_damp()`, `build_waveno_ablation_bias_film()`, `build_waveno_ablation_film()`, `build_waveno_ablation_cross_attn()`, `build_waveno_ablation_full()`, `build_waveno_ablation_film_only()`, `build_waveno_ablation_cross_attn_only()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
   - `WaveFrontModel`, `build_wavefront_model()`
 - **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.
@@ -243,6 +245,7 @@ wavefront_learning/
 - **cross_decoder.py** — `CrossDecoderLayer`, `CrossDecoder`
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
+- **lwr_bias.py** — `LWRBias` (per-segment attention bias using shock/rarefaction classification at IC interfaces, with optional collision-time damping)
 - **wave_builder.py** — `build_initial_waves()` (STE-based initial wave construction from discontinuity predictions)
 - **wave_reconstructor.py** — `reconstruct_grid()` (type-aware grid reconstruction for shocks, rarefaction fans, bent shocks)
 - **collision_processor.py** — `process_collisions()` (type-aware collision loop: shock-shock, rar-rar, shock-rar→bent shock)

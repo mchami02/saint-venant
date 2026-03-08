@@ -15,7 +15,9 @@ import argparse
 
 
 def _coerce_type(value: str):
-    """Auto-coerce a string CLI value to bool / int / float / str."""
+    """Auto-coerce a string CLI value to None / bool / int / float / str."""
+    if value.lower() in ("none", "null"):
+        return None
     if value.lower() in ("true", "yes"):
         return True
     if value.lower() in ("false", "no"):
@@ -209,7 +211,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--initial_damping_sharpness",
         type=float,
-        help="Initial sharpness for collision-time bias damping in WaveNO",
+        help="Initial sharpness for LWRBias collision-time damping (learnable)",
     )
     parser.add_argument(
         "--dropout",

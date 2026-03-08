@@ -5,8 +5,8 @@ matter most:
 
     1. SegmentPhysicsEncoder — encode IC segments with physics features
     1b. Self-attention over segments — contextualize embeddings
-    2. Fourier query encoding — FourierFeatures(t) + FourierFeatures(x) → MLP
-    3. compute_characteristic_bias — backward characteristic foot penalty with damping
+    2. Raw (t, x) query encoding — MLP on raw coordinates
+    3. LWRBias — shock/rarefaction-aware attention bias with time damping
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
     5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
 
@@ -21,7 +21,7 @@ Segment embeddings are contextualized (segments know about neighbors)
 but static across time. Time dependence enters only through the query
 encoding and the characteristic bias.
 
-Ablation flags (use_char_bias, use_damping, use_film, use_cross_seg_attn)
+Ablation flags (use_char_bias, use_film, use_cross_seg_attn)
 allow toggling individual components for controlled experiments. See the
 build_waveno_ablation_* factory functions for predefined configurations.
 """
@@ -29,10 +29,8 @@ build_waveno_ablation_* factory functions for predefined configurations.
 import torch
 import torch.nn as nn
 
-from .base.biased_cross_attention import (
-    BiasedCrossDecoderLayer,
-    compute_characteristic_bias,
-)
+from .base.biased_cross_attention import BiasedCrossDecoderLayer
+from .base.lwr_bias import LWRBias
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
 from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
@@ -44,22 +42,18 @@ class WaveNOMinimal(nn.Module):
 
     Args:
         hidden_dim: All embedding dimensions.
-        num_freq_t: Fourier frequency bands for time in query encoder.
-        num_freq_x: Fourier frequency bands for space in query encoder.
         num_seg_frequencies: Fourier frequency bands for segment encoder.
         num_seg_mlp_layers: MLP depth in segment encoder.
         num_self_attn_layers: Self-attention layers for segment interaction.
         num_cross_layers: Biased cross-attention layers (queries → segments).
         num_heads: Attention heads for self and cross attention.
-        initial_bias_scale: Initial characteristic bias scale.
-        initial_damping_sharpness: Initial sharpness for collision-time damping.
+        initial_damping_sharpness: Initial sharpness for LWRBias
+            collision-time damping (learnable).
         flux: Flux function instance.
         local_features: Include cumulative mass in segment encoder.
         dropout: Dropout rate.
-        use_char_bias: Enable characteristic attention bias. When False,
+        use_char_bias: Enable LWR attention bias. When False,
             cross-attention is unbiased (attn_mask=None).
-        use_damping: Enable collision-time damping on the characteristic
-            bias. Requires use_char_bias=True.
         use_film: Enable FiLM time conditioning on segment embeddings.
         use_cross_seg_attn: Enable per-timestep cross-segment attention.
         num_cross_segment_layers: Number of cross-segment attention layers
@@ -69,36 +63,28 @@ class WaveNOMinimal(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_freq_t: int = 8,
-        num_freq_x: int = 8,
-        num_seg_frequencies: int = 8,
+        num_freq_t: int | None = 8,
+        num_freq_x: int | None = 8,
+        num_seg_frequencies: int | None = 8,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
         num_heads: int = 4,
-        initial_bias_scale: float = 5.0,
         initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
+        use_damping: bool = True,
         local_features: bool = True,
         dropout: float = 0.05,
         use_char_bias: bool = True,
-        use_damping: bool = True,
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
     ):
         super().__init__()
 
-        if use_damping and not use_char_bias:
-            raise ValueError(
-                "use_damping=True requires use_char_bias=True "
-                "(damping modulates the characteristic bias)."
-            )
-
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.use_char_bias = use_char_bias
-        self.use_damping = use_damping
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
         flux = flux or DEFAULT_FLUX()
@@ -121,13 +107,25 @@ class WaveNOMinimal(nn.Module):
         )
 
         # Stage 2: Query encoder (Fourier + MLP)
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_freq_t, include_input=True
-        )
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_freq_x, include_input=True
-        )
-        query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        if num_freq_t is not None:
+            self.fourier_t = FourierFeatures(
+                num_frequencies=num_freq_t, include_input=True
+            )
+            query_t_dim = self.fourier_t.output_dim
+        else:
+            self.fourier_t = None
+            query_t_dim = 1
+
+        if num_freq_x is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_freq_x, include_input=True
+            )
+            query_x_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            query_x_dim = 1
+
+        query_input_dim = query_t_dim + query_x_dim
         self.query_mlp = nn.Sequential(
             nn.Linear(query_input_dim, hidden_dim),
             nn.ReLU(),
@@ -153,12 +151,12 @@ class WaveNOMinimal(nn.Module):
                 ]
             )
 
-        # Stage 3: Characteristic bias scale + collision-time damping (conditional)
+        # Stage 3: LWR attention bias (conditional)
         if use_char_bias:
-            self.bias_scale = nn.Parameter(torch.tensor(initial_bias_scale))
-        if use_damping:
-            self.damping_sharpness = nn.Parameter(
-                torch.tensor(initial_damping_sharpness)
+            self.lwr_bias = LWRBias(
+                initial_damping_sharpness=initial_damping_sharpness,
+                flux=flux,
+                use_damping=use_damping,
             )
 
         # Stage 4: Biased cross-attention layers
@@ -254,18 +252,11 @@ class WaveNOMinimal(nn.Module):
             kv = kv * pieces_mask.unsqueeze(1).unsqueeze(-1)  # re-zero
             kv = kv.reshape(B * nt, K, self.hidden_dim)
 
-        # Stage 3: Characteristic attention bias (conditional)
+        # Stage 3: LWR attention bias (conditional)
         if self.use_char_bias:
-            damping = self.damping_sharpness if self.use_damping else None
-            char_bias = compute_characteristic_bias(
-                t_coords,
-                x_coords,
-                xs,
-                ks,
-                pieces_mask,
-                self.flux,
-                self.bias_scale,
-                damping_sharpness=damping,
+            ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
+            char_bias = self.lwr_bias(
+                ic_data, (t_coords, x_coords)
             )  # (B, nt, nx, K)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
@@ -327,14 +318,11 @@ def build_waveno_minimal(args: dict) -> WaveNOMinimal:
 
     return WaveNOMinimal(
         hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
-        initial_bias_scale=args.get("initial_bias_scale", 5.0),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
@@ -348,14 +336,11 @@ def _build_ablation(args: dict, **flag_overrides) -> WaveNOMinimal:
 
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
-        initial_bias_scale=args.get("initial_bias_scale", 5.0),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
@@ -368,54 +353,61 @@ def _build_ablation(args: dict, **flag_overrides) -> WaveNOMinimal:
 def build_waveno_ablation(args: dict) -> WaveNOMinimal:
     """Bare minimum: unbiased cross-attention, no extras."""
     return _build_ablation(
-        args, use_char_bias=False, use_damping=False, use_film=False, use_cross_seg_attn=False
+        args, use_char_bias=False, use_film=False, use_cross_seg_attn=False
     )
 
 
 def build_waveno_ablation_bias(args: dict) -> WaveNOMinimal:
-    """+ characteristic bias (no damping)."""
+    """+ LWR bias (without damping)."""
     return _build_ablation(
         args, use_char_bias=True, use_damping=False, use_film=False, use_cross_seg_attn=False
     )
 
 
 def build_waveno_ablation_damp(args: dict) -> WaveNOMinimal:
-    """+ characteristic bias + collision-time damping (= current WaveNOMinimal)."""
+    """+ LWR bias + collision-time damping."""
     return _build_ablation(
         args, use_char_bias=True, use_damping=True, use_film=False, use_cross_seg_attn=False
     )
 
 
 def build_waveno_ablation_film(args: dict) -> WaveNOMinimal:
-    """+ characteristic bias + damping + FiLM time conditioning."""
+    """+ LWR bias + FiLM time conditioning."""
     return _build_ablation(
-        args, use_char_bias=True, use_damping=True, use_film=True, use_cross_seg_attn=False
+        args, use_char_bias=True, use_film=True, use_cross_seg_attn=False
     )
 
 
 def build_waveno_ablation_cross_attn(args: dict) -> WaveNOMinimal:
-    """+ characteristic bias + damping + cross-segment attention."""
+    """+ LWR bias + cross-segment attention."""
     return _build_ablation(
-        args, use_char_bias=True, use_damping=True, use_film=False, use_cross_seg_attn=True
+        args, use_char_bias=True, use_film=False, use_cross_seg_attn=True
     )
 
 
 def build_waveno_ablation_full(args: dict) -> WaveNOMinimal:
     """All components except trajectories."""
     return _build_ablation(
-        args, use_char_bias=True, use_damping=True, use_film=True, use_cross_seg_attn=True
+        args, use_char_bias=True, use_film=True, use_cross_seg_attn=True
     )
 
 
 def build_waveno_ablation_film_only(args: dict) -> WaveNOMinimal:
-    """FiLM only (no characteristic bias)."""
+    """FiLM only (no LWR bias)."""
     return _build_ablation(
-        args, use_char_bias=False, use_damping=False, use_film=True, use_cross_seg_attn=False
+        args, use_char_bias=False, use_film=True, use_cross_seg_attn=False
+    )
+
+
+def build_waveno_ablation_bias_film(args: dict) -> WaveNOMinimal:
+    """+ LWR bias (no damping) + FiLM time conditioning."""
+    return _build_ablation(
+        args, use_char_bias=True, use_damping=False, use_film=True, use_cross_seg_attn=False
     )
 
 
 def build_waveno_ablation_cross_attn_only(args: dict) -> WaveNOMinimal:
-    """Cross-segment attention only (no characteristic bias)."""
+    """Cross-segment attention only (no LWR bias)."""
     return _build_ablation(
-        args, use_char_bias=False, use_damping=False, use_film=False, use_cross_seg_attn=True
+        args, use_char_bias=False, use_film=False, use_cross_seg_attn=True
     )

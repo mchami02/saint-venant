@@ -54,6 +54,7 @@ from models.waveno import (
 from models.waveno_minimal import (
     build_waveno_ablation,
     build_waveno_ablation_bias,
+    build_waveno_ablation_bias_film,
     build_waveno_ablation_cross_attn,
     build_waveno_ablation_cross_attn_only,
     build_waveno_ablation_damp,
@@ -95,6 +96,7 @@ MODELS = {
     "WaveNOAblation": build_waveno_ablation,
     "WaveNOAblationBias": build_waveno_ablation_bias,
     "WaveNOAblationDamp": build_waveno_ablation_damp,
+    "WaveNOAblationBiasFiLM": build_waveno_ablation_bias_film,
     "WaveNOAblationFiLM": build_waveno_ablation_film,
     "WaveNOAblationCrossAttn": build_waveno_ablation_cross_attn,
     "WaveNOAblationFull": build_waveno_ablation_full,
