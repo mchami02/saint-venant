@@ -302,13 +302,13 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         args = vars(args)
 
     kwargs = dict(
-        hidden_dim=args.get("hidden_dim", 64),
+        hidden_dim=args.get("hidden_dim", 96),
         num_freq_t=args.get("num_freq_t", None),
         num_freq_x=args.get("num_freq_x", None),
         num_seg_frequencies=args.get("num_seg_frequencies", None),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
-        num_self_attn_layers=args.get("num_self_attn_layers", 2),
-        num_cross_layers=args.get("num_cross_layers", 2),
+        num_self_attn_layers=args.get("num_self_attn_layers", 3),
+        num_cross_layers=args.get("num_cross_layers", 3),
         num_heads=args.get("num_heads", 4),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
