@@ -105,18 +105,28 @@ Use `--no_wandb` flag to disable logging.
 | **EncoderDecoder** | Transformer encoder + axial attention decoder | `{output_grid}` |
 | **EncoderDecoderCross** | Transformer encoder + cross-attention decoder | `{output_grid}` |
 | **ECARZ** | EncoderDecoderCross with 2-channel output for ARZ (rho, v) | `{output_grid}` (B,2,T,X) |
-| **WaveNOBase** | WaveNO without trajectory prediction (grid-only ablation) | `{output_grid}` |
-| **WaveNOCls** | WaveNO + classifier head to filter breakpoints | `{positions, existence, output_grid}` |
-| **WaveNOLocal** | WaveNO without cumulative mass (N_k) feature | `{positions, output_grid}` |
-| **WaveNOIndepTraj** | WaveNO with independent trajectory from raw discontinuities | `{positions, output_grid}` |
-| **WaveNODisc** | WaveNO with discontinuity tokens instead of segment tokens | `{positions, output_grid}` |
+| **WaveNO** | Default WaveNO (bias + FiLM, no trajectories) | `{output_grid}` |
+| **WaveNOBare** | Bare minimum: unbiased cross-attention | `{output_grid}` |
+| **WaveNOBiasOnly** | + LWR bias (no damping) | `{output_grid}` |
+| **WaveNOBiasDamp** | + LWR bias + damping | `{output_grid}` |
+| **WaveNODamp** | + LWR bias + damping + FiLM | `{output_grid}` |
+| **WaveNODampCrossAttn** | + LWR bias + damping + cross-segment attention | `{output_grid}` |
+| **WaveNOAll** | All components except trajectories | `{output_grid}` |
+| **WaveNOFiLMOnly** | FiLM only (no LWR bias) | `{output_grid}` |
+| **WaveNOCrossAttnOnly** | Cross-segment attention only (no LWR bias) | `{output_grid}` |
+| **WaveNOFull** | Full WaveNOFull with trajectory prediction + boundary features | `{positions, output_grid}` |
+| **WaveNOFullBase** | WaveNOFull without trajectory prediction (grid-only ablation) | `{output_grid}` |
+| **WaveNOFullCls** | WaveNOFull + classifier head to filter breakpoints | `{positions, existence, output_grid}` |
+| **WaveNOFullLocal** | WaveNOFull without cumulative mass (N_k) feature | `{positions, output_grid}` |
+| **WaveNOFullIndepTraj** | WaveNOFull with independent trajectory from raw discontinuities | `{positions, output_grid}` |
+| **WaveNOFullDisc** | WaveNOFull with discontinuity tokens instead of segment tokens | `{positions, output_grid}` |
 | **CTTBiased** | CTT + characteristic attention bias (ablation alias) | `{positions, existence, output_grid}` |
 | **CTTSegPhysics** | CTT + physics features in disc encoder | `{positions, existence, output_grid}` |
 | **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |
-| **CTTSeg** | CTT with segment tokens (like WaveNO) instead of discontinuities | `{positions, existence, output_grid}` |
+| **CTTSeg** | CTT with segment tokens (like WaveNOFull) instead of discontinuities | `{positions, existence, output_grid}` |
 | **TransformerSeg** | Segment-based encoding + cross-attention density decoder, no trajectories | `{output_grid}` |
 | **ShockAwareDeepONet** | Dual-head DeepONet: shared trunk, solution + shock proximity heads | `{output_grid, shock_proximity}` |
-| **ShockAwareWaveNO** | WaveNO with shock proximity head on cross-attention features | `{positions, output_grid, shock_proximity}` |
+| **ShockAwareWaveNOFull** | WaveNOFull with shock proximity head on cross-attention features | `{positions, output_grid, shock_proximity}` |
 | **NeuralFVSolver** | Learned FV time-marching with stencil features + shock proximity | `{output_grid}` |
 | **WaveNOARZ** | WaveNO adapted for ARZ traffic flow (2-channel: rho, v) with trajectory prediction | `{positions, output_grid}` (B,2,T,X) |
 | **WaveNOARZBase** | WaveNOARZ without trajectory prediction (grid-only) | `{output_grid}` (B,2,T,X) |

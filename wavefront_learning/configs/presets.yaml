@@ -7,8 +7,8 @@ model_loss_preset:
   CVAEDeepONet: cvae
   TrajTransformer: traj_regularized
   ShockAwareDeepONet: shock_proximity
-  ShockAwareWaveNO: shock_proximity
-  AutoregressiveWaveNO: traj_regularized
+  ShockAwareWaveNOFull: shock_proximity
+  AutoregressiveWaveNOFull: traj_regularized
   NeuralFVSolver: mse_wasserstein
   WaveNOARZ: arz_pde_shocks
 
@@ -17,28 +17,28 @@ model_loss_preset:
 model_plot_preset:
   TrajDeepONet: traj_residual
   TrajTransformer: traj_residual
-  WaveNO: traj_residual
-  WaveNOLocal: traj_residual
-  WaveNOIndepTraj: traj_residual
-  WaveNODisc: traj_residual
+  WaveNOFull: traj_residual
+  WaveNOFullLocal: traj_residual
+  WaveNOFullIndepTraj: traj_residual
+  WaveNOFullDisc: traj_residual
   ClassifierTrajTransformer: traj_existence
   ClassifierAllTrajTransformer: traj_existence
   BiasedClassifierTrajTransformer: traj_existence
-  WaveNOCls: traj_existence
+  WaveNOFullCls: traj_existence
   CTTBiased: traj_existence
   CTTSegPhysics: traj_existence
   CTTFiLM: traj_existence
   CTTSeg: traj_existence
   CharNO: charno
-  WaveNOMinimal: grid_minimal
-  WaveNOAblation: grid_minimal
-  WaveNOAblationBias: grid_minimal
-  WaveNOAblationDamp: grid_minimal
-  WaveNOAblationFiLM: grid_minimal
-  WaveNOAblationCrossAttn: grid_minimal
-  WaveNOAblationFull: grid_minimal
-  WaveNOAblationFiLMOnly: grid_minimal
-  WaveNOAblationCrossAttnOnly: grid_minimal
+  WaveNO: grid_minimal
+  WaveNOBare: grid_minimal
+  WaveNOBiasOnly: grid_minimal
+  WaveNOBiasDamp: grid_minimal
+  WaveNODamp: grid_minimal
+  WaveNODampCrossAttn: grid_minimal
+  WaveNOAll: grid_minimal
+  WaveNOFiLMOnly: grid_minimal
+  WaveNOCrossAttnOnly: grid_minimal
   TransformerSeg: grid_minimal
   WaveFrontModel: wavefront
   CVAEDeepONet: cvae
@@ -46,8 +46,8 @@ model_plot_preset:
   WaveNOARZ: ecarz
   WaveNOARZBase: ecarz
   ShockAwareDeepONet: shock_proximity
-  ShockAwareWaveNO: traj_residual
-  AutoregressiveWaveNO: traj_residual
+  ShockAwareWaveNOFull: traj_residual
+  AutoregressiveWaveNOFull: traj_residual
   NeuralFVSolver: grid_residual
 
 # Model -> input transform.
@@ -57,7 +57,7 @@ model_transform:
   FNO: ToGridNoCoords
   AutoregressiveFNO: ToGridNoCoords
   AutoregressiveRealFNO: ToGridNoCoords
-  AutoregressiveWaveNO: ToGridNoCoords
+  AutoregressiveWaveNOFull: ToGridNoCoords
   DeepONet: ToGridInput
   EncoderDecoder: ToGridInput
   EncoderDecoderCross: ToGridInput
@@ -71,21 +71,21 @@ model_transform:
   NoTrajTransformer: null
   CharNO: null
   WaveNO: null
-  WaveNOBase: null
-  WaveNOCls: null
-  WaveNOLocal: null
-  WaveNOIndepTraj: null
-  WaveNODisc: null
-  ShockAwareWaveNO: null
-  WaveNOMinimal: null
-  WaveNOAblation: null
-  WaveNOAblationBias: null
-  WaveNOAblationDamp: null
-  WaveNOAblationFiLM: null
-  WaveNOAblationCrossAttn: null
-  WaveNOAblationFull: null
-  WaveNOAblationFiLMOnly: null
-  WaveNOAblationCrossAttnOnly: null
+  WaveNOBare: null
+  WaveNOBiasOnly: null
+  WaveNOBiasDamp: null
+  WaveNODamp: null
+  WaveNODampCrossAttn: null
+  WaveNOAll: null
+  WaveNOFiLMOnly: null
+  WaveNOCrossAttnOnly: null
+  WaveNOFull: null
+  WaveNOFullBase: null
+  WaveNOFullCls: null
+  WaveNOFullLocal: null
+  WaveNOFullIndepTraj: null
+  WaveNOFullDisc: null
+  ShockAwareWaveNOFull: null
   CTTBiased: null
   CTTSegPhysics: null
   CTTFiLM: null

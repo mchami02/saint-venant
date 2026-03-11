@@ -8,7 +8,7 @@ from models.autoregressive_fno import (
     build_autoregressive_fno,
     build_autoregressive_real_fno,
 )
-from models.autoregressive_waveno import build_autoregressive_waveno
+from models.autoregressive_waveno import build_autoregressive_waveno_full
 from models.charno import build_charno
 from models.ctt_seg import build_ctt_seg
 from models.cvae_deeponet import build_cvae_deeponet
@@ -19,9 +19,9 @@ from models.encoder_decoder import (
     build_encoder_decoder_cross,
 )
 from models.fno_wrapper import build_fno
-from models.lno import build_lno
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
+from models.lno import build_lno
 from models.neural_fv_solver import build_neural_fv_solver
 from models.shock_aware_deeponet import build_shock_aware_deeponet
 from models.shock_trajectory_net import build_shock_net
@@ -43,25 +43,25 @@ from models.traj_transformer import (
 from models.transformer_seg import build_transformer_seg
 from models.wavefront_model import build_wavefront_model
 from models.waveno import (
-    build_shock_aware_waveno,
     build_waveno,
-    build_waveno_base,
-    build_waveno_cls,
-    build_waveno_disc,
-    build_waveno_indep_traj,
-    build_waveno_local,
+    build_waveno_all,
+    build_waveno_bare,
+    build_waveno_bias_damp,
+    build_waveno_bias_only,
+    build_waveno_cross_attn_only,
+    build_waveno_damp,
+    build_waveno_damp_cross_attn,
+    build_waveno_film_only,
 )
 from models.waveno_arz import build_waveno_arz, build_waveno_arz_base
-from models.waveno_minimal import (
-    build_waveno_ablation,
-    build_waveno_ablation_bias,
-    build_waveno_ablation_cross_attn,
-    build_waveno_ablation_cross_attn_only,
-    build_waveno_ablation_damp,
-    build_waveno_ablation_film,
-    build_waveno_ablation_film_only,
-    build_waveno_ablation_full,
-    build_waveno_minimal,
+from models.waveno_full import (
+    build_shock_aware_waveno_full,
+    build_waveno_full,
+    build_waveno_full_base,
+    build_waveno_full_cls,
+    build_waveno_full_disc,
+    build_waveno_full_indep_traj,
+    build_waveno_full_local,
 )
 
 # Registry of available models
@@ -74,7 +74,7 @@ MODELS = {
     "FNO": build_fno,
     "AutoregressiveFNO": build_autoregressive_fno,
     "AutoregressiveRealFNO": build_autoregressive_real_fno,
-    "AutoregressiveWaveNO": build_autoregressive_waveno,
+    "AutoregressiveWaveNOFull": build_autoregressive_waveno_full,
     "DeepONet": build_deeponet,
     "EncoderDecoder": build_encoder_decoder,
     "EncoderDecoderCross": build_encoder_decoder_cross,
@@ -86,21 +86,21 @@ MODELS = {
     "NoTrajTransformer": build_no_traj_transformer,
     "CharNO": build_charno,
     "WaveNO": build_waveno,
-    "WaveNOBase": build_waveno_base,
-    "WaveNOCls": build_waveno_cls,
-    "WaveNOLocal": build_waveno_local,
-    "WaveNOIndepTraj": build_waveno_indep_traj,
-    "WaveNODisc": build_waveno_disc,
-    "ShockAwareWaveNO": build_shock_aware_waveno,
-    "WaveNOMinimal": build_waveno_minimal,
-    "WaveNOAblation": build_waveno_ablation,
-    "WaveNOAblationBias": build_waveno_ablation_bias,
-    "WaveNOAblationDamp": build_waveno_ablation_damp,
-    "WaveNOAblationFiLM": build_waveno_ablation_film,
-    "WaveNOAblationCrossAttn": build_waveno_ablation_cross_attn,
-    "WaveNOAblationFull": build_waveno_ablation_full,
-    "WaveNOAblationFiLMOnly": build_waveno_ablation_film_only,
-    "WaveNOAblationCrossAttnOnly": build_waveno_ablation_cross_attn_only,
+    "WaveNOBare": build_waveno_bare,
+    "WaveNOBiasOnly": build_waveno_bias_only,
+    "WaveNOBiasDamp": build_waveno_bias_damp,
+    "WaveNODamp": build_waveno_damp,
+    "WaveNODampCrossAttn": build_waveno_damp_cross_attn,
+    "WaveNOAll": build_waveno_all,
+    "WaveNOFiLMOnly": build_waveno_film_only,
+    "WaveNOCrossAttnOnly": build_waveno_cross_attn_only,
+    "WaveNOFull": build_waveno_full,
+    "WaveNOFullBase": build_waveno_full_base,
+    "WaveNOFullCls": build_waveno_full_cls,
+    "WaveNOFullLocal": build_waveno_full_local,
+    "WaveNOFullIndepTraj": build_waveno_full_indep_traj,
+    "WaveNOFullDisc": build_waveno_full_disc,
+    "ShockAwareWaveNOFull": build_shock_aware_waveno_full,
     "CTTBiased": build_ctt_biased,
     "CTTSegPhysics": build_ctt_seg_physics,
     "CTTFiLM": build_ctt_film,
@@ -115,8 +115,6 @@ MODELS = {
     "WaveNOARZ": build_waveno_arz,
     "WaveNOARZBase": build_waveno_arz_base,
 }
-
-
 
 
 def get_model(model_name: str, args: dict) -> nn.Module:
