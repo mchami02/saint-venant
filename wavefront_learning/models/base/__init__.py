@@ -43,6 +43,7 @@ from .feature_encoders import (
 from .flow_matching import ConditionEncoder, FlowMatchingDenoiser, HeunODESolver
 from .collision_processor import process_collisions
 from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
+from .lwr_bias import LWRBias
 from .regions import RegionTrunk, RegionTrunkSet
 from .transformer_encoder import Encoder
 from .vae_encoder import VAEEncoder
@@ -91,6 +92,7 @@ __all__ = [
     "GreenshieldsFlux",
     "TriangularFlux",
     "DEFAULT_FLUX",
+    "LWRBias",
     "SegmentPhysicsEncoder",
     "DiscontinuityPhysicsEncoder",
     "CharacteristicFeatureComputer",

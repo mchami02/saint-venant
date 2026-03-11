@@ -1,6 +1,6 @@
-"""AutoregressiveWaveNO: Autoregressive Neural Operator with Trajectory Prediction.
+"""AutoregressiveWaveNOFull: Autoregressive Neural Operator with Trajectory Prediction.
 
-Combines WaveNO's segment encoding and trajectory prediction with autoregressive
+Combines WaveNOFull's segment encoding and trajectory prediction with autoregressive
 time-stepping. Both the spatial state and the shock positions evolve step-by-step,
 letting the FNO use shock boundary information and letting trajectories adapt to
 the evolving state.
@@ -37,7 +37,7 @@ from .base.flux import DEFAULT_FLUX, Flux
 from .base.transformer_encoder import EncoderLayer
 
 
-class AutoregressiveWaveNO(nn.Module):
+class AutoregressiveWaveNOFull(nn.Module):
     """Autoregressive Neural Operator with segment-aware trajectory prediction.
 
     Args:
@@ -187,9 +187,7 @@ class AutoregressiveWaveNO(nn.Module):
         right_idx = (torch.arange(D, device=ks.device) + 1).clamp(max=K - 1)
         seg_left = seg_emb[:, left_idx, :]  # (B, D, H)
         seg_right = seg_emb[:, right_idx, :]  # (B, D, H)
-        bp_emb = self.bp_encoder(
-            torch.cat([seg_left, seg_right], dim=-1)
-        )  # (B, D, H)
+        bp_emb = self.bp_encoder(torch.cat([seg_left, seg_right], dim=-1))  # (B, D, H)
         bp_emb = bp_emb * disc_mask.unsqueeze(-1)  # zero out invalid
 
         # === Stage 3: Initialize ===
@@ -221,9 +219,9 @@ class AutoregressiveWaveNO(nn.Module):
             state = (state + self.fno(fno_in)).clamp(0.0, 1.0)  # (B, 1, nx)
 
             # c. Trajectory step: predict position delta
-            pos_enc = self.fourier_pos(
-                positions.reshape(-1)
-            ).reshape(B, D, -1)  # (B, D, F)
+            pos_enc = self.fourier_pos(positions.reshape(-1)).reshape(
+                B, D, -1
+            )  # (B, D, F)
             dt_exp = dt.view(B, 1, 1).expand(B, D, 1)  # (B, D, 1)
             traj_in = torch.cat([bp_emb, pos_enc, dt_exp], dim=-1)  # (B, D, H+F+1)
             delta_pos = self.traj_mlp(traj_in).squeeze(-1).clamp(-0.1, 0.1)  # (B, D)
@@ -235,7 +233,9 @@ class AutoregressiveWaveNO(nn.Module):
 
             # e. Pushforward noise: perturb input to next step (training only)
             if self.training and self.noise_std > 0:
-                state = (state + torch.randn_like(state) * self.noise_std).clamp(0.0, 1.0)
+                state = (state + torch.randn_like(state) * self.noise_std).clamp(
+                    0.0, 1.0
+                )
 
             # f. Teacher forcing: replace state with GT for next step
             if target_grid is not None and torch.rand(1).item() < tf_ratio:
@@ -251,19 +251,19 @@ class AutoregressiveWaveNO(nn.Module):
         }
 
 
-def build_autoregressive_waveno(args: dict) -> AutoregressiveWaveNO:
-    """Factory function for AutoregressiveWaveNO.
+def build_autoregressive_waveno_full(args: dict) -> AutoregressiveWaveNOFull:
+    """Factory function for AutoregressiveWaveNOFull.
 
     Args:
         args: Dict or Namespace with model configuration.
 
     Returns:
-        Configured AutoregressiveWaveNO instance.
+        Configured AutoregressiveWaveNOFull instance.
     """
     if not isinstance(args, dict):
         args = vars(args)
 
-    return AutoregressiveWaveNO(
+    return AutoregressiveWaveNOFull(
         hidden_dim=args.get("hidden_dim", 64),
         num_seg_frequencies=args.get("num_seg_frequencies", 8),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
