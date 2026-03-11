@@ -10,6 +10,8 @@ model_loss_preset:
   ShockAwareWaveNOFull: shock_proximity
   AutoregressiveWaveNOFull: traj_regularized
   NeuralFVSolver: mse_wasserstein
+  WaveNOARZ: arz_pde_shocks
+  WaveNOARZBare: mse
 
 # Model -> plot preset (auto-selected when --plot is None).
 # Models not listed here default to "grid_residual".
@@ -42,6 +44,8 @@ model_plot_preset:
   WaveFrontModel: wavefront
   CVAEDeepONet: cvae
   ECARZ: ecarz
+  WaveNOARZ: ecarz
+  WaveNOARZBare: ecarz
   ShockAwareDeepONet: shock_proximity
   ShockAwareWaveNOFull: traj_residual
   AutoregressiveWaveNOFull: traj_residual
@@ -59,6 +63,8 @@ model_transform:
   EncoderDecoder: ToGridInput
   EncoderDecoderCross: ToGridInput
   ECARZ: ToGridInput
+  WaveNOARZ: null
+  WaveNOARZBase: null
   TrajTransformer: null
   ClassifierTrajTransformer: null
   ClassifierAllTrajTransformer: null
@@ -74,6 +80,8 @@ model_transform:
   WaveNOAll: null
   WaveNOFiLMOnly: null
   WaveNOCrossAttnOnly: null
+  WaveNOARZ: null
+  WaveNOARZBare: null
   WaveNOFull: null
   WaveNOFullBase: null
   WaveNOFullCls: null
@@ -135,6 +143,11 @@ loss_presets:
       weight: 0.1
   mse_shock:
     - name: mse_shock
+      weight: 1.0
+  arz_pde_shocks:
+    - name: mse
+      weight: 1.0
+    - name: arz_pde_shock_residual
       weight: 1.0
 
 # Plot presets.

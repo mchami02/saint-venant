@@ -10,6 +10,9 @@ This module contains reusable components used by main models:
 - Encoder-Decoder components: Encoder, AxialDecoder, CrossDecoder
 """
 
+from .arz_bias import ARZBias
+from .arz_physics import ARZPhysics
+from .arz_segment_encoder import ARZSegmentPhysicsEncoder
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
@@ -51,6 +54,10 @@ from .wave_builder import build_initial_waves
 from .wave_reconstructor import reconstruct_grid
 
 __all__ = [
+    # ARZ components
+    "ARZBias",
+    "ARZPhysics",
+    "ARZSegmentPhysicsEncoder",
     # Base class
     "BaseWavefrontModel",
     # Biased cross-attention
