@@ -31,7 +31,7 @@ cli_defaults:
   # Training
   epochs: 100
   batch_size: 16
-  lr: 0.002
+  lr: 0.003
 
   # Data
   n_samples: 1000
