@@ -17,6 +17,7 @@ This document describes the neural network architectures and loss functions used
    - [LatentDiffusionDeepONet](#latentdiffusiondeeponet)
    - [NeuralFVSolver](#neuralfvsolver)
    - [LNO](#lno)
+   - [WaveNOARZ](#wavenoarz)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -30,6 +31,8 @@ This document describes the neural network architectures and loss functions used
      - [SupervisedTrajectoryLoss](#supervisedtrajectoryloss)
      - [PDEResidualLoss](#pderesidualloss)
      - [PDEShockResidualLoss](#pdeshockresidualloss)
+     - [ARZPDEResidualLoss](#arzpderesidualloss)
+     - [ARZPDEShockResidualLoss](#arzpdeshockresidualloss)
      - [RHResidualLoss](#rhresidualloss)
      - [AccelerationLoss](#accelerationloss)
      - [RegularizeTrajLoss](#regularizetrajloss)
@@ -1451,6 +1454,57 @@ Uses `ToGridNoCoords` transform, default `mse` loss preset, `grid_residual` plot
 
 ---
 
+### WaveNOARZ
+
+**Location**: `models/waveno_arz.py`
+
+**Concept**: WaveNO adapted for the ARZ (Aw-Rascle-Zhang) traffic flow system — a 2-variable hyperbolic system with density (rho) and velocity (v). Same 8-stage architecture as WaveNO with equation-specific adaptations for the encoder, characteristic bias, and output head.
+
+**ARZ system** (conservative form):
+- Mass: $\partial_t \rho + \partial_x(\rho v) = 0$
+- Momentum: $\partial_t(\rho w) + \partial_x(\rho w v) = 0$, where $w = v + \rho^\gamma$
+- Eigenvalues: $\lambda_1 = v$, $\lambda_2 = v - \gamma \rho^\gamma$
+
+**Architecture pseudocode**:
+```
+xs (K+1), ks_rho (K), ks_v (K), pieces_mask (K)
+    -> ARZSegmentPhysicsEncoder                    -> (K, H)
+    -> [EncoderLayer] x L_self                     -> (K, H)
+    -> TimeConditioner (FiLM)                      -> (nt, K, H)
+    -> [CrossSegmentAttention] x L_cross_seg       -> (nt, K, H)
+
+    -> BreakpointEvolution (if predict_trajectories) -> positions (D, nt)
+    -> compute_boundaries                            -> (nt, nx) left/right
+
+t_coords (nt, nx), x_coords (nt, nx), [left, right (nt, nx)]
+    -> FourierFeatures(t) + FourierFeatures(x) [+ FourierFeatures(bounds)]
+    -> query_mlp                                   -> (nt, nx, H)
+
+    -> compute_arz_characteristic_bias             -> (nt, nx, K) bias
+    -> [BiasedCrossDecoderLayer] x L_cross         -> (nt*nx, H)
+    -> output_head Linear(H,H) -> ReLU -> Linear(H,2) -> (nt, nx, 2)
+    -> permute                                     -> output_grid (2, nt, nx)
+```
+
+**ARZ-specific components**:
+
+| Component | File | Difference from LWR WaveNO |
+|-----------|------|---------------------------|
+| `ARZPhysics` | `models/base/arz_physics.py` | Pressure law p(rho)=rho^gamma, two eigenvalues |
+| `ARZSegmentPhysicsEncoder` | `models/base/arz_segment_encoder.py` | 6 scalar features: rho, v, lam1, lam2, p, w |
+| `compute_arz_characteristic_bias` | `models/base/biased_cross_attention.py` | Two eigenvalues define wider influence zone |
+| Output head | inline | 2-channel [rho, v], no [0,1] clamping |
+
+**Variants**:
+- `WaveNOARZ`: Full model with trajectory prediction
+- `WaveNOARZBase`: Grid-only (no trajectory prediction)
+
+**Default configuration**: Same as WaveNO. Additional parameter: `gamma=1.0` (ARZ pressure exponent).
+
+Uses no transform, default `arz_pde_shocks` loss preset, `ecarz` plot preset.
+
+---
+
 ## Losses
 
 ### Unified Loss Interface
@@ -1704,6 +1758,37 @@ $$\mathcal{L}_{PDE\text{-}shock} = \frac{1}{|\mathcal{I}|} \sum_{(t,x) \in \math
 **Optional outputs**: `existence`
 
 **Components returned**: `{"pde_shock_residual": float, "total": float}`
+
+---
+
+#### ARZPDEResidualLoss
+
+**Location**: `losses/pde_residual_arz.py`
+
+PDE residual loss for the ARZ system on the **predicted** grid. Enforces both mass and momentum conservation using central finite differences.
+
+**Residuals** (interior points):
+$$R_1 = \frac{\rho^{t+1} - \rho^{t-1}}{2\Delta t} + \frac{(\rho v)^{x+1} - (\rho v)^{x-1}}{2\Delta x}$$
+
+$$R_2 = \frac{(\rho w)^{t+1} - (\rho w)^{t-1}}{2\Delta t} + \frac{(\rho w v)^{x+1} - (\rho w v)^{x-1}}{2\Delta x}$$
+
+where $w = v + \rho^\gamma$.
+
+**Loss**: $\mathcal{L} = \text{mean}(R_1^2 + R_2^2)$
+
+**Configuration**: `dt`, `dx`, `gamma` (default 1.0)
+
+---
+
+#### ARZPDEShockResidualLoss
+
+**Location**: `losses/pde_residual_arz.py`
+
+Same distance-weighting pattern as `PDEShockResidualLoss` but for the ARZ system. Computes combined residual $R^2 = R_1^2 + R_2^2$ on the ground truth, weighted by distance to predicted shocks.
+
+**Configuration**: `dt`, `dx`, `gamma` (default 1.0), `fp_weight` (default 1.0)
+
+**Components returned**: `{"arz_pde_shock_miss", "arz_pde_shock_fp", "arz_pde_shock_residual", "total"}`
 
 ---
 

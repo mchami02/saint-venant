@@ -130,6 +130,8 @@ Use `--no_wandb` flag to disable logging.
 | **ShockAwareDeepONet** | Dual-head DeepONet: shared trunk, solution + shock proximity heads | `{output_grid, shock_proximity}` |
 | **ShockAwareWaveNOFull** | WaveNOFull with shock proximity head on cross-attention features | `{positions, output_grid, shock_proximity}` |
 | **NeuralFVSolver** | Learned FV time-marching with stencil features + shock proximity | `{output_grid}` |
+| **WaveNOARZ** | WaveNO adapted for ARZ traffic flow (2-channel: rho, v) with trajectory prediction | `{positions, output_grid}` (B,2,T,X) |
+| **WaveNOARZBase** | WaveNOARZ without trajectory prediction (grid-only) | `{output_grid}` (B,2,T,X) |
 
 ## Available Losses
 
@@ -151,6 +153,8 @@ Individual losses (in `losses/`):
 | `entropy` | Lax entropy condition on GT: penalizes missed shocks and false positives |
 | `mse_shock` | MSE on non-shock cells (shocks detected via Lax entropy condition on GT) |
 | `shock_proximity` | Solution MSE + weighted shock proximity MSE |
+| `arz_pde_residual` | ARZ PDE residual (mass + momentum conservation) on predicted grid |
+| `arz_pde_shock_residual` | ARZ PDE residual on GT, weighted by distance to predicted shocks |
 
 Presets (in `loss.py`):
 | Preset | Description |
@@ -163,6 +167,7 @@ Presets (in `loss.py`):
 | `shock_proximity` | shock_proximity (solution MSE + proximity MSE) |
 | `mse_wasserstein` | mse + wasserstein (sharp shocks via W1 distance) |
 | `mse_shock` | mse_shock only (MSE on non-shock cells) |
+| `arz_pde_shocks` | mse + arz_pde_shock_residual (ARZ system) |
 
 Model-to-loss mapping is in `train.py` `MODEL_LOSS_PRESET` dict. When `--loss mse` (default), the preset is auto-selected per model.
 

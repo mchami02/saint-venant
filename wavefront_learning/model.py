@@ -55,6 +55,7 @@ from models.waveno import (
     build_waveno_damp_cross_attn,
     build_waveno_film_only,
 )
+from models.waveno_arz import build_waveno_arz, build_waveno_arz_base
 from models.waveno_full import (
     build_shock_aware_waveno_full,
     build_waveno_full,
@@ -115,6 +116,8 @@ MODELS = {
     "ShockAwareDeepONet": build_shock_aware_deeponet,
     "NeuralFVSolver": build_neural_fv_solver,
     "LNO": build_lno,
+    "WaveNOARZ": build_waveno_arz,
+    "WaveNOARZBase": build_waveno_arz_base,
 }
 
 

@@ -24,6 +24,7 @@ from losses.kl_divergence import KLDivergenceLoss
 from losses.mse import MSELoss
 from losses.mse_shock import MSEShockLoss
 from losses.pde_residual import PDEResidualLoss, PDEShockResidualLoss
+from losses.pde_residual_arz import ARZPDEResidualLoss, ARZPDEShockResidualLoss
 from losses.regularize_traj import RegularizeTrajLoss
 from losses.rh_residual import RHResidualLoss
 from losses.selection_supervision import SelectionSupervisionLoss
@@ -57,6 +58,8 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "flow_matching": FlowMatchingLoss,
     "kl_divergence": KLDivergenceLoss,
     "shock_proximity": ShockProximityLoss,
+    "arz_pde_residual": ARZPDEResidualLoss,
+    "arz_pde_shock_residual": ARZPDEShockResidualLoss,
 }
 
 
@@ -315,6 +318,20 @@ def create_loss_from_args(args) -> nn.Module:
         loss_kwargs["mse_shock"] = {
             "dx": args.dx,
             "min_component_size": getattr(args, "min_component_size", 5),
+        }
+
+    # ARZ losses need gamma in addition to dt/dx
+    gamma = getattr(args, "gamma", 1.0)
+    if hasattr(args, "dt") and hasattr(args, "dx"):
+        loss_kwargs["arz_pde_residual"] = {
+            "dt": args.dt,
+            "dx": args.dx,
+            "gamma": gamma,
+        }
+        loss_kwargs["arz_pde_shock_residual"] = {
+            "dt": args.dt,
+            "dx": args.dx,
+            "gamma": gamma,
         }
 
     return get_loss(args.loss, loss_kwargs=loss_kwargs)

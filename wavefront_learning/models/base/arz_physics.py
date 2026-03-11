@@ -97,3 +97,6 @@ class ARZPhysics(nn.Module):
             Contact speed (= v_R).
         """
         return v_R
+
+    def extra_repr(self) -> str:
+        return f"gamma={self.gamma}"

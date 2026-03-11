@@ -50,6 +50,11 @@ from .pde_residual import (
     compute_pde_residual,
     create_shock_mask,
 )
+from .pde_residual_arz import (
+    ARZPDEResidualLoss,
+    ARZPDEShockResidualLoss,
+    compute_arz_pde_residual,
+)
 from .regularize_traj import RegularizeTrajLoss
 from .rh_residual import RHResidualLoss
 from .selection_supervision import SelectionSupervisionLoss
@@ -99,6 +104,10 @@ __all__ = [
     "SelectionSupervisionLoss",
     # Shock proximity loss
     "ShockProximityLoss",
+    # ARZ losses
+    "ARZPDEResidualLoss",
+    "ARZPDEShockResidualLoss",
+    "compute_arz_pde_residual",
     # Shock utils
     "filter_small_components",
 ]

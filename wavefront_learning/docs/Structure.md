@@ -11,6 +11,7 @@ wavefront_learning/
 ├── training_loop.py              # Training loop primitives (step, epoch, validation, early stopping)
 ├── test.py                       # Testing/evaluation CLI entry point
 ├── eval.sh                       # Shell script for batch evaluation
+├── eval_arz.sh                   # Shell script for ARZ traffic flow evaluation
 ├── configs/
 │   ├── __init__.py               # Re-exports all config submodules
 │   ├── presets.yaml              # All preset mappings as YAML (source of truth)
@@ -45,6 +46,7 @@ wavefront_learning/
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (default: bias + FiLM, ablation variants)
+│   ├── waveno_arz.py             # WaveNOARZ: WaveNO adapted for ARZ traffic flow (2-channel rho+v output)
 │   ├── waveno_full.py            # WaveNOFull: Full Wavefront Neural Operator (trajectory prediction + boundary features)
 │   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
@@ -70,7 +72,9 @@ wavefront_learning/
 │       ├── wave_reconstructor.py    # reconstruct_grid (type-aware: shock/rarefaction/bent shock)
 │       ├── collision_processor.py   # process_collisions (type-aware collision loop)
 │       ├── characteristic_features.py  # SegmentPhysicsEncoder, DiscontinuityPhysicsEncoder, CharacteristicFeatureComputer
-│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, CollisionTimeHead, compute_characteristic_bias, compute_discontinuity_characteristic_bias
+│       ├── arz_physics.py                # ARZPhysics (pressure law, eigenvalues for ARZ system)
+│       ├── arz_segment_encoder.py        # ARZSegmentPhysicsEncoder (segment encoder with rho+v physics features)
+│       ├── biased_cross_attention.py   # BiasedCrossDecoderLayer, CollisionTimeHead, compute_characteristic_bias, compute_discontinuity_characteristic_bias, compute_arz_characteristic_bias
 │       ├── breakpoint_evolution.py     # BreakpointEvolution (adjacent segment pairs → trajectory positions)
 │       ├── vae_encoder.py             # VAEEncoder (2D conv encoder for latent diffusion)
 │       ├── deeponet_decoder.py        # DeepONetDecoder (resolution-invariant branch-trunk decoder)
@@ -88,6 +92,7 @@ wavefront_learning/
 │   ├── existence_regularization.py # ICAnchoringLoss
 │   ├── supervised_trajectory.py  # SupervisedTrajectoryLoss
 │   ├── pde_residual.py           # PDEResidualLoss, PDEShockResidualLoss
+│   ├── pde_residual_arz.py       # ARZPDEResidualLoss, ARZPDEShockResidualLoss
 │   ├── rh_residual.py            # RHResidualLoss
 │   ├── acceleration.py           # AccelerationLoss
 │   ├── regularize_traj.py        # RegularizeTrajLoss
@@ -257,7 +262,9 @@ wavefront_learning/
 - **wave_reconstructor.py** — `reconstruct_grid()` (type-aware grid reconstruction for shocks, rarefaction fans, bent shocks)
 - **collision_processor.py** — `process_collisions()` (type-aware collision loop: shock-shock, rar-rar, shock-rar→bent shock)
 - **characteristic_features.py** — `SegmentPhysicsEncoder`, `DiscontinuityPhysicsEncoder`, `CharacteristicFeatureComputer`
-- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `CollisionTimeHead`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`
+- **arz_physics.py** — `ARZPhysics` (pressure law p(rho)=rho^gamma, eigenvalues for ARZ system)
+- **arz_segment_encoder.py** — `ARZSegmentPhysicsEncoder` (segment encoder with 6 ARZ physics features: rho, v, lam1, lam2, p, w)
+- **biased_cross_attention.py** — `BiasedCrossDecoderLayer`, `CollisionTimeHead`, `compute_characteristic_bias`, `compute_discontinuity_characteristic_bias`, `compute_arz_characteristic_bias`
 - **breakpoint_evolution.py** — `BreakpointEvolution` (predicts breakpoint positions from adjacent segment pairs via cross-attention)
 - **vae_encoder.py** — `VAEEncoder` (2D conv encoder mapping solution grid to latent Gaussian)
 - **deeponet_decoder.py** — `DeepONetDecoder` (resolution-invariant branch-trunk decoder)
@@ -278,6 +285,7 @@ All losses inherit from `BaseLoss` with interface: `forward(input_dict, output_d
 - **existence_regularization.py** — `ICAnchoringLoss` (anchor trajectories to IC positions)
 - **supervised_trajectory.py** — `SupervisedTrajectoryLoss` (supervised when GT available)
 - **pde_residual.py** — `PDEResidualLoss`, `PDEShockResidualLoss`
+- **pde_residual_arz.py** — `ARZPDEResidualLoss`, `ARZPDEShockResidualLoss`, `compute_arz_pde_residual()`
 - **rh_residual.py** — `RHResidualLoss` (Rankine-Hugoniot from sampled densities); also `compute_shock_velocity()`, `sample_density_from_grid()`
 - **acceleration.py** — `AccelerationLoss` (shock detection via acceleration); also `compute_acceleration()`
 - **regularize_traj.py** — `RegularizeTrajLoss` (penalize erratic trajectory jumps)
