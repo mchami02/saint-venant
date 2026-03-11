@@ -116,6 +116,11 @@ wavefront_learning/
 │   ├── test_running.py           # Sanity checks, profiling, inference testing
 │   ├── test_results.py           # Evaluation metrics, sample collection, high-res testing
 │   └── test_lwr_bias.py          # Standalone pytest tests for LWRBias module
+├── notebooks/
+│   ├── visualize_extraction.ipynb # IC grid with extracted discontinuity positions
+│   ├── visualize_losses.ipynb    # Loss component visualization
+│   ├── visualize_bias.ipynb      # LWR vs ARZ attention bias visualization
+│   └── test_wavefront_model.ipynb # WaveFrontModel testing notebook
 ├── artifacts/                    # Saved model checkpoints (versioned)
 ├── wandb/                        # W&B run logs (gitignored)
 ├── ClassifierTrajDeepONet.pth    # Saved model checkpoint
@@ -215,8 +220,8 @@ wavefront_learning/
   - `EncoderDecoder`, `build_encoder_decoder()`, `build_encoder_decoder_cross()`
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
   - `CharNO`, `build_charno()`
-- **waveno.py** — Wavefront Neural Operator (default: bias + FiLM) with ablation variants.
-  - `WaveNO`, `build_waveno()`, `build_waveno_bare()`, `build_waveno_bias_only()`, `build_waveno_bias_damp()`, `build_waveno_damp()`, `build_waveno_damp_cross_attn()`, `build_waveno_all()`, `build_waveno_film_only()`, `build_waveno_cross_attn_only()`
+- **waveno.py** — Wavefront Neural Operator (default: bias + FiLM) with ablation variants. Supports both LWR and ARZ equations via `equation` parameter.
+  - `WaveNO`, `build_waveno()`, `build_waveno_bare()`, `build_waveno_bias_only()`, `build_waveno_bias_damp()`, `build_waveno_damp()`, `build_waveno_damp_cross_attn()`, `build_waveno_all()`, `build_waveno_film_only()`, `build_waveno_cross_attn_only()`, `build_waveno_arz()`, `build_waveno_arz_bare()`
 - **waveno_full.py** — Full Wavefront Neural Operator (trajectory prediction + boundary features + characteristic-biased cross-attention).
   - `WaveNOFull`, `build_waveno_full()`, `build_waveno_full_cls()`, `build_waveno_full_local()`, `build_waveno_full_indep_traj()`, `build_waveno_full_disc()`, `build_waveno_full_base()`, `build_shock_aware_waveno_full()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
@@ -245,6 +250,9 @@ wavefront_learning/
 - **shock_gnn.py** — `GatedMPNNLayer`, `ShockGNN` (optional, requires torch_geometric)
 - **flux.py** — `Flux`, `GreenshieldsFlux`, `TriangularFlux`, `DEFAULT_FLUX`
 - **lwr_bias.py** — `LWRBias` (per-segment attention bias using shock/rarefaction classification at IC interfaces, with optional collision-time damping)
+- **arz_physics.py** — `ARZPhysics` (pressure law, eigenvalues, shock/contact speeds for the ARZ system)
+- **arz_segment_encoder.py** — `ARZSegmentPhysicsEncoder` (segment encoder for 2-variable ARZ ICs with rho, v, eigenvalues, pressure)
+- **arz_bias.py** — `ARZBias` (per-segment attention bias from ARZ interface dynamics: asymmetric lambda_2-wave + lambda_1-contact boundaries)
 - **wave_builder.py** — `build_initial_waves()` (STE-based initial wave construction from discontinuity predictions)
 - **wave_reconstructor.py** — `reconstruct_grid()` (type-aware grid reconstruction for shocks, rarefaction fans, bent shocks)
 - **collision_processor.py** — `process_collisions()` (type-aware collision loop: shock-shock, rar-rar, shock-rar→bent shock)

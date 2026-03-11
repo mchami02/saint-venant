@@ -45,6 +45,8 @@ from models.wavefront_model import build_wavefront_model
 from models.waveno import (
     build_waveno,
     build_waveno_all,
+    build_waveno_arz,
+    build_waveno_arz_bare,
     build_waveno_bare,
     build_waveno_bias_damp,
     build_waveno_bias_only,
@@ -93,6 +95,8 @@ MODELS = {
     "WaveNOAll": build_waveno_all,
     "WaveNOFiLMOnly": build_waveno_film_only,
     "WaveNOCrossAttnOnly": build_waveno_cross_attn_only,
+    "WaveNOARZ": build_waveno_arz,
+    "WaveNOARZBare": build_waveno_arz_bare,
     "WaveNOFull": build_waveno_full,
     "WaveNOFullBase": build_waveno_full_base,
     "WaveNOFullCls": build_waveno_full_cls,

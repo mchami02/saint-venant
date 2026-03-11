@@ -120,6 +120,8 @@ Use `--no_wandb` flag to disable logging.
 | **WaveNOFullLocal** | WaveNOFull without cumulative mass (N_k) feature | `{positions, output_grid}` |
 | **WaveNOFullIndepTraj** | WaveNOFull with independent trajectory from raw discontinuities | `{positions, output_grid}` |
 | **WaveNOFullDisc** | WaveNOFull with discontinuity tokens instead of segment tokens | `{positions, output_grid}` |
+| **WaveNOARZ** | WaveNO for ARZ equations (bias + FiLM, 2-channel output) | `{output_grid}` (B,2,T,X) |
+| **WaveNOARZBare** | Bare WaveNO for ARZ (no bias, no extras) | `{output_grid}` (B,2,T,X) |
 | **CTTBiased** | CTT + characteristic attention bias (ablation alias) | `{positions, existence, output_grid}` |
 | **CTTSegPhysics** | CTT + physics features in disc encoder | `{positions, existence, output_grid}` |
 | **CTTFiLM** | CTT + FiLM time conditioning for density decoding | `{positions, existence, output_grid}` |

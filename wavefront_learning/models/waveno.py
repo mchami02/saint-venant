@@ -3,14 +3,18 @@
 The default WaveNO uses LWR bias (without damping) + FiLM time conditioning.
 This was identified as the most effective variant in the ablation study.
 
+Supports both LWR and ARZ equations via the ``equation`` parameter:
+- "lwr": 1-channel (density), SegmentPhysicsEncoder, LWRBias
+- "arz": 2-channel (density, velocity), ARZSegmentPhysicsEncoder, ARZBias
+
 Architecture:
     1. SegmentPhysicsEncoder — encode IC segments with physics features
     1b. Self-attention over segments — contextualize embeddings
     2. Raw (t, x) query encoding — MLP on raw coordinates
     2b. FiLM time conditioning on segment embeddings (default)
-    3. LWRBias — shock/rarefaction-aware attention bias (no damping by default)
+    3. Physics bias — shock/rarefaction-aware attention bias (no damping by default)
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
-    5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
+    5. Output head — Linear → ReLU → Dropout → Linear
 
 Ablation flags (use_char_bias, use_film, use_cross_seg_attn)
 allow toggling individual components for controlled experiments. See the
@@ -20,6 +24,9 @@ build_waveno_* factory functions for predefined configurations.
 import torch
 import torch.nn as nn
 
+from .base.arz_bias import ARZBias
+from .base.arz_physics import ARZPhysics
+from .base.arz_segment_encoder import ARZSegmentPhysicsEncoder
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
 from .base.feature_encoders import FourierFeatures
@@ -38,17 +45,19 @@ class WaveNO(nn.Module):
         num_self_attn_layers: Self-attention layers for segment interaction.
         num_cross_layers: Biased cross-attention layers (queries → segments).
         num_heads: Attention heads for self and cross attention.
-        initial_damping_sharpness: Initial sharpness for LWRBias
+        initial_damping_sharpness: Initial sharpness for bias
             collision-time damping (learnable).
-        flux: Flux function instance.
-        local_features: Include cumulative mass in segment encoder.
+        flux: Flux function instance (LWR only).
+        local_features: Include cumulative mass in segment encoder (LWR only).
         dropout: Dropout rate.
-        use_char_bias: Enable LWR attention bias. When False,
+        use_char_bias: Enable physics attention bias. When False,
             cross-attention is unbiased (attn_mask=None).
         use_film: Enable FiLM time conditioning on segment embeddings.
         use_cross_seg_attn: Enable per-timestep cross-segment attention.
         num_cross_segment_layers: Number of cross-segment attention layers
             (only used when use_cross_seg_attn=True).
+        equation: Equation system ("lwr" or "arz").
+        gamma: ARZ pressure exponent (only used when equation="arz").
     """
 
     def __init__(
@@ -70,6 +79,8 @@ class WaveNO(nn.Module):
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
+        equation: str = "lwr",
+        gamma: float = 1.0,
     ):
         super().__init__()
 
@@ -78,18 +89,33 @@ class WaveNO(nn.Module):
         self.use_char_bias = use_char_bias
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
-        flux = flux or DEFAULT_FLUX()
-        self.flux = flux
+        self.equation = equation.lower()
+
+        # Equation-dependent output channels
+        self.output_channels = 2 if self.equation == "arz" else 1
 
         # Stage 1: Segment encoder + self-attention
-        self.segment_encoder = SegmentPhysicsEncoder(
-            hidden_dim=hidden_dim,
-            num_frequencies=num_seg_frequencies,
-            num_layers=num_seg_mlp_layers,
-            flux=flux,
-            include_cumulative_mass=local_features,
-            dropout=dropout,
-        )
+        if self.equation == "arz":
+            self.arz_physics = ARZPhysics(gamma=gamma)
+            self.segment_encoder = ARZSegmentPhysicsEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
+                num_layers=num_seg_mlp_layers,
+                arz_physics=self.arz_physics,
+                dropout=dropout,
+            )
+        else:
+            flux = flux or DEFAULT_FLUX()
+            self.flux = flux
+            self.segment_encoder = SegmentPhysicsEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
+                num_layers=num_seg_mlp_layers,
+                flux=flux,
+                include_cumulative_mass=local_features,
+                dropout=dropout,
+            )
+
         self.self_attn_layers = nn.ModuleList(
             [
                 EncoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
@@ -142,13 +168,20 @@ class WaveNO(nn.Module):
                 ]
             )
 
-        # Stage 3: LWR attention bias (conditional)
+        # Stage 3: Physics attention bias (conditional)
         if use_char_bias:
-            self.lwr_bias = LWRBias(
-                initial_damping_sharpness=initial_damping_sharpness,
-                flux=flux,
-                use_damping=use_damping,
-            )
+            if self.equation == "arz":
+                self.arz_bias = ARZBias(
+                    initial_damping_sharpness=initial_damping_sharpness,
+                    arz_physics=self.arz_physics,
+                    use_damping=use_damping,
+                )
+            else:
+                self.lwr_bias = LWRBias(
+                    initial_damping_sharpness=initial_damping_sharpness,
+                    flux=flux,
+                    use_damping=use_damping,
+                )
 
         # Stage 4: Biased cross-attention layers
         self.cross_attn_layers = nn.ModuleList(
@@ -160,12 +193,12 @@ class WaveNO(nn.Module):
             ]
         )
 
-        # Stage 5: Density head
+        # Stage 5: Output head
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, self.output_channels),
         )
         nn.init.zeros_(self.density_head[-1].weight)
         nn.init.constant_(self.density_head[-1].bias, 0.5)
@@ -179,14 +212,15 @@ class WaveNO(nn.Module):
         Args:
             batch_input: Dict containing:
                 - 'xs': (B, K+1) breakpoint positions
-                - 'ks': (B, K) piece values
+                - 'ks': (B, K) piece values (density)
                 - 'pieces_mask': (B, K) validity mask
                 - 't_coords': (B, 1, nt, nx) time coordinates
                 - 'x_coords': (B, 1, nt, nx) space coordinates
+                - 'ks_v': (B, K) velocity values (ARZ only)
 
         Returns:
             Dict containing:
-                - 'output_grid': (B, 1, nt, nx) predicted density
+                - 'output_grid': (B, C, nt, nx) prediction (C=1 for LWR, C=2 for ARZ)
                 - 'characteristic_bias': (B, nt, nx, K) physics bias (if use_char_bias)
         """
         xs = batch_input["xs"]
@@ -199,7 +233,11 @@ class WaveNO(nn.Module):
         K = ks.shape[1]
 
         # Stage 1: Encode segments + self-attention
-        seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+        if self.equation == "arz":
+            ks_v = batch_input["ks_v"]
+            seg_emb = self.segment_encoder(xs, ks, ks_v, pieces_mask)  # (B, K, H)
+        else:
+            seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
 
         key_padding_mask = ~pieces_mask.bool()  # True = padded
         all_masked = key_padding_mask.all(dim=1)
@@ -250,10 +288,19 @@ class WaveNO(nn.Module):
             kv = kv * pieces_mask.unsqueeze(1).unsqueeze(-1)  # re-zero
             kv = kv.reshape(B * nt, K, self.hidden_dim)
 
-        # Stage 3: LWR attention bias (conditional)
+        # Stage 3: Physics attention bias (conditional)
         if self.use_char_bias:
-            ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
-            char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
+            if self.equation == "arz":
+                ic_data = {
+                    "xs": xs,
+                    "ks": ks,
+                    "ks_v": batch_input["ks_v"],
+                    "pieces_mask": pieces_mask,
+                }
+                char_bias = self.arz_bias(ic_data, (t_coords, x_coords))
+            else:
+                ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
+                char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
             attn_mask = (
@@ -280,10 +327,16 @@ class WaveNO(nn.Module):
         for layer in self.cross_attn_layers:
             q = layer(q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask)
 
-        # Stage 5: Density head
-        density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
-        density = density.clamp(0.0, 1.0)
-        output_grid = density.reshape(B, 1, nt, nx)
+        # Stage 5: Output head
+        if self.equation == "arz":
+            # q: (B*nt, nx, H) → (B*nt, nx, 2) → (B, nt, nx, 2)
+            out = self.density_head(q)  # (B*nt, nx, 2)
+            out = out.reshape(B, nt, nx, 2)  # (B, nt, nx, 2)
+            output_grid = out.permute(0, 3, 1, 2)  # (B, 2, nt, nx)
+        else:
+            density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
+            density = density.clamp(0.0, 1.0)
+            output_grid = density.reshape(B, 1, nt, nx)
 
         result = {"output_grid": output_grid}
         if char_bias is not None:
@@ -319,6 +372,9 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
     return WaveNO(**kwargs)
 
 
+# -- LWR builders -----------------------------------------------------------
+
+
 def build_waveno(args: dict) -> WaveNO:
     """Factory function for WaveNO (bias + FiLM, the default).
 
@@ -330,6 +386,7 @@ def build_waveno(args: dict) -> WaveNO:
     """
     return _build_waveno(
         args,
+        equation="lwr",
         use_char_bias=True,
         use_damping=False,
         use_film=True,
@@ -340,7 +397,11 @@ def build_waveno(args: dict) -> WaveNO:
 def build_waveno_bare(args: dict) -> WaveNO:
     """Bare minimum: unbiased cross-attention, no extras."""
     return _build_waveno(
-        args, use_char_bias=False, use_film=False, use_cross_seg_attn=False
+        args,
+        equation="lwr",
+        use_char_bias=False,
+        use_film=False,
+        use_cross_seg_attn=False,
     )
 
 
@@ -348,6 +409,7 @@ def build_waveno_bias_only(args: dict) -> WaveNO:
     """+ LWR bias (without damping)."""
     return _build_waveno(
         args,
+        equation="lwr",
         use_char_bias=True,
         use_damping=False,
         use_film=False,
@@ -359,6 +421,7 @@ def build_waveno_bias_damp(args: dict) -> WaveNO:
     """+ LWR bias + collision-time damping."""
     return _build_waveno(
         args,
+        equation="lwr",
         use_char_bias=True,
         use_damping=True,
         use_film=False,
@@ -369,33 +432,92 @@ def build_waveno_bias_damp(args: dict) -> WaveNO:
 def build_waveno_damp(args: dict) -> WaveNO:
     """+ LWR bias + damping + FiLM time conditioning."""
     return _build_waveno(
-        args, use_char_bias=True, use_film=True, use_cross_seg_attn=False
+        args,
+        equation="lwr",
+        use_char_bias=True,
+        use_film=True,
+        use_cross_seg_attn=False,
     )
 
 
 def build_waveno_damp_cross_attn(args: dict) -> WaveNO:
     """+ LWR bias + damping + cross-segment attention."""
     return _build_waveno(
-        args, use_char_bias=True, use_film=False, use_cross_seg_attn=True
+        args,
+        equation="lwr",
+        use_char_bias=True,
+        use_film=False,
+        use_cross_seg_attn=True,
     )
 
 
 def build_waveno_all(args: dict) -> WaveNO:
     """All components except trajectories."""
     return _build_waveno(
-        args, use_char_bias=True, use_film=True, use_cross_seg_attn=True
+        args,
+        equation="lwr",
+        use_char_bias=True,
+        use_film=True,
+        use_cross_seg_attn=True,
     )
 
 
 def build_waveno_film_only(args: dict) -> WaveNO:
     """FiLM only (no LWR bias)."""
     return _build_waveno(
-        args, use_char_bias=False, use_film=True, use_cross_seg_attn=False
+        args,
+        equation="lwr",
+        use_char_bias=False,
+        use_film=True,
+        use_cross_seg_attn=False,
     )
 
 
 def build_waveno_cross_attn_only(args: dict) -> WaveNO:
     """Cross-segment attention only (no LWR bias)."""
     return _build_waveno(
-        args, use_char_bias=False, use_film=False, use_cross_seg_attn=True
+        args,
+        equation="lwr",
+        use_char_bias=False,
+        use_film=False,
+        use_cross_seg_attn=True,
+    )
+
+
+# -- ARZ builders -----------------------------------------------------------
+
+
+def build_waveno_arz(args: dict) -> WaveNO:
+    """WaveNO for ARZ equations (bias + FiLM, the default ARZ variant).
+
+    Args:
+        args: Dict or Namespace with model configuration.
+
+    Returns:
+        Configured WaveNO instance for ARZ.
+    """
+    if not isinstance(args, dict):
+        args = vars(args)
+    return _build_waveno(
+        args,
+        equation="arz",
+        gamma=args.get("gamma", 1.0),
+        use_char_bias=True,
+        use_damping=False,
+        use_film=True,
+        use_cross_seg_attn=False,
+    )
+
+
+def build_waveno_arz_bare(args: dict) -> WaveNO:
+    """Bare WaveNO for ARZ: unbiased cross-attention, no extras."""
+    if not isinstance(args, dict):
+        args = vars(args)
+    return _build_waveno(
+        args,
+        equation="arz",
+        gamma=args.get("gamma", 1.0),
+        use_char_bias=False,
+        use_film=False,
+        use_cross_seg_attn=False,
     )

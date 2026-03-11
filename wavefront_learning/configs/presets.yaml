@@ -10,6 +10,7 @@ model_loss_preset:
   ShockAwareWaveNOFull: shock_proximity
   AutoregressiveWaveNOFull: traj_regularized
   NeuralFVSolver: mse_wasserstein
+  WaveNOARZBare: mse
 
 # Model -> plot preset (auto-selected when --plot is None).
 # Models not listed here default to "grid_residual".
@@ -42,6 +43,8 @@ model_plot_preset:
   WaveFrontModel: wavefront
   CVAEDeepONet: cvae
   ECARZ: ecarz
+  WaveNOARZ: ecarz
+  WaveNOARZBare: ecarz
   ShockAwareDeepONet: shock_proximity
   ShockAwareWaveNOFull: traj_residual
   AutoregressiveWaveNOFull: traj_residual
@@ -74,6 +77,8 @@ model_transform:
   WaveNOAll: null
   WaveNOFiLMOnly: null
   WaveNOCrossAttnOnly: null
+  WaveNOARZ: null
+  WaveNOARZBare: null
   WaveNOFull: null
   WaveNOFullBase: null
   WaveNOFullCls: null
