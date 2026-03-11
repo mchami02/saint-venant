@@ -53,7 +53,7 @@ class WaveNO(nn.Module):
 
     def __init__(
         self,
-        hidden_dim: int = 64,
+        hidden_dim: int = 96,
         num_freq_t: int | None = None,
         num_freq_x: int | None = None,
         num_seg_frequencies: int | None = None,
