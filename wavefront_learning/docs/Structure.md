@@ -44,8 +44,8 @@ wavefront_learning/
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
-│   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (characteristic-biased cross-attention)
-│   ├── waveno_minimal.py         # WaveNOMinimal: Stripped-down WaveNO ablation baseline (5-stage core only)
+│   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (default: bias + FiLM, ablation variants)
+│   ├── waveno_full.py            # WaveNOFull: Full Wavefront Neural Operator (trajectory prediction + boundary features)
 │   ├── wavefront_model.py        # WaveFrontModel: Learned Riemann solver with analytical wave reconstruction
 │   ├── latent_diffusion_deeponet.py  # LatentDiffusionDeepONet: VAE + flow matching generative model
 │   ├── shock_aware_deeponet.py      # ShockAwareDeepONet: dual-head DeepONet (solution + shock proximity)
@@ -207,19 +207,18 @@ wavefront_learning/
 - **autoregressive_fno.py** — 1D spatial FNO applied autoregressively in time with dt conditioning. Two variants: neuralop-based (complex weights) and real-valued (MPS-compatible).
   - `AutoregressiveFNO`, `build_autoregressive_fno()`, `AutoregressiveRealFNO`, `build_autoregressive_real_fno()`
   - `SpectralConv1d`, `FNO1dBlock`, `RealFNO1d` (internal components for real-valued variant)
-- **autoregressive_waveno.py** — Autoregressive FNO with segment-aware trajectory prediction. Combines WaveNO's SegmentPhysicsEncoder and breakpoint embeddings with autoregressive time-stepping.
-  - `AutoregressiveWaveNO`, `build_autoregressive_waveno()`
+- **autoregressive_waveno.py** — Autoregressive FNO with segment-aware trajectory prediction. Combines WaveNOFull's SegmentPhysicsEncoder and breakpoint embeddings with autoregressive time-stepping.
+  - `AutoregressiveWaveNOFull`, `build_autoregressive_waveno_full()`
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.
   - `FNOWrapper`, `build_fno()`
 - **encoder_decoder.py** — Transformer encoder-decoder.
   - `EncoderDecoder`, `build_encoder_decoder()`, `build_encoder_decoder_cross()`
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
   - `CharNO`, `build_charno()`
-- **waveno.py** — Wavefront Neural Operator (characteristic-biased cross-attention).
-  - `WaveNO`, `build_waveno()`, `build_waveno_cls()`, `build_waveno_local()`, `build_waveno_indep_traj()`, `build_waveno_disc()`, `build_shock_aware_waveno()`
-- **waveno_minimal.py** — Stripped-down WaveNO ablation baseline (core 5-stage pipeline only) with toggle flags for controlled experiments.
-  - `WaveNOMinimal`, `build_waveno_minimal()`
-  - Ablation builders: `build_waveno_ablation()`, `build_waveno_ablation_bias()`, `build_waveno_ablation_damp()`, `build_waveno_ablation_bias_film()`, `build_waveno_ablation_film()`, `build_waveno_ablation_cross_attn()`, `build_waveno_ablation_full()`, `build_waveno_ablation_film_only()`, `build_waveno_ablation_cross_attn_only()`
+- **waveno.py** — Wavefront Neural Operator (default: bias + FiLM) with ablation variants.
+  - `WaveNO`, `build_waveno()`, `build_waveno_bare()`, `build_waveno_bias_only()`, `build_waveno_bias_damp()`, `build_waveno_damp()`, `build_waveno_damp_cross_attn()`, `build_waveno_all()`, `build_waveno_film_only()`, `build_waveno_cross_attn_only()`
+- **waveno_full.py** — Full Wavefront Neural Operator (trajectory prediction + boundary features + characteristic-biased cross-attention).
+  - `WaveNOFull`, `build_waveno_full()`, `build_waveno_full_cls()`, `build_waveno_full_local()`, `build_waveno_full_indep_traj()`, `build_waveno_full_disc()`, `build_waveno_full_base()`, `build_shock_aware_waveno_full()`
 - **wavefront_model.py** — Learned Riemann solver with analytical wave reconstruction.
   - `WaveFrontModel`, `build_wavefront_model()`
 - **latent_diffusion_deeponet.py** — VAE + flow matching generative model for PDE solutions.

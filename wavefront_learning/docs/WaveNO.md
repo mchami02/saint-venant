@@ -1,13 +1,13 @@
-# WaveNO: Wavefront Neural Operator
+# WaveNOFull: Full Wavefront Neural Operator
 
-A detailed analysis of the WaveNO architecture, its physics-informed design, and why it is particularly suited for hyperbolic conservation laws.
+A detailed analysis of the WaveNOFull architecture, its physics-informed design, and why it is particularly suited for hyperbolic conservation laws.
 
 ## Table of Contents
 
 1. [Overview](#overview)
 2. [The Problem: Learning Hyperbolic PDEs](#the-problem-learning-hyperbolic-pdes)
 3. [Architecture](#architecture)
-4. [Why WaveNO Is a Physics-Informed Neural Network](#why-waveno-is-a-physics-informed-neural-network)
+4. [Why WaveNOFull Is a Physics-Informed Neural Network](#why-wavenofull-is-a-physics-informed-neural-network)
 5. [Strengths](#strengths)
 6. [Comparison to Baselines](#comparison-to-baselines)
 
@@ -15,15 +15,15 @@ A detailed analysis of the WaveNO architecture, its physics-informed design, and
 
 ## Overview
 
-WaveNO (Wavefront Neural Operator) is a neural operator architecture for learning the solution operator of scalar hyperbolic conservation laws of the form:
+WaveNOFull (Full Wavefront Neural Operator) is a neural operator architecture for learning the solution operator of scalar hyperbolic conservation laws of the form:
 
 $$\frac{\partial \rho}{\partial t} + \frac{\partial f(\rho)}{\partial x} = 0$$
 
 where $\rho(t, x)$ is the conserved quantity (e.g., traffic density) and $f(\rho)$ is the flux function (e.g., Greenshields flux $f(\rho) = \rho(1-\rho)$).
 
-Given a piecewise-constant initial condition described by breakpoint positions $\{x_k\}_{k=0}^{K}$ and segment values $\{\rho_k\}_{k=1}^{K}$, WaveNO maps this compact representation directly to the full space-time solution grid $\rho(t, x) \in \mathbb{R}^{n_t \times n_x}$.
+Given a piecewise-constant initial condition described by breakpoint positions $\{x_k\}_{k=0}^{K}$ and segment values $\{\rho_k\}_{k=1}^{K}$, WaveNOFull maps this compact representation directly to the full space-time solution grid $\rho(t, x) \in \mathbb{R}^{n_t \times n_x}$.
 
-The key insight is that the solution to a hyperbolic conservation law is fully determined by the **wavefronts** (shocks and rarefactions) emanating from each initial discontinuity. Rather than tracking these wavefronts explicitly or selecting a "winning" segment via soft-argmax, WaveNO lets spatial query points **attend to all segments** via cross-attention, guided by a physics-informed attention bias derived from characteristic propagation.
+The key insight is that the solution to a hyperbolic conservation law is fully determined by the **wavefronts** (shocks and rarefactions) emanating from each initial discontinuity. Rather than tracking these wavefronts explicitly or selecting a "winning" segment via soft-argmax, WaveNOFull lets spatial query points **attend to all segments** via cross-attention, guided by a physics-informed attention bias derived from characteristic propagation.
 
 ---
 
@@ -51,13 +51,13 @@ Waves emanating from different discontinuities eventually **collide**, producing
 
 Among all weak solutions satisfying Rankine-Hugoniot, only the **entropy solution** is physically admissible. The Lax entropy condition requires that characteristics compress into the shock (information flows into the discontinuity, not out of it). A model that merely interpolates between states can produce non-physical "expansion shocks."
 
-WaveNO addresses each of these challenges through its architecture design, as described below.
+WaveNOFull addresses each of these challenges through its architecture design, as described below.
 
 ---
 
 ## Architecture
 
-WaveNO is an 8-stage pipeline. The stages are:
+WaveNOFull is an 8-stage pipeline. The stages are:
 
 ### Stage 1: Segment Encoding
 
@@ -89,7 +89,7 @@ A `BreakpointEvolution` module predicts how IC breakpoints move over time:
 2. **Cross-attention trajectory decoding**: time embeddings (queries) attend to breakpoint embeddings (keys/values) via a transformer decoder
 3. **Position head**: outputs predicted breakpoint positions $p_d(t) \in [0, 1]$ for each discontinuity $d$ at each time $t$
 
-The predicted trajectories are used by `compute_boundaries` to extract, for each query point $(t, x)$, the positions of the nearest left and right breakpoints $(x_L, x_R)$. This **local boundary context** is the mechanism that makes WaveNO invariant to the total number of IC segments (K-invariant).
+The predicted trajectories are used by `compute_boundaries` to extract, for each query point $(t, x)$, the positions of the nearest left and right breakpoints $(x_L, x_R)$. This **local boundary context** is the mechanism that makes WaveNOFull invariant to the total number of IC segments (K-invariant).
 
 ### Stage 5: Query Encoding
 
@@ -101,7 +101,7 @@ where $\gamma(\cdot)$ denotes Fourier positional encoding and $\|$ denotes conca
 
 ### Stage 6: Characteristic Attention Bias
 
-This is the core physics-informed component. For each query $(t, x)$ and segment $k$, WaveNO computes a **backward characteristic foot**:
+This is the core physics-informed component. For each query $(t, x)$ and segment $k$, WaveNOFull computes a **backward characteristic foot**:
 
 $$y^* = x - f'(\rho_k) \cdot t$$
 
@@ -118,7 +118,7 @@ where $\alpha$ is a learnable scale parameter (initialized at 5.0). The semantic
 
 #### Collision-Time Damping
 
-The raw bias assumes independent wave propagation, which is only valid **before** waves interact. After collisions, the characteristic geometry changes and the raw bias becomes misleading. WaveNO handles this via a **collision-time damping** factor:
+The raw bias assumes independent wave propagation, which is only valid **before** waves interact. After collisions, the characteristic geometry changes and the raw bias becomes misleading. WaveNOFull handles this via a **collision-time damping** factor:
 
 $$t_{\text{coll},k} = \min\left(\frac{w_{k-1}}{|\lambda_{k-1} - \lambda_k|},\; \frac{w_k}{|\lambda_k - \lambda_{k+1}|}\right)$$
 
@@ -146,13 +146,13 @@ The last layer is initialized near zero with bias 0.5 (neutral density), ensurin
 
 ---
 
-## Why WaveNO Is a Physics-Informed Neural Network
+## Why WaveNOFull Is a Physics-Informed Neural Network
 
-WaveNO qualifies as a PINN not through a PDE residual loss (though such losses are available), but through deep **structural** incorporation of the governing physics into the network architecture itself. This is a stronger form of physics-informedness than soft penalty terms, because the inductive biases are always active regardless of loss weighting.
+WaveNOFull qualifies as a PINN not through a PDE residual loss (though such losses are available), but through deep **structural** incorporation of the governing physics into the network architecture itself. This is a stronger form of physics-informedness than soft penalty terms, because the inductive biases are always active regardless of loss weighting.
 
 ### 1. Characteristic Propagation as Attention Bias
 
-The most direct physics encoding. For a scalar conservation law $\partial_t \rho + \partial_x f(\rho) = 0$, the solution along characteristic curves $dx/dt = f'(\rho)$ is constant. WaveNO encodes this via the backward characteristic foot $y^* = x - f'(\rho_k) \cdot t$, which determines which IC segment "should" influence each query point. This is not a learned heuristic — it is the **exact method of characteristics** for the independent-wave regime, embedded as an attention prior.
+The most direct physics encoding. For a scalar conservation law $\partial_t \rho + \partial_x f(\rho) = 0$, the solution along characteristic curves $dx/dt = f'(\rho)$ is constant. WaveNOFull encodes this via the backward characteristic foot $y^* = x - f'(\rho_k) \cdot t$, which determines which IC segment "should" influence each query point. This is not a learned heuristic — it is the **exact method of characteristics** for the independent-wave regime, embedded as an attention prior.
 
 ### 2. Flux-Aware Feature Encoding
 
@@ -172,13 +172,13 @@ The cumulative mass feature $N_k = \sum_{j < k} \rho_j w_j$ encodes the total ma
 
 ### 6. Pluggable Flux Interface
 
-WaveNO accesses physics through an abstract `Flux` class requiring only `f(\rho)$, $f'(\rho)$, and $s(\rho_L, \rho_R)`. This means the entire physics-informed machinery (characteristic bias, collision times, segment features) works for **any** scalar conservation law — Greenshields, triangular, or otherwise — by swapping the flux. The physics is not hard-coded to a specific equation.
+WaveNOFull accesses physics through an abstract `Flux` class requiring only `f(\rho)$, $f'(\rho)$, and $s(\rho_L, \rho_R)`. This means the entire physics-informed machinery (characteristic bias, collision times, segment features) works for **any** scalar conservation law — Greenshields, triangular, or otherwise — by swapping the flux. The physics is not hard-coded to a specific equation.
 
 ### Structural vs. Loss-Based Physics
 
 Most PINNs enforce physics via a **soft loss penalty**: $\mathcal{L} = \mathcal{L}_{\text{data}} + \lambda \cdot \mathcal{L}_{\text{PDE}}$. This approach has well-documented failure modes for hyperbolic PDEs (the PDE residual is undefined at shocks, gradient pathologies from competing loss terms, sensitivity to $\lambda$).
 
-WaveNO instead encodes physics **structurally**:
+WaveNOFull instead encodes physics **structurally**:
 - The attention bias physically restricts which segments can influence which query points
 - Collision-time damping physically transitions from analytical to learned behavior
 - Flux derivatives physically determine propagation speeds
@@ -191,7 +191,7 @@ These structural priors are active unconditionally — they do not compete with 
 
 ### 1. Resolution Generalization
 
-WaveNO's representation is **resolution-invariant** by construction:
+WaveNOFull's representation is **resolution-invariant** by construction:
 
 - **Fourier positional encodings** have fixed output dimension regardless of the grid density — adding more query points at test time simply produces more Fourier vectors, not a different-dimensional input
 - **Characteristic bias** is computed from continuous $(t, x)$ values and characteristic speeds, not grid indices
@@ -201,15 +201,15 @@ The model trained at $n_x = 50$ can be evaluated at $n_x = 100$ without any arch
 
 ### 2. K-Invariance (Generalization Across IC Complexity)
 
-Through breakpoint evolution and local boundary context, WaveNO generalizes across ICs with different numbers of segments. A query at $(t, x)$ encodes "where are my nearest boundaries?" rather than "how many boundaries exist globally." This means a model trained on 4-piece ICs can handle 10+ piece ICs at test time — a critical capability for real-world problems where IC complexity varies.
+Through breakpoint evolution and local boundary context, WaveNOFull generalizes across ICs with different numbers of segments. A query at $(t, x)$ encodes "where are my nearest boundaries?" rather than "how many boundaries exist globally." This means a model trained on 4-piece ICs can handle 10+ piece ICs at test time — a critical capability for real-world problems where IC complexity varies.
 
 ### 3. Continuous Gradient Flow
 
-Previous approaches (CharNO) used softmin-based segment selection, which concentrates gradients on the "winning" segment and starves others. WaveNO's cross-attention allows **all segments to contribute** with smooth, well-conditioned gradients. The physics bias acts as a prior guiding attention, not a hard gate cutting gradient flow. This eliminates the need for temperature scheduling or auxiliary selection supervision.
+Previous approaches (CharNO) used softmin-based segment selection, which concentrates gradients on the "winning" segment and starves others. WaveNOFull's cross-attention allows **all segments to contribute** with smooth, well-conditioned gradients. The physics bias acts as a prior guiding attention, not a hard gate cutting gradient flow. This eliminates the need for temperature scheduling or auxiliary selection supervision.
 
 ### 4. Graceful Degradation After Wave Collision
 
-The collision-time damping mechanism gives WaveNO a principled two-phase behavior:
+The collision-time damping mechanism gives WaveNOFull a principled two-phase behavior:
 
 - **Before collision** ($t < t_{\text{coll}}$): the characteristic bias provides exact physics guidance, and the model benefits from strong inductive bias
 - **After collision** ($t > t_{\text{coll}}$): the bias fades, and the learned $QK^T$ attention takes over to model complex post-interaction dynamics
@@ -222,18 +222,18 @@ The characteristic bias tensor $\text{bias}(t, x, k) \in \mathbb{R}^{B \times n_
 
 ### 6. Modularity and Extensibility
 
-WaveNO is composed of independently meaningful components:
+WaveNOFull is composed of independently meaningful components:
 
 | Component | Physical role | Can be swapped/ablated |
 |-----------|--------------|----------------------|
 | `Flux` | Defines the conservation law | Any flux function |
 | `SegmentPhysicsEncoder` | IC representation | With/without cumulative mass |
-| `BreakpointEvolution` | Shock tracking | Enable/disable (WaveNO vs WaveNOBase) |
+| `BreakpointEvolution` | Shock tracking | Enable/disable (WaveNOFull vs WaveNOFullBase) |
 | Characteristic bias | Wave propagation prior | Adjustable scale, damping |
 | `CollisionTimeHead` | Post-interaction transition | Analytical or learned |
-| Density head | Solution reconstruction | Can add proximity head (ShockAwareWaveNO) |
+| Density head | Solution reconstruction | Can add proximity head (ShockAwareWaveNOFull) |
 
-This modularity enables controlled ablation studies (WaveNOBase, WaveNOLocal, WaveNODisc, etc.) and extension to new physics without rewriting the core architecture.
+This modularity enables controlled ablation studies (WaveNOFullBase, WaveNOFullLocal, WaveNOFullDisc, etc.) and extension to new physics without rewriting the core architecture.
 
 ---
 
@@ -241,23 +241,23 @@ This modularity enables controlled ablation studies (WaveNOBase, WaveNOLocal, Wa
 
 ### FNO (Fourier Neural Operator)
 
-FNO applies spectral convolutions in Fourier space, which is natural for smooth periodic solutions but fundamentally mismatched with shocks. Discontinuities require infinitely many Fourier modes to represent exactly, and truncation produces Gibbs oscillations. FNO also processes the entire spatial domain globally in each layer, ignoring the finite propagation speed of hyperbolic PDEs. WaveNO's attention mechanism is inherently local (guided by characteristic cones) and operates on the compact IC representation rather than discretized grids.
+FNO applies spectral convolutions in Fourier space, which is natural for smooth periodic solutions but fundamentally mismatched with shocks. Discontinuities require infinitely many Fourier modes to represent exactly, and truncation produces Gibbs oscillations. FNO also processes the entire spatial domain globally in each layer, ignoring the finite propagation speed of hyperbolic PDEs. WaveNOFull's attention mechanism is inherently local (guided by characteristic cones) and operates on the compact IC representation rather than discretized grids.
 
 ### DeepONet
 
-DeepONet learns a branch-trunk factorization of the solution operator. It is expressive but has no physics priors — the branch network must learn wave propagation, shock formation, and entropy selection purely from data. WaveNO provides these as architectural inductive biases, reducing the learning burden and improving data efficiency.
+DeepONet learns a branch-trunk factorization of the solution operator. It is expressive but has no physics priors — the branch network must learn wave propagation, shock formation, and entropy selection purely from data. WaveNOFull provides these as architectural inductive biases, reducing the learning burden and improving data efficiency.
 
 ### CharNO (Characteristic Neural Operator)
 
-CharNO, WaveNO's predecessor, uses the same IC representation and characteristic-speed features but selects the "winning" segment via a softmin operation. This creates gradient concentration issues (only the selected segment receives strong gradients), requires temperature scheduling, and the selection becomes unreliable after wave collisions. WaveNO replaces softmin with cross-attention + physics bias, providing continuous gradients, no temperature tuning, and collision-time damping.
+CharNO, WaveNOFull's predecessor, uses the same IC representation and characteristic-speed features but selects the "winning" segment via a softmin operation. This creates gradient concentration issues (only the selected segment receives strong gradients), requires temperature scheduling, and the selection becomes unreliable after wave collisions. WaveNOFull replaces softmin with cross-attention + physics bias, providing continuous gradients, no temperature tuning, and collision-time damping.
 
 ### WaveFrontModel (Explicit Wave Tracking)
 
-The WaveFrontModel takes the opposite extreme — it explicitly constructs waves (shock/rarefaction), handles collisions via hand-crafted rules, and reconstructs the grid analytically. This is highly accurate when it works but brittle: adding new wave interaction types requires manual implementation, and the straight-through estimator for shock/rarefaction classification can be unstable. WaveNO achieves comparable accuracy with a fully differentiable, learned architecture that naturally extends to more complex scenarios.
+The WaveFrontModel takes the opposite extreme — it explicitly constructs waves (shock/rarefaction), handles collisions via hand-crafted rules, and reconstructs the grid analytically. This is highly accurate when it works but brittle: adding new wave interaction types requires manual implementation, and the straight-through estimator for shock/rarefaction classification can be unstable. WaveNOFull achieves comparable accuracy with a fully differentiable, learned architecture that naturally extends to more complex scenarios.
 
 ### Summary Table
 
-| Property | FNO | DeepONet | CharNO | WaveFrontModel | **WaveNO** |
+| Property | FNO | DeepONet | CharNO | WaveFrontModel | **WaveNOFull** |
 |----------|-----|----------|--------|----------------|------------|
 | Shock handling | Gibbs oscillations | Learned (no prior) | Softmin selection | Explicit construction | Physics-biased attention |
 | Physics encoding | None | None | Characteristic features | Full analytical | Characteristic bias + flux features |
