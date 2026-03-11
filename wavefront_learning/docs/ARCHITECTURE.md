@@ -13,7 +13,7 @@ This document describes the neural network architectures and loss functions used
    - [FNO](#fno-baseline)
    - [EncoderDecoder](#encoderdecoder)
    - [TrajTransformer](#trajtransformer)
-   - [WaveNO](#waveno)
+   - [WaveNOFull](#wavenofull)
    - [LatentDiffusionDeepONet](#latentdiffusiondeeponet)
    - [NeuralFVSolver](#neuralfvsolver)
    - [LNO](#lno)
@@ -446,11 +446,11 @@ SpectralConv1d:
 
 ---
 
-### AutoregressiveWaveNO
+### AutoregressiveWaveNOFull
 
 **Location**: `models/autoregressive_waveno.py`
 
-Combines WaveNO's segment encoding and trajectory prediction with autoregressive time-stepping. Both the spatial state and shock positions evolve step-by-step. The FNO receives boundary channels indicating where discontinuities are, and a trajectory MLP predicts position deltas from static breakpoint embeddings.
+Combines WaveNOFull's segment encoding and trajectory prediction with autoregressive time-stepping. Both the spatial state and shock positions evolve step-by-step. The FNO receives boundary channels indicating where discontinuities are, and a trajectory MLP predicts position deltas from static breakpoint embeddings.
 
 Key design choices:
 - **Boundary channels in FNO** (4 input channels): `[state, dt, left_bound, right_bound]` — boundary positions tell the FNO where discontinuities are.
@@ -893,9 +893,9 @@ $$\rho(t, x) = \sum_k w_k(t,x) \cdot v_k(t,x)$$
 
 ---
 
-### WaveNO
+### WaveNOFull
 
-**Location**: `models/waveno.py`
+**Location**: `models/waveno_full.py`
 
 Wavefront Neural Operator that replaces CharNO's softmin selection with **physics-biased cross-attention**. Instead of scoring and selecting a winning segment, spatial queries discover relevant segment information via cross-attention with a characteristic-distance attention bias (analogous to ALiBi in NLP, but using wave propagation geometry).
 
@@ -1088,7 +1088,7 @@ The predicted positions are then used by `compute_boundaries` (from `traj_deepon
 
 #### Factory Functions
 
-- `build_waveno(args)`: Creates WaveNO with configuration from args dict
+- `build_waveno_full(args)`: Creates WaveNOFull with configuration from args dict
 
 ---
 
@@ -2064,9 +2064,9 @@ loss = get_loss("pde_shocks", loss_kwargs={
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
 | CharNO | IC segments (xs, ks) + coordinates | Full grid + selection weights | Characteristic neural operator (Lax-Hopf softmin) |
-| WaveNO | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
-| WaveNOBase | IC segments (xs, ks) + coordinates | Full grid + characteristic bias | WaveNO without trajectory prediction (no breakpoint evolution, no boundary features) |
-| WaveNODisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNO variant with discontinuity tokens instead of segments |
+| WaveNOFull | IC segments (xs, ks) + coordinates | Full grid + characteristic bias + positions | Wavefront neural operator (characteristic-biased cross-attention + breakpoint evolution) |
+| WaveNOFullBase | IC segments (xs, ks) + coordinates | Full grid + characteristic bias | WaveNOFull without trajectory prediction (no breakpoint evolution, no boundary features) |
+| WaveNOFullDisc | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + characteristic bias + positions | WaveNOFull variant with discontinuity tokens instead of segments |
 | CTTSeg | IC segments (xs, ks) + coordinates | Positions + Existence + Full grid | CTT with segment tokens + BreakpointEvolution instead of discontinuity tokens |
 | TransformerSeg | IC segments (xs, ks) + coordinates | Full grid | Segment-based encoding + cross-attention density decoder, no trajectory prediction |
 | WaveFrontModel | Discontinuities (x, rho_L, rho_R) + coordinates | Full grid + wave pattern | Learned Riemann solver with type-aware waves (shock/rarefaction/bent shock) |
@@ -2115,31 +2115,31 @@ loss = get_loss("pde_shocks", loss_kwargs={
 
 ## Ablation Models
 
-Six ablation models isolate which architectural component drives the performance gap between WaveNO and ClassifierTrajTransformer.
+Six ablation models isolate which architectural component drives the performance gap between WaveNOFull and ClassifierTrajTransformer.
 
 ### WaveNO Ablations (fixing step-generalization weakness)
 
 | Model | Flag | Change |
 |-------|------|--------|
-| `WaveNOBase` | `predict_trajectories=False` | Removes stages 3-4 (breakpoint evolution + boundary computation); query encoder uses only (t, x) without boundary features. Grid-only output, no trajectory prediction. Ablation baseline. |
-| `WaveNOCls` | `with_classifier=True` | Adds classifier head on breakpoint embeddings to filter breakpoints in `compute_boundaries` |
-| `WaveNOLocal` | `local_features=False` | Removes cumulative mass $N_k$ from `SegmentPhysicsEncoder` (3 scalar features instead of 4) |
-| `WaveNOIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
-| `WaveNODisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
-| `ShockAwareWaveNO` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
-| `WaveNOMinimal` | Standalone class | Strips WaveNO to a minimal pipeline: self-attention + Fourier queries + characteristic bias with damping + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories |
-| `WaveNOAblation` | `use_char_bias=False, use_damping=False` | Bare minimum baseline: unbiased cross-attention, no extras |
-| `WaveNOAblationBias` | `use_char_bias=True, use_damping=False` | + characteristic bias (no damping) |
-| `WaveNOAblationDamp` | `use_char_bias=True, use_damping=True` | + characteristic bias + collision-time damping (= WaveNOMinimal) |
-| `WaveNOAblationFiLM` | `+ use_film=True` | + bias + damping + FiLM time conditioning |
-| `WaveNOAblationCrossAttn` | `+ use_cross_seg_attn=True` | + bias + damping + cross-segment attention |
-| `WaveNOAblationFull` | all flags True | All components except trajectories |
-| `WaveNOAblationFiLMOnly` | `use_film=True` only | FiLM without characteristic bias |
-| `WaveNOAblationCrossAttnOnly` | `use_cross_seg_attn=True` only | Cross-segment attention without characteristic bias |
+| `WaveNOFullBase` | `predict_trajectories=False` | Removes stages 3-4 (breakpoint evolution + boundary computation); query encoder uses only (t, x) without boundary features. Grid-only output, no trajectory prediction. Ablation baseline. |
+| `WaveNOFullCls` | `with_classifier=True` | Adds classifier head on breakpoint embeddings to filter breakpoints in `compute_boundaries` |
+| `WaveNOFullLocal` | `local_features=False` | Removes cumulative mass $N_k$ from `SegmentPhysicsEncoder` (3 scalar features instead of 4) |
+| `WaveNOFullIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
+| `WaveNOFullDisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
+| `ShockAwareWaveNOFull` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
+| `WaveNO` | Standalone class | Strips WaveNOFull to a minimal pipeline: self-attention + Fourier queries + characteristic bias with damping + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories |
+| `WaveNOBare` | `use_char_bias=False, use_damping=False` | Bare minimum baseline: unbiased cross-attention, no extras |
+| `WaveNOBiasOnly` | `use_char_bias=True, use_damping=False` | + characteristic bias (no damping) |
+| `WaveNOBiasDamp` | `use_char_bias=True, use_damping=True` | + characteristic bias + collision-time damping (= WaveNO) |
+| `WaveNODamp` | `+ use_film=True` | + bias + damping + FiLM time conditioning |
+| `WaveNODampCrossAttn` | `+ use_cross_seg_attn=True` | + bias + damping + cross-segment attention |
+| `WaveNOAll` | all flags True | All components except trajectories |
+| `WaveNOFiLMOnly` | `use_film=True` only | FiLM without characteristic bias |
+| `WaveNOCrossAttnOnly` | `use_cross_seg_attn=True` only | Cross-segment attention without characteristic bias |
 
-#### WaveNOMinimal Architecture
+#### WaveNO Architecture
 
-**Location**: `models/waveno_minimal.py`
+**Location**: `models/waveno.py`
 
 Ablation baseline that removes FiLM time conditioning, cross-segment attention, and trajectory prediction. Keeps self-attention over segments (contextualized embeddings) and collision-time damping (bias fades after wave interactions). Segment embeddings are static across time.
 
@@ -2179,7 +2179,7 @@ query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
 
 #### Ablation Toggle Flags
 
-WaveNOMinimal supports 4 boolean flags for controlled ablation experiments:
+WaveNO supports 4 boolean flags for controlled ablation experiments:
 
 | Flag | Default | Effect |
 |------|---------|--------|
@@ -2194,26 +2194,26 @@ Constraint: `use_damping=True` requires `use_char_bias=True`.
 
 | Variant | Bias | Damp | FiLM | CrossSeg |
 |---------|------|------|------|----------|
-| `WaveNOAblation` | - | - | - | - |
-| `WaveNOAblationBias` | + | - | - | - |
-| `WaveNOAblationDamp` | + | + | - | - |
-| `WaveNOAblationFiLM` | + | + | + | - |
-| `WaveNOAblationCrossAttn` | + | + | - | + |
-| `WaveNOAblationFull` | + | + | + | + |
+| `WaveNOBare` | - | - | - | - |
+| `WaveNOBiasOnly` | + | - | - | - |
+| `WaveNOBiasDamp` | + | + | - | - |
+| `WaveNODamp` | + | + | + | - |
+| `WaveNODampCrossAttn` | + | + | - | + |
+| `WaveNOAll` | + | + | + | + |
 
 **Isolated additions** (each component alone on bare baseline):
 
 | Variant | Bias | Damp | FiLM | CrossSeg |
 |---------|------|------|------|----------|
-| `WaveNOAblationFiLMOnly` | - | - | + | - |
-| `WaveNOAblationCrossAttnOnly` | - | - | - | + |
+| `WaveNOFiLMOnly` | - | - | + | - |
+| `WaveNOCrossAttnOnly` | - | - | - | + |
 
-#### ShockAwareWaveNO Architecture
+#### ShockAwareWaveNOFull Architecture
 
-WaveNO with a dual output: density solution and shock proximity. The proximity head is an MLP identical to the density head but with sigmoid activation instead of clamp. Both heads operate on the same fused cross-attention features `q`, forcing the shared representation to be shock-aware.
+WaveNOFull with a dual output: density solution and shock proximity. The proximity head is an MLP identical to the density head but with sigmoid activation instead of clamp. Both heads operate on the same fused cross-attention features `q`, forcing the shared representation to be shock-aware.
 
 ```
-# Same as WaveNO up to cross-attention output q: (nt, nx, H)
+# Same as WaveNOFull up to cross-attention output q: (nt, nx, H)
 
 q → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
 q → ProximityHead(MLP) → sigmoid → shock_proximity: (1, nt, nx)
@@ -2232,11 +2232,11 @@ Uses `shock_proximity` loss preset (MSE + proximity MSE) and `traj_residual` plo
 | `CTTBiased` | `characteristic_bias=True` | Adds characteristic attention bias to density cross-attention (alias for `BiasedClassifierTrajTransformer`) |
 | `CTTSegPhysics` | `segment_physics=True` | Enriches disc encoder input with $\lambda_L$, $\lambda_R$, $s$ (6 features instead of 3) |
 | `CTTFiLM` | `film_time=True` | Applies FiLM time conditioning to disc embeddings, producing per-timestep keys for density decoding |
-| `CTTSeg` | `use_segments=True` | Replaces discontinuity tokens with segment tokens (SegmentPhysicsEncoder + BreakpointEvolution), like WaveNO's representation |
+| `CTTSeg` | `use_segments=True` | Replaces discontinuity tokens with segment tokens (SegmentPhysicsEncoder + BreakpointEvolution), like WaveNOFull's representation |
 
 #### CTTSeg Architecture
 
-Replaces the discontinuity-based input representation with WaveNO's segment-based representation while keeping the CTT architecture for trajectory decoding and density prediction.
+Replaces the discontinuity-based input representation with WaveNOFull's segment-based representation while keeping the CTT architecture for trajectory decoding and density prediction.
 
 ```
 xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
@@ -2361,7 +2361,7 @@ Parameters: `dx` (spatial step, kept for interface compatibility), `min_componen
 
 ## Two-Phase Teacher Forcing (All Autoregressive Models)
 
-All autoregressive models (AutoregressiveFNO, AutoregressiveRealFNO, AutoregressiveWaveNO, LNO, NeuralFVSolver) share a unified 2-phase teacher forcing training strategy, orchestrated by `train_model_two_phase_tf()` in `train.py`.
+All autoregressive models (AutoregressiveFNO, AutoregressiveRealFNO, AutoregressiveWaveNOFull, LNO, NeuralFVSolver) share a unified 2-phase teacher forcing training strategy, orchestrated by `train_model_two_phase_tf()` in `train.py`.
 
 ### Training Phases
 

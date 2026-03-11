@@ -1,6 +1,6 @@
-# WaveNO Ablation: FiLM Time Conditioning
+# WaveNODamp: LWR Bias + Damping + FiLM Time Conditioning
 
-A complete specification of the `WaveNOAblationFiLM` variant — a controlled ablation of WaveNO that isolates the contribution of FiLM (Feature-wise Linear Modulation) time conditioning on top of the characteristic-biased attention baseline.
+A complete specification of the `WaveNODamp` variant — a controlled ablation of WaveNO that isolates the contribution of FiLM (Feature-wise Linear Modulation) time conditioning on top of the characteristic-biased attention baseline.
 
 ## Table of Contents
 
@@ -17,18 +17,18 @@ A complete specification of the `WaveNOAblationFiLM` variant — a controlled ab
 
 ## Position in the Ablation Ladder
 
-WaveNOMinimal is a stripped-down version of WaveNO designed for controlled ablation experiments. It removes the trajectory prediction, boundary extraction, and boundary Fourier features of the full WaveNO, isolating the core attention-based density prediction pipeline. Four boolean flags toggle individual components:
+WaveNO is a stripped-down version of WaveNOFull designed for controlled ablation experiments. It removes the trajectory prediction, boundary extraction, and boundary Fourier features of WaveNOFull, isolating the core attention-based density prediction pipeline. Four boolean flags toggle individual components:
 
 | Ablation name | `use_char_bias` | `use_damping` | `use_film` | `use_cross_seg_attn` |
 |---|---|---|---|---|
-| `WaveNOAblation` (bare) | off | off | off | off |
-| `WaveNOAblationBias` | **on** | off | off | off |
-| `WaveNOAblationDamp` | **on** | **on** | off | off |
-| **`WaveNOAblationFiLM`** | **on** | **on** | **on** | off |
-| `WaveNOAblationCrossAttn` | **on** | **on** | off | **on** |
-| `WaveNOAblationFull` | **on** | **on** | **on** | **on** |
+| `WaveNOBare` | off | off | off | off |
+| `WaveNOBiasOnly` | **on** | off | off | off |
+| `WaveNOBiasDamp` | **on** | **on** | off | off |
+| **`WaveNODamp`** | **on** | **on** | **on** | off |
+| `WaveNODampCrossAttn` | **on** | **on** | off | **on** |
+| `WaveNOAll` | **on** | **on** | **on** | **on** |
 
-`WaveNOAblationFiLM` is the first variant where segment embeddings become **time-dependent**. All prior variants use static segment embeddings that are identical across all timesteps — time dependence enters only through the query encoding and the characteristic bias. FiLM adds a direct mechanism for the segment representations themselves to evolve with time.
+`WaveNODamp` is the first variant where segment embeddings become **time-dependent**. All prior variants use static segment embeddings that are identical across all timesteps — time dependence enters only through the query encoding and the characteristic bias. FiLM adds a direct mechanism for the segment representations themselves to evolve with time.
 
 ---
 
@@ -50,7 +50,7 @@ The default flux is Greenshields: $f(\rho) = \rho(1 - \rho)$, with derivative $f
 
 ## Architecture Overview
 
-WaveNOAblationFiLM is a 6-stage pipeline:
+WaveNODamp is a 6-stage pipeline:
 
 ```
 Input: xs (K+1,), ks (K,), pieces_mask (K,), t_coords (nt, nx), x_coords (nt, nx)
@@ -145,7 +145,7 @@ where:
 
 All $n_t \times n_x$ query points are encoded in parallel (flattened, processed, reshaped).
 
-**Note**: Unlike the full WaveNO, this variant does **not** include boundary features ($x_L$, $x_R$) in the query encoding because there is no trajectory prediction module to provide them. The query knows its absolute $(t, x)$ position but not its position relative to nearby discontinuities.
+**Note**: Unlike WaveNOFull, this variant does **not** include boundary features ($x_L$, $x_R$) in the query encoding because there is no trajectory prediction module to provide them. The query knows its absolute $(t, x)$ position but not its position relative to nearby discontinuities.
 
 **Output**: `query_emb` $(n_t, n_x, H)$
 
@@ -275,7 +275,7 @@ The additive bias shifts the attention logits before softmax. This is a **soft**
 - The learned $QK^T$ scores can override the bias when the data requires it
 - But the bias provides a strong default that aligns with physics, reducing the learning burden
 
-**Why FiLM matters here**: Without FiLM (the `WaveNOAblationDamp` variant), the KV tokens are the same static segment embeddings at every timestep. The only time-varying signal in the cross-attention is the query encoding (which knows $t$) and the attention bias (which encodes characteristic geometry). With FiLM, the KV tokens themselves carry time-specific information — the segment's "state" at time $t$ — giving the attention mechanism richer key-value representations to read from.
+**Why FiLM matters here**: Without FiLM (the `WaveNOBiasDamp` variant), the KV tokens are the same static segment embeddings at every timestep. The only time-varying signal in the cross-attention is the query encoding (which knows $t$) and the attention bias (which encodes characteristic geometry). With FiLM, the KV tokens themselves carry time-specific information — the segment's "state" at time $t$ — giving the attention mechanism richer key-value representations to read from.
 
 **Output**: `attended` $(n_t, n_x, H)$
 
@@ -375,11 +375,11 @@ with torch.no_grad():
 
 This means:
 1. At initialization, `TimeConditioner` is an identity function: $\text{kv}(t, k) = \mathbf{s}_k$ for all $t$
-2. The model starts exactly equivalent to the `WaveNOAblationDamp` variant (no FiLM)
+2. The model starts exactly equivalent to the `WaveNOBiasDamp` variant (no FiLM)
 3. Training gradually introduces time dependence only where it improves the loss
 4. If time conditioning is not helpful, the model can keep $\gamma \approx 1, \beta \approx 0$ — it never hurts
 
-This is a strict improvement over the non-FiLM baseline: the hypothesis class of `WaveNOAblationFiLM` is a superset of `WaveNOAblationDamp`.
+This is a strict improvement over the non-FiLM baseline: the hypothesis class of `WaveNODamp` is a superset of `WaveNOBiasDamp`.
 
 ---
 
@@ -439,9 +439,9 @@ FiLM helps precisely here: by providing time-evolved segment representations, it
 
 ## Comparison with Adjacent Ablations
 
-### vs. WaveNOAblationDamp (predecessor: no FiLM)
+### vs. WaveNOBiasDamp (predecessor: no FiLM)
 
-The only difference is the absence of FiLM. In `WaveNOAblationDamp`:
+The only difference is the absence of FiLM. In `WaveNOBiasDamp`:
 - KV tokens for cross-attention are the static segment embeddings, broadcast identically to every timestep
 - Time information enters only through query encoding and the characteristic bias
 - After collision-time damping fades the bias, the model has no time-dependent signal in the KV branch
@@ -451,9 +451,9 @@ Adding FiLM gives the KV branch its own time dependence, which is expected to im
 - Smooth region accuracy (FiLM can encode the gradual evolution of rarefaction fans)
 - Generalization to longer time horizons (the model can learn extrapolation of the FiLM modulation)
 
-### vs. WaveNOAblationCrossAttn (sibling: cross-segment attention instead of FiLM)
+### vs. WaveNODampCrossAttn (sibling: cross-segment attention instead of FiLM)
 
-`WaveNOAblationCrossAttn` uses `CrossSegmentAttention` — a lightweight self-attention over the $K$ segment dimension, applied per-timestep after broadcasting the static embeddings. This is a different mechanism for introducing time-dependent segment interactions:
+`WaveNODampCrossAttn` uses `CrossSegmentAttention` — a lightweight self-attention over the $K$ segment dimension, applied per-timestep after broadcasting the static embeddings. This is a different mechanism for introducing time-dependent segment interactions:
 
 | | FiLM | CrossSegmentAttention |
 |---|---|---|
@@ -464,9 +464,9 @@ Adding FiLM gives the KV branch its own time dependence, which is expected to im
 
 FiLM is lighter and introduces continuous time dependence. Cross-segment attention is heavier but can model pairwise segment interactions that change between timesteps (e.g., two segments that were independent at $t=0$ but are now interacting).
 
-### vs. WaveNOAblationFull (successor: FiLM + CrossSegmentAttention)
+### vs. WaveNOAll (successor: FiLM + CrossSegmentAttention)
 
-`WaveNOAblationFull` combines both FiLM and cross-segment attention. The pipeline becomes:
+`WaveNOAll` combines both FiLM and cross-segment attention. The pipeline becomes:
 
 1. Static segment embeddings $(K, H)$
 2. FiLM modulation → time-dependent embeddings $(n_t, K, H)$
@@ -475,9 +475,9 @@ FiLM is lighter and introduces continuous time dependence. Cross-segment attenti
 
 This is the most expressive ablation variant. It tests whether FiLM and cross-segment attention provide complementary benefits (FiLM for continuous time modulation, cross-segment attention for dynamic inter-segment relationships).
 
-### vs. Full WaveNO
+### vs. WaveNOFull
 
-The full WaveNO adds three more components on top of the ablation:
+WaveNOFull adds three more components on top of the ablation:
 - **Breakpoint evolution** (trajectory prediction via cross-attention decoder)
 - **Boundary extraction** (local $x_L, x_R$ from predicted trajectories)
 - **Boundary Fourier features** ($\gamma(x_L), \gamma(x_R)$ added to query encoding)
@@ -507,9 +507,9 @@ These components provide the model with explicit local boundary context — each
 | `use_film` | True | FiLM time conditioning enabled |
 | `use_cross_seg_attn` | False | Cross-segment attention disabled |
 
-**Factory function**: `build_waveno_ablation_film(args)` in `waveno_minimal.py`
+**Factory function**: `build_waveno_damp(args)` in `waveno.py`
 
-**Model registration**: Registered as `"WaveNOAblationFiLM"` in the model registry.
+**Model registration**: Registered as `"WaveNODamp"` in the model registry.
 
 **Loss**: Uses the default `mse` preset (no model-specific override).
 
@@ -517,7 +517,7 @@ These components provide the model with explicit local boundary context — each
 ```bash
 cd wavefront_learning
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python train.py \
-    --model WaveNOAblationFiLM \
+    --model WaveNODamp \
     --loss mse \
     --epochs 100 \
     --no_wandb

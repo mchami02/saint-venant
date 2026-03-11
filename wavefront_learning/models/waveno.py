@@ -1,54 +1,30 @@
-"""WaveNO: Wavefront Neural Operator for hyperbolic conservation laws.
+"""WaveNO: Wavefront Neural Operator (default architecture).
 
-Inspired by wavefront tracking: the solution is determined by wavefronts
-emanating from IC boundaries, acting on IC segments. Instead of tracking
-wavefronts explicitly (trajectories) or selecting a winning segment (softmin),
-WaveNO lets spatial queries discover the relevant segment information via
-physics-biased cross-attention.
+The default WaveNO uses LWR bias (without damping) + FiLM time conditioning.
+This was identified as the most effective variant in the ablation study.
 
-Architecture (with predict_trajectories=True):
-    1. SegmentPhysicsEncoder + self-attention -> contextualized segment embeddings
-    2. TimeConditioner (FiLM) + CrossSegmentAttention -> time-evolved segments
-    3. BreakpointEvolution -> predicted breakpoint positions (B, D, nt)
-    4. compute_boundaries -> per-query local boundary positions (x_left, x_right)
-    5. Fourier query encoding with local context -> per-(t, x) query embeddings
-    6. Characteristic attention bias -> physics-informed bias (B, nt, nx, K)
-    7. Per-time-step biased cross-attention (queries attend to segments)
-    8. Density head MLP -> output density
+Architecture:
+    1. SegmentPhysicsEncoder — encode IC segments with physics features
+    1b. Self-attention over segments — contextualize embeddings
+    2. Raw (t, x) query encoding — MLP on raw coordinates
+    2b. FiLM time conditioning on segment embeddings (default)
+    3. LWRBias — shock/rarefaction-aware attention bias (no damping by default)
+    4. BiasedCrossDecoderLayer — cross-attention with physics bias
+    5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
 
-Without predict_trajectories, stages 3-4 are skipped and queries encode
-only (t, x) as before.
-
-Key advantages over CharNO:
-    - Cross-attention replaces softmin (continuous gradient flow, no vanishing)
-    - Density decoded from attended features (fused, not decoupled)
-    - Single characteristic bias as attention prior, not 8 hand-engineered features
-    - No temperature scheduling, no auxiliary selection supervision loss
-
-Key advantage of breakpoint evolution (v2):
-    - Local boundary context (x_left, x_right) makes queries K-invariant
-    - Generalizes from 4-piece to 10+ piece initial conditions
+Ablation flags (use_char_bias, use_film, use_cross_seg_attn)
+allow toggling individual components for controlled experiments. See the
+build_waveno_* factory functions for predefined configurations.
 """
 
 import torch
 import torch.nn as nn
 
-from .base.biased_cross_attention import (
-    BiasedCrossDecoderLayer,
-    CollisionTimeHead,
-    compute_discontinuity_characteristic_bias,
-)
-from .base.lwr_bias import LWRBias
-from .base.boundaries import compute_boundaries
-from .base.breakpoint_evolution import BreakpointEvolution
-from .base.characteristic_features import (
-    DiscontinuityPhysicsEncoder,
-    SegmentPhysicsEncoder,
-    TimeConditioner,
-)
-from .base.decoders import TrajectoryDecoderTransformer
-from .base.feature_encoders import DiscontinuityEncoder, FourierFeatures, TimeEncoder
+from .base.biased_cross_attention import BiasedCrossDecoderLayer
+from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
+from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
+from .base.lwr_bias import LWRBias
 from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
 
 
@@ -57,104 +33,63 @@ class WaveNO(nn.Module):
 
     Args:
         hidden_dim: All embedding dimensions.
-        num_freq_t: Fourier frequency bands for time in query encoder.
-        num_freq_x: Fourier frequency bands for space in query encoder.
         num_seg_frequencies: Fourier frequency bands for segment encoder.
         num_seg_mlp_layers: MLP depth in segment encoder.
         num_self_attn_layers: Self-attention layers for segment interaction.
-        num_cross_layers: Biased cross-attention layers (queries -> segments).
-        num_heads: Attention heads (both self and cross).
-        num_cross_segment_layers: Cross-segment attention per timestep.
-        time_condition: Enable FiLM time conditioning.
+        num_cross_layers: Biased cross-attention layers (queries → segments).
+        num_heads: Attention heads for self and cross attention.
         initial_damping_sharpness: Initial sharpness for LWRBias
             collision-time damping (learnable).
-        predict_trajectories: If True, predict breakpoint evolution and
-            include local boundary features (x_left, x_right) in queries.
-            This makes the model K-invariant for generalization.
-        num_traj_cross_layers: Cross-attention layers in breakpoint
-            evolution trajectory decoder.
-        num_time_layers: MLP layers in breakpoint time encoder.
-        num_freq_bound: Fourier frequency bands for boundary features
-            in query encoder.
         flux: Flux function instance.
-        predict_proximity: If True, add a second MLP head that predicts
-            a sigmoid-activated shock proximity field from the same
-            cross-attention features as the density head.
-        learned_collision_time: If True, replace the analytical collision
-            time with a learned MLP head on token embeddings. The head
-            predicts a per-token "validity horizon" for the characteristic
-            bias damping. Default False (backward compat).
+        local_features: Include cumulative mass in segment encoder.
+        dropout: Dropout rate.
+        use_char_bias: Enable LWR attention bias. When False,
+            cross-attention is unbiased (attn_mask=None).
+        use_film: Enable FiLM time conditioning on segment embeddings.
+        use_cross_seg_attn: Enable per-timestep cross-segment attention.
+        num_cross_segment_layers: Number of cross-segment attention layers
+            (only used when use_cross_seg_attn=True).
     """
 
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_freq_t: int = 8,
-        num_freq_x: int = 8,
-        num_seg_frequencies: int = 8,
+        num_freq_t: int | None = 8,
+        num_freq_x: int | None = 8,
+        num_seg_frequencies: int | None = 8,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
         num_heads: int = 4,
-        num_cross_segment_layers: int = 1,
-        time_condition: bool = True,
         initial_damping_sharpness: float = 5.0,
-        predict_trajectories: bool = True,
-        num_traj_cross_layers: int = 2,
-        num_time_layers: int = 2,
-        num_freq_bound: int = 8,
         flux: Flux | None = None,
-        with_classifier: bool = False,
+        use_damping: bool = True,
         local_features: bool = True,
-        independent_traj: bool = False,
-        use_discontinuities: bool = False,
-        predict_proximity: bool = False,
-        learned_collision_time: bool = False,
         dropout: float = 0.05,
+        use_char_bias: bool = True,
+        use_film: bool = False,
+        use_cross_seg_attn: bool = False,
+        num_cross_segment_layers: int = 1,
     ):
         super().__init__()
+
         self.hidden_dim = hidden_dim
-        self.time_condition = time_condition
         self.num_heads = num_heads
-        self.predict_trajectories = predict_trajectories
-        self.with_classifier = with_classifier
-        self.independent_traj = independent_traj
-        self.use_discontinuities = use_discontinuities
-        self.predict_proximity = predict_proximity
-        self.learned_collision_time = learned_collision_time
+        self.use_char_bias = use_char_bias
+        self.use_film = use_film
+        self.use_cross_seg_attn = use_cross_seg_attn
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
-        # === LWR-aware attention bias (segment-based path) ===
-        self.lwr_bias = LWRBias(
-            initial_damping_sharpness=initial_damping_sharpness,
+        # Stage 1: Segment encoder + self-attention
+        self.segment_encoder = SegmentPhysicsEncoder(
+            hidden_dim=hidden_dim,
+            num_frequencies=num_seg_frequencies,
+            num_layers=num_seg_mlp_layers,
             flux=flux,
+            include_cumulative_mass=local_features,
+            dropout=dropout,
         )
-
-        # === Learned collision time head ===
-        if learned_collision_time:
-            self.collision_time_head = CollisionTimeHead(hidden_dim)
-
-        # === Stage 1: Token encoder ===
-        if use_discontinuities:
-            self.disc_physics_encoder = DiscontinuityPhysicsEncoder(
-                hidden_dim=hidden_dim,
-                num_frequencies=num_seg_frequencies,
-                num_layers=num_seg_mlp_layers,
-                flux=flux,
-                dropout=dropout,
-            )
-        else:
-            self.segment_encoder = SegmentPhysicsEncoder(
-                hidden_dim=hidden_dim,
-                num_frequencies=num_seg_frequencies,
-                num_layers=num_seg_mlp_layers,
-                flux=flux,
-                include_cumulative_mass=local_features,
-                dropout=dropout,
-            )
-
-        # Self-attention over segments
         self.self_attn_layers = nn.ModuleList(
             [
                 EncoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
@@ -162,126 +97,78 @@ class WaveNO(nn.Module):
             ]
         )
 
-        # === Stage 2: Time conditioning + cross-segment attention ===
-        if time_condition:
+        # Stage 2: Query encoder (Fourier + MLP)
+        if num_freq_t is not None:
+            self.fourier_t = FourierFeatures(
+                num_frequencies=num_freq_t, include_input=True
+            )
+            query_t_dim = self.fourier_t.output_dim
+        else:
+            self.fourier_t = None
+            query_t_dim = 1
+
+        if num_freq_x is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_freq_x, include_input=True
+            )
+            query_x_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            query_x_dim = 1
+
+        query_input_dim = query_t_dim + query_x_dim
+        self.query_mlp = nn.Sequential(
+            nn.Linear(query_input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+        # Stage 2b: Segment evolution (conditional)
+        if use_film:
             self.time_conditioner = TimeConditioner(
                 hidden_dim=hidden_dim,
                 num_time_frequencies=num_seg_frequencies,
                 dropout=dropout,
             )
 
-        if num_cross_segment_layers > 0:
+        if use_cross_seg_attn:
             self.cross_segment_layers = nn.ModuleList(
                 [
-                    CrossSegmentAttention(hidden_dim, num_heads=num_heads, dropout=dropout)
+                    CrossSegmentAttention(
+                        hidden_dim, num_heads=num_heads, dropout=dropout
+                    )
                     for _ in range(num_cross_segment_layers)
                 ]
             )
-        else:
-            self.cross_segment_layers = nn.ModuleList()
 
-        # === Stage 3: Breakpoint evolution (when predict_trajectories) ===
-        if predict_trajectories:
-            if use_discontinuities or independent_traj:
-                # Trajectory decoded directly from disc embeddings
-                # (use_discontinuities: disc_physics_encoder embeddings;
-                #  independent_traj: separate DiscontinuityEncoder embeddings)
-                if independent_traj and not use_discontinuities:
-                    self.disc_encoder = DiscontinuityEncoder(
-                        input_dim=3,
-                        hidden_dim=hidden_dim,
-                        output_dim=hidden_dim,
-                        num_frequencies=num_seg_frequencies,
-                        num_layers=num_seg_mlp_layers,
-                        dropout=dropout,
-                    )
-                self.traj_time_encoder = TimeEncoder(
-                    hidden_dim=hidden_dim,
-                    output_dim=hidden_dim,
-                    num_frequencies=num_freq_t,
-                    num_layers=num_time_layers,
-                    dropout=dropout,
-                )
-                self.traj_decoder = TrajectoryDecoderTransformer(
-                    hidden_dim=hidden_dim,
-                    num_cross_layers=num_traj_cross_layers,
-                    num_attention_heads=num_heads,
-                )
-            else:
-                self.breakpoint_evolution = BreakpointEvolution(
-                    hidden_dim=hidden_dim,
-                    num_traj_cross_layers=num_traj_cross_layers,
-                    num_time_layers=num_time_layers,
-                    num_freq_t=num_freq_t,
-                    num_heads=num_heads,
-                    dropout=dropout,
-                )
-            self.fourier_bound = FourierFeatures(
-                num_frequencies=num_freq_bound, include_input=True
+        # Stage 3: LWR attention bias (conditional)
+        if use_char_bias:
+            self.lwr_bias = LWRBias(
+                initial_damping_sharpness=initial_damping_sharpness,
+                flux=flux,
+                use_damping=use_damping,
             )
 
-        # === Classifier head (when with_classifier) ===
-        if with_classifier:
-            self.classifier_head = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim // 2),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim // 2, 1),
-                nn.Sigmoid(),
-            )
-
-        # === Stage 5: Query encoder (Fourier + MLP) ===
-        self.fourier_t = FourierFeatures(
-            num_frequencies=num_freq_t, include_input=True
-        )
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_freq_x, include_input=True
-        )
-        query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
-        if predict_trajectories:
-            query_input_dim += 2 * self.fourier_bound.output_dim
-        self.query_mlp = nn.Sequential(
-            nn.Linear(query_input_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
-
-        # === Stage 6: Attention bias (disc path still uses characteristic bias) ===
-        if use_discontinuities:
-            self.bias_scale = nn.Parameter(torch.tensor(5.0))
-            self.damping_sharpness = nn.Parameter(torch.tensor(5.0))
-
-        # === Stage 7: Biased cross-attention layers ===
+        # Stage 4: Biased cross-attention layers
         self.cross_attn_layers = nn.ModuleList(
             [
-                BiasedCrossDecoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
+                BiasedCrossDecoderLayer(
+                    hidden_dim, num_heads=num_heads, dropout=dropout
+                )
                 for _ in range(num_cross_layers)
             ]
         )
 
-        # === Stage 8: Density head ===
+        # Stage 5: Density head
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
         )
-        # Initialize last layer near zero for stable start
         nn.init.zeros_(self.density_head[-1].weight)
         nn.init.constant_(self.density_head[-1].bias, 0.5)
-
-        # === Optional: Proximity head ===
-        if predict_proximity:
-            self.proximity_head = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, 1),
-            )
-            nn.init.zeros_(self.proximity_head[-1].weight)
-            nn.init.zeros_(self.proximity_head[-1].bias)
 
     def forward(
         self,
@@ -294,26 +181,14 @@ class WaveNO(nn.Module):
                 - 'xs': (B, K+1) breakpoint positions
                 - 'ks': (B, K) piece values
                 - 'pieces_mask': (B, K) validity mask
-                - 'disc_mask': (B, D) discontinuity validity mask
-                - 'discontinuities': (B, D, 3) discontinuity features
                 - 't_coords': (B, 1, nt, nx) time coordinates
                 - 'x_coords': (B, 1, nt, nx) space coordinates
 
         Returns:
             Dict containing:
                 - 'output_grid': (B, 1, nt, nx) predicted density
-                - 'characteristic_bias': (B, nt, nx, K_or_D) physics bias
-                - 'positions': (B, D, nt) breakpoint positions (when predict_trajectories)
+                - 'characteristic_bias': (B, nt, nx, K) physics bias (if use_char_bias)
         """
-        if self.use_discontinuities:
-            return self._forward_disc(batch_input)
-        return self._forward_seg(batch_input)
-
-    def _forward_seg(
-        self,
-        batch_input: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        """Segment-based forward pass (original WaveNO)."""
         xs = batch_input["xs"]
         ks = batch_input["ks"]
         pieces_mask = batch_input["pieces_mask"]
@@ -323,10 +198,9 @@ class WaveNO(nn.Module):
         B, nt, nx = t_coords.shape
         K = ks.shape[1]
 
-        # === Stage 1: Encode segments ===
+        # Stage 1: Encode segments + self-attention
         seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
 
-        # Self-attention over segments
         key_padding_mask = ~pieces_mask.bool()  # True = padded
         all_masked = key_padding_mask.all(dim=1)
         if all_masked.any():
@@ -336,304 +210,107 @@ class WaveNO(nn.Module):
             seg_emb = layer(seg_emb, key_padding_mask=key_padding_mask)
         seg_emb = seg_emb * pieces_mask.unsqueeze(-1)  # re-zero padded
 
-        # === Stage 2: Time-conditioned segment evolution ===
-        t_unique = t_coords[:, :, 0]  # (B, nt)
-        if self.time_condition:
-            seg_emb_t = self.time_conditioner(seg_emb, t_unique)  # (B, nt, K, H)
-        else:
-            seg_emb_t = seg_emb.unsqueeze(1).expand(B, nt, K, self.hidden_dim)
+        # Stage 2: Query encoding
+        t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
+        x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
+        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
+        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
+        query_features = torch.cat([t_enc, x_enc], dim=-1)
+        query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
+        query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)
 
-        # Cross-segment attention per time step
-        if len(self.cross_segment_layers) > 0:
-            seg_flat = seg_emb_t.reshape(B * nt, K, -1)
+        # Stage 2b: Segment evolution (FiLM + cross-segment attention)
+        if self.use_film:
+            t_unique = t_coords[:, :, 0]  # (B, nt)
+            kv = self.time_conditioner(seg_emb, t_unique)  # (B, nt, K, H)
+        else:
+            kv = seg_emb.unsqueeze(1).expand(B, nt, K, self.hidden_dim)
+
+        kv = kv.reshape(B * nt, K, self.hidden_dim)  # (B*nt, K, H)
+
+        if self.use_cross_seg_attn:
             cs_mask = (
-                (~pieces_mask.bool())
-                .unsqueeze(1)
-                .expand(B, nt, K)
-                .reshape(B * nt, K)
+                (~pieces_mask.bool()).unsqueeze(1).expand(B, nt, K).reshape(B * nt, K)
             )
             all_masked_cs = cs_mask.all(dim=1)
             if all_masked_cs.any():
                 cs_mask = cs_mask.clone()
                 cs_mask[all_masked_cs] = False
             for layer in self.cross_segment_layers:
-                seg_flat = layer(seg_flat, key_padding_mask=cs_mask)
-            seg_emb_t = seg_flat.reshape(B, nt, K, self.hidden_dim)
-            seg_emb_t = seg_emb_t * pieces_mask.unsqueeze(1).unsqueeze(-1)
+                kv = layer(kv, key_padding_mask=cs_mask)
+            kv = kv.reshape(B, nt, K, self.hidden_dim)
+            kv = kv * pieces_mask.unsqueeze(1).unsqueeze(-1)  # re-zero
+            kv = kv.reshape(B * nt, K, self.hidden_dim)
 
-        # === Stage 3 & 4: Breakpoint evolution + boundary extraction ===
-        positions = None
-        existence = None
-        if self.predict_trajectories:
-            disc_mask = batch_input["disc_mask"]  # (B, D)
+        # Stage 3: LWR attention bias (conditional)
+        if self.use_char_bias:
+            ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
+            char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
 
-            if self.independent_traj:
-                # Independent trajectory: encode raw discontinuities directly
-                discontinuities = batch_input["discontinuities"]  # (B, D, 3)
-                disc_emb = self.disc_encoder(discontinuities, disc_mask)  # (B, D, H)
-                time_emb = self.traj_time_encoder(t_unique)  # (B, nt, H)
-                positions = self.traj_decoder(
-                    disc_emb, time_emb, disc_mask
-                )  # (B, D, nt)
-                bp_emb = disc_emb  # for classifier if needed
-            elif self.with_classifier:
-                # Need bp_emb for classifier head
-                positions, bp_emb = self.breakpoint_evolution(
-                    seg_emb, disc_mask, t_unique, return_embeddings=True
-                )
-            else:
-                positions = self.breakpoint_evolution(
-                    seg_emb, disc_mask, t_unique
-                )  # (B, D, nt)
-
-            # Classifier: filter breakpoints
-            if self.with_classifier:
-                existence = (
-                    self.classifier_head(bp_emb).squeeze(-1) * disc_mask
-                )  # (B, D)
-                effective_mask = disc_mask * (existence > 0.5).float()
-            else:
-                effective_mask = disc_mask
-
-            left_bound, right_bound = compute_boundaries(
-                positions, x_coords, effective_mask
-            )  # each (B, nt, nx)
-
-        # === Stage 5: Query encoding ===
-        t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
-        x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
-
-        if self.predict_trajectories:
-            left_enc = self.fourier_bound(
-                left_bound.reshape(-1)
-            )  # (B*nt*nx, F_bound)
-            right_enc = self.fourier_bound(
-                right_bound.reshape(-1)
-            )  # (B*nt*nx, F_bound)
-            query_features = torch.cat(
-                [t_enc, x_enc, left_enc, right_enc], dim=-1
+            bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
+            attn_mask = (
+                bias_flat.unsqueeze(1)
+                .expand(-1, self.num_heads, -1, -1)
+                .reshape(B * nt * self.num_heads, nx, K)
             )
         else:
-            query_features = torch.cat([t_enc, x_enc], dim=-1)
+            char_bias = None
+            attn_mask = None
 
-        query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
-        query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)  # (B, nt, nx, H)
-
-        # === Stage 6: LWR attention bias ===
-        ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
-        char_bias = self.lwr_bias(
-            ic_data, (t_coords, x_coords)
-        )  # (B, nt, nx, K)
-
-        # === Stage 7: Per-time-step biased cross-attention ===
-        # Reshape for batched per-timestep attention
+        # Stage 4: Per-time-step cross-attention
         q = query_emb.reshape(B * nt, nx, self.hidden_dim)  # (B*nt, nx, H)
-        kv = seg_emb_t.reshape(B * nt, K, self.hidden_dim)  # (B*nt, K, H)
-        bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
 
-        # Expand bias for multi-head: (B*nt, nx, K) -> (B*nt*heads, nx, K)
-        attn_mask = (
-            bias_flat.unsqueeze(1)
-            .expand(-1, self.num_heads, -1, -1)
-            .reshape(B * nt * self.num_heads, nx, K)
-        )
-
-        # Key padding mask: (B, K) -> (B*nt, K)
+        # Key padding mask: (B, K) → (B*nt, K)
         kv_padding_mask = (
-            (~pieces_mask.bool())
-            .unsqueeze(1)
-            .expand(B, nt, K)
-            .reshape(B * nt, K)
+            (~pieces_mask.bool()).unsqueeze(1).expand(B, nt, K).reshape(B * nt, K)
         )
-        all_masked_kv = kv_padding_mask.all(dim=1)
-        if all_masked_kv.any():
-            kv_padding_mask = kv_padding_mask.clone()
-            kv_padding_mask[all_masked_kv] = False
-
-        for layer in self.cross_attn_layers:
-            q = layer(
-                q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask
-            )
-
-        # === Stage 8: Density head ===
-        density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
-        density = density.clamp(0.0, 1.0)
-        output_grid = density.reshape(B, 1, nt, nx)
-
-        output = {
-            "output_grid": output_grid,
-            "characteristic_bias": char_bias,
-        }
-        if self.predict_proximity:
-            proximity = torch.sigmoid(self.proximity_head(q).squeeze(-1))  # (B*nt, nx)
-            output["shock_proximity"] = proximity.reshape(B, 1, nt, nx)
-        if positions is not None:
-            output["positions"] = positions
-        if existence is not None:
-            output["existence"] = existence.unsqueeze(-1).expand_as(positions)
-
-        return output
-
-    def _forward_disc(
-        self,
-        batch_input: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        """Discontinuity-based forward pass (WaveNODisc).
-
-        Uses discontinuities as tokens instead of segments. The token
-        dimension is D (number of discontinuities) instead of K (number
-        of IC pieces).
-        """
-        discontinuities = batch_input["discontinuities"]  # (B, D, 3)
-        disc_mask = batch_input["disc_mask"]  # (B, D)
-        t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
-        x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
-
-        B, nt, nx = t_coords.shape
-        D = disc_mask.shape[1]
-
-        # === Stage 1: Encode discontinuities ===
-        emb = self.disc_physics_encoder(discontinuities, disc_mask)  # (B, D, H)
-
-        # Self-attention over discontinuity tokens
-        key_padding_mask = ~disc_mask.bool()  # True = padded
-        all_masked = key_padding_mask.all(dim=1)
+        all_masked = kv_padding_mask.all(dim=1)
         if all_masked.any():
-            key_padding_mask = key_padding_mask.clone()
-            key_padding_mask[all_masked] = False
-        for layer in self.self_attn_layers:
-            emb = layer(emb, key_padding_mask=key_padding_mask)
-        emb = emb * disc_mask.unsqueeze(-1)  # re-zero padded
-
-        # Learned collision time (after self-attention has full IC context)
-        disc_t_coll = None
-        if self.learned_collision_time:
-            disc_t_coll = self.collision_time_head(emb, disc_mask)  # (B, D)
-
-        # === Stage 2: Time-conditioned disc evolution ===
-        t_unique = t_coords[:, :, 0]  # (B, nt)
-        if self.time_condition:
-            emb_t = self.time_conditioner(emb, t_unique)  # (B, nt, D, H)
-        else:
-            emb_t = emb.unsqueeze(1).expand(B, nt, D, self.hidden_dim)
-
-        # Cross-token attention per time step
-        if len(self.cross_segment_layers) > 0:
-            emb_flat = emb_t.reshape(B * nt, D, -1)
-            cs_mask = (
-                (~disc_mask.bool())
-                .unsqueeze(1)
-                .expand(B, nt, D)
-                .reshape(B * nt, D)
-            )
-            all_masked_cs = cs_mask.all(dim=1)
-            if all_masked_cs.any():
-                cs_mask = cs_mask.clone()
-                cs_mask[all_masked_cs] = False
-            for layer in self.cross_segment_layers:
-                emb_flat = layer(emb_flat, key_padding_mask=cs_mask)
-            emb_t = emb_flat.reshape(B, nt, D, self.hidden_dim)
-            emb_t = emb_t * disc_mask.unsqueeze(1).unsqueeze(-1)
-
-        # === Stage 3 & 4: Trajectory from disc embeddings + boundary extraction ===
-        positions = None
-        if self.predict_trajectories:
-            time_emb = self.traj_time_encoder(t_unique)  # (B, nt, H)
-            positions = self.traj_decoder(
-                emb, time_emb, disc_mask
-            )  # (B, D, nt)
-
-            left_bound, right_bound = compute_boundaries(
-                positions, x_coords, disc_mask
-            )  # each (B, nt, nx)
-
-        # === Stage 5: Query encoding ===
-        t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
-        x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
-
-        if self.predict_trajectories:
-            left_enc = self.fourier_bound(
-                left_bound.reshape(-1)
-            )  # (B*nt*nx, F_bound)
-            right_enc = self.fourier_bound(
-                right_bound.reshape(-1)
-            )  # (B*nt*nx, F_bound)
-            query_features = torch.cat(
-                [t_enc, x_enc, left_enc, right_enc], dim=-1
-            )
-        else:
-            query_features = torch.cat([t_enc, x_enc], dim=-1)
-
-        query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
-        query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)  # (B, nt, nx, H)
-
-        # === Stage 6: Discontinuity characteristic attention bias ===
-        char_bias = compute_discontinuity_characteristic_bias(
-            t_coords,
-            x_coords,
-            discontinuities[:, :, 0],  # disc positions
-            discontinuities[:, :, 1],  # rho_L
-            discontinuities[:, :, 2],  # rho_R
-            disc_mask,
-            self.flux,
-            self.bias_scale,
-            damping_sharpness=self.damping_sharpness,
-            t_coll=disc_t_coll,
-        )  # (B, nt, nx, D)
-
-        # === Stage 7: Per-time-step biased cross-attention ===
-        q = query_emb.reshape(B * nt, nx, self.hidden_dim)  # (B*nt, nx, H)
-        kv = emb_t.reshape(B * nt, D, self.hidden_dim)  # (B*nt, D, H)
-        bias_flat = char_bias.reshape(B * nt, nx, D)  # (B*nt, nx, D)
-
-        # Expand bias for multi-head: (B*nt, nx, D) -> (B*nt*heads, nx, D)
-        attn_mask = (
-            bias_flat.unsqueeze(1)
-            .expand(-1, self.num_heads, -1, -1)
-            .reshape(B * nt * self.num_heads, nx, D)
-        )
-
-        # Key padding mask: (B, D) -> (B*nt, D)
-        kv_padding_mask = (
-            (~disc_mask.bool())
-            .unsqueeze(1)
-            .expand(B, nt, D)
-            .reshape(B * nt, D)
-        )
-        all_masked_kv = kv_padding_mask.all(dim=1)
-        if all_masked_kv.any():
             kv_padding_mask = kv_padding_mask.clone()
-            kv_padding_mask[all_masked_kv] = False
+            kv_padding_mask[all_masked] = False
 
         for layer in self.cross_attn_layers:
-            q = layer(
-                q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask
-            )
+            q = layer(q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask)
 
-        # === Stage 8: Density head ===
+        # Stage 5: Density head
         density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
         density = density.clamp(0.0, 1.0)
         output_grid = density.reshape(B, 1, nt, nx)
 
-        output = {
-            "output_grid": output_grid,
-            "characteristic_bias": char_bias,
-        }
-        if self.predict_proximity:
-            proximity = torch.sigmoid(self.proximity_head(q).squeeze(-1))  # (B*nt, nx)
-            output["shock_proximity"] = proximity.reshape(B, 1, nt, nx)
-        if positions is not None:
-            output["positions"] = positions
+        result = {"output_grid": output_grid}
+        if char_bias is not None:
+            result["characteristic_bias"] = char_bias
+        return result
 
-        return output
+
+# ---------------------------------------------------------------------------
+# Factory functions
+# ---------------------------------------------------------------------------
+
+
+def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
+    """Shared builder for WaveNO variants."""
+    if not isinstance(args, dict):
+        args = vars(args)
+
+    kwargs = dict(
+        hidden_dim=args.get("hidden_dim", 64),
+        num_seg_frequencies=args.get("num_seg_frequencies", 8),
+        num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
+        num_self_attn_layers=args.get("num_self_attn_layers", 2),
+        num_cross_layers=args.get("num_cross_layers", 2),
+        num_heads=args.get("num_heads", 4),
+        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
+        local_features=args.get("local_features", True),
+        dropout=args.get("dropout", 0.05),
+        num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
+    )
+    kwargs.update(flag_overrides)
+    return WaveNO(**kwargs)
 
 
 def build_waveno(args: dict) -> WaveNO:
-    """Factory function for WaveNO.
+    """Factory function for WaveNO (bias + FiLM, the default).
 
     Args:
         args: Dict or Namespace with model configuration.
@@ -641,82 +318,74 @@ def build_waveno(args: dict) -> WaveNO:
     Returns:
         Configured WaveNO instance.
     """
-    if not isinstance(args, dict):
-        args = vars(args)
-
-    return WaveNO(
-        hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
-        num_seg_frequencies=args.get("num_seg_frequencies", 8),
-        num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
-        num_self_attn_layers=args.get("num_self_attn_layers", 2),
-        num_cross_layers=args.get("num_cross_layers", 2),
-        num_heads=args.get("num_heads", 4),
-        num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
-        time_condition=args.get("time_condition", True),
-        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
-        predict_trajectories=args.get("predict_trajectories", True),
-        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
-        num_time_layers=args.get("num_time_layers", 2),
-        num_freq_bound=args.get("num_freq_bound", 8),
-        learned_collision_time=args.get("learned_collision_time", False),
-        dropout=args.get("dropout", 0.05),
+    return _build_waveno(
+        args,
+        use_char_bias=True,
+        use_damping=False,
+        use_film=True,
+        use_cross_seg_attn=False,
     )
 
 
-def _build_waveno_base(args: dict, **overrides) -> WaveNO:
-    """Shared builder for WaveNO variants."""
-    if not isinstance(args, dict):
-        args = vars(args)
-    kwargs = dict(
-        hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
-        num_seg_frequencies=args.get("num_seg_frequencies", 8),
-        num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
-        num_self_attn_layers=args.get("num_self_attn_layers", 2),
-        num_cross_layers=args.get("num_cross_layers", 2),
-        num_heads=args.get("num_heads", 4),
-        num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
-        time_condition=args.get("time_condition", True),
-        initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
-        predict_trajectories=args.get("predict_trajectories", True),
-        num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
-        num_time_layers=args.get("num_time_layers", 2),
-        num_freq_bound=args.get("num_freq_bound", 8),
-        learned_collision_time=args.get("learned_collision_time", False),
-        dropout=args.get("dropout", 0.05),
+def build_waveno_bare(args: dict) -> WaveNO:
+    """Bare minimum: unbiased cross-attention, no extras."""
+    return _build_waveno(
+        args, use_char_bias=False, use_film=False, use_cross_seg_attn=False
     )
-    kwargs.update(overrides)
-    return WaveNO(**kwargs)
 
 
-def build_waveno_cls(args: dict) -> WaveNO:
-    """WaveNO + classifier head to filter breakpoints."""
-    return _build_waveno_base(args, with_classifier=True)
+def build_waveno_bias_only(args: dict) -> WaveNO:
+    """+ LWR bias (without damping)."""
+    return _build_waveno(
+        args,
+        use_char_bias=True,
+        use_damping=False,
+        use_film=False,
+        use_cross_seg_attn=False,
+    )
 
 
-def build_waveno_local(args: dict) -> WaveNO:
-    """WaveNO without cumulative mass (N_k) in segment encoder."""
-    return _build_waveno_base(args, local_features=False)
+def build_waveno_bias_damp(args: dict) -> WaveNO:
+    """+ LWR bias + collision-time damping."""
+    return _build_waveno(
+        args,
+        use_char_bias=True,
+        use_damping=True,
+        use_film=False,
+        use_cross_seg_attn=False,
+    )
 
 
-def build_waveno_indep_traj(args: dict) -> WaveNO:
-    """WaveNO with independent trajectory decoding from raw discontinuities."""
-    return _build_waveno_base(args, independent_traj=True)
+def build_waveno_damp(args: dict) -> WaveNO:
+    """+ LWR bias + damping + FiLM time conditioning."""
+    return _build_waveno(
+        args, use_char_bias=True, use_film=True, use_cross_seg_attn=False
+    )
 
 
-def build_waveno_disc(args: dict) -> WaveNO:
-    """WaveNO with discontinuity-based tokens instead of segments."""
-    return _build_waveno_base(args, use_discontinuities=True)
+def build_waveno_damp_cross_attn(args: dict) -> WaveNO:
+    """+ LWR bias + damping + cross-segment attention."""
+    return _build_waveno(
+        args, use_char_bias=True, use_film=False, use_cross_seg_attn=True
+    )
 
 
-def build_waveno_base(args: dict) -> WaveNO:
-    """WaveNO without trajectory prediction (grid-only output)."""
-    return _build_waveno_base(args, predict_trajectories=False)
+def build_waveno_all(args: dict) -> WaveNO:
+    """All components except trajectories."""
+    return _build_waveno(
+        args, use_char_bias=True, use_film=True, use_cross_seg_attn=True
+    )
 
 
-def build_shock_aware_waveno(args: dict) -> WaveNO:
-    """WaveNO with shock proximity prediction head."""
-    return _build_waveno_base(args, predict_proximity=True)
+def build_waveno_film_only(args: dict) -> WaveNO:
+    """FiLM only (no LWR bias)."""
+    return _build_waveno(
+        args, use_char_bias=False, use_film=True, use_cross_seg_attn=False
+    )
+
+
+def build_waveno_cross_attn_only(args: dict) -> WaveNO:
+    """Cross-segment attention only (no LWR bias)."""
+    return _build_waveno(
+        args, use_char_bias=False, use_film=False, use_cross_seg_attn=True
+    )
