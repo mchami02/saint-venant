@@ -89,9 +89,9 @@ class WaveNOFull(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_freq_t: int = 8,
-        num_freq_x: int = 8,
-        num_seg_frequencies: int = 8,
+        num_freq_t: int | None = None,
+        num_freq_x: int | None = None,
+        num_seg_frequencies: int | None = None,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
@@ -102,7 +102,7 @@ class WaveNOFull(nn.Module):
         predict_trajectories: bool = True,
         num_traj_cross_layers: int = 2,
         num_time_layers: int = 2,
-        num_freq_bound: int = 8,
+        num_freq_bound: int | None = None,
         flux: Flux | None = None,
         with_classifier: bool = False,
         local_features: bool = True,
@@ -218,9 +218,12 @@ class WaveNOFull(nn.Module):
                     num_heads=num_heads,
                     dropout=dropout,
                 )
-            self.fourier_bound = FourierFeatures(
-                num_frequencies=num_freq_bound, include_input=True
-            )
+            if num_freq_bound is not None:
+                self.fourier_bound = FourierFeatures(
+                    num_frequencies=num_freq_bound, include_input=True
+                )
+            else:
+                self.fourier_bound = None
 
         # === Classifier head (when with_classifier) ===
         if with_classifier:
@@ -233,11 +236,30 @@ class WaveNOFull(nn.Module):
             )
 
         # === Stage 5: Query encoder (Fourier + MLP) ===
-        self.fourier_t = FourierFeatures(num_frequencies=num_freq_t, include_input=True)
-        self.fourier_x = FourierFeatures(num_frequencies=num_freq_x, include_input=True)
-        query_input_dim = self.fourier_t.output_dim + self.fourier_x.output_dim
+        if num_freq_t is not None:
+            self.fourier_t = FourierFeatures(
+                num_frequencies=num_freq_t, include_input=True
+            )
+            query_t_dim = self.fourier_t.output_dim
+        else:
+            self.fourier_t = None
+            query_t_dim = 1
+
+        if num_freq_x is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_freq_x, include_input=True
+            )
+            query_x_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            query_x_dim = 1
+
+        query_input_dim = query_t_dim + query_x_dim
         if predict_trajectories:
-            query_input_dim += 2 * self.fourier_bound.output_dim
+            bound_dim = (
+                self.fourier_bound.output_dim if self.fourier_bound is not None else 1
+            )
+            query_input_dim += 2 * bound_dim
         self.query_mlp = nn.Sequential(
             nn.Linear(query_input_dim, hidden_dim),
             nn.GELU(),
@@ -399,14 +421,26 @@ class WaveNOFull(nn.Module):
         # === Stage 5: Query encoding ===
         t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
         x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
+        t_enc = (
+            self.fourier_t(t_flat)
+            if self.fourier_t is not None
+            else t_flat.unsqueeze(-1)
+        )
+        x_enc = (
+            self.fourier_x(x_flat)
+            if self.fourier_x is not None
+            else x_flat.unsqueeze(-1)
+        )
 
         if self.predict_trajectories:
-            left_enc = self.fourier_bound(left_bound.reshape(-1))  # (B*nt*nx, F_bound)
-            right_enc = self.fourier_bound(
-                right_bound.reshape(-1)
-            )  # (B*nt*nx, F_bound)
+            left_flat = left_bound.reshape(-1)
+            right_flat = right_bound.reshape(-1)
+            if self.fourier_bound is not None:
+                left_enc = self.fourier_bound(left_flat)
+                right_enc = self.fourier_bound(right_flat)
+            else:
+                left_enc = left_flat.unsqueeze(-1)
+                right_enc = right_flat.unsqueeze(-1)
             query_features = torch.cat([t_enc, x_enc, left_enc, right_enc], dim=-1)
         else:
             query_features = torch.cat([t_enc, x_enc], dim=-1)
@@ -533,14 +567,26 @@ class WaveNOFull(nn.Module):
         # === Stage 5: Query encoding ===
         t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
         x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
+        t_enc = (
+            self.fourier_t(t_flat)
+            if self.fourier_t is not None
+            else t_flat.unsqueeze(-1)
+        )
+        x_enc = (
+            self.fourier_x(x_flat)
+            if self.fourier_x is not None
+            else x_flat.unsqueeze(-1)
+        )
 
         if self.predict_trajectories:
-            left_enc = self.fourier_bound(left_bound.reshape(-1))  # (B*nt*nx, F_bound)
-            right_enc = self.fourier_bound(
-                right_bound.reshape(-1)
-            )  # (B*nt*nx, F_bound)
+            left_flat = left_bound.reshape(-1)
+            right_flat = right_bound.reshape(-1)
+            if self.fourier_bound is not None:
+                left_enc = self.fourier_bound(left_flat)
+                right_enc = self.fourier_bound(right_flat)
+            else:
+                left_enc = left_flat.unsqueeze(-1)
+                right_enc = right_flat.unsqueeze(-1)
             query_features = torch.cat([t_enc, x_enc, left_enc, right_enc], dim=-1)
         else:
             query_features = torch.cat([t_enc, x_enc], dim=-1)
@@ -618,9 +664,9 @@ def build_waveno_full(args: dict) -> WaveNOFull:
 
     return WaveNOFull(
         hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
-        num_seg_frequencies=args.get("num_seg_frequencies", 8),
+        num_freq_t=args.get("num_freq_t", None),
+        num_freq_x=args.get("num_freq_x", None),
+        num_seg_frequencies=args.get("num_seg_frequencies", None),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
@@ -631,7 +677,7 @@ def build_waveno_full(args: dict) -> WaveNOFull:
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
-        num_freq_bound=args.get("num_freq_bound", 8),
+        num_freq_bound=args.get("num_freq_bound", None),
         learned_collision_time=args.get("learned_collision_time", False),
         dropout=args.get("dropout", 0.05),
     )
@@ -643,9 +689,9 @@ def _build_waveno_full_base(args: dict, **overrides) -> WaveNOFull:
         args = vars(args)
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
-        num_freq_t=args.get("num_freq_t", 8),
-        num_freq_x=args.get("num_freq_x", 8),
-        num_seg_frequencies=args.get("num_seg_frequencies", 8),
+        num_freq_t=args.get("num_freq_t", None),
+        num_freq_x=args.get("num_freq_x", None),
+        num_seg_frequencies=args.get("num_seg_frequencies", None),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
@@ -656,7 +702,7 @@ def _build_waveno_full_base(args: dict, **overrides) -> WaveNOFull:
         predict_trajectories=args.get("predict_trajectories", True),
         num_traj_cross_layers=args.get("num_traj_cross_layers", 2),
         num_time_layers=args.get("num_time_layers", 2),
-        num_freq_bound=args.get("num_freq_bound", 8),
+        num_freq_bound=args.get("num_freq_bound", None),
         learned_collision_time=args.get("learned_collision_time", False),
         dropout=args.get("dropout", 0.05),
     )

@@ -37,7 +37,7 @@ class BreakpointEvolution(nn.Module):
         hidden_dim: int = 64,
         num_traj_cross_layers: int = 2,
         num_time_layers: int = 2,
-        num_freq_t: int = 8,
+        num_freq_t: int | None = 8,
         num_heads: int = 4,
         dropout: float = 0.0,
     ):
