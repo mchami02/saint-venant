@@ -25,7 +25,8 @@ def solve(
     bc_left: tuple[float, float] | None = None,
     bc_right: tuple[float, float] | None = None,
     bc_left_time: Callable[[float], tuple[float, float]] | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    max_value: float | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool]:
     """Run the ARZ solver.
 
     Parameters
@@ -39,9 +40,12 @@ def solve(
     bc_left, bc_right : static Dirichlet values (rho, v).
     bc_left_time : time-varying left BC callable.
 
+    max_value : if set, terminate early when any value exceeds this threshold.
+
     Returns
     -------
     rho_hist, w_hist, v_hist : tensors of shape (nt+1, nx).
+    valid : True if the solution remained finite (and within max_value).
     """
     eps = 1e-12
     use_weno = reconstruction == "weno5"
@@ -97,6 +101,7 @@ def solve(
         return drho, drho_w
 
     # --------------------------------------------------------------- march
+    valid = True
     for n in range(nt):
         t = n * dt
 
@@ -130,4 +135,15 @@ def solve(
         w_hist[n + 1] = w
         v_hist[n + 1] = v
 
-    return rho_hist, w_hist, v_hist
+        # Check for NaN/Inf always; extreme values only if max_value is set
+        is_bad = not torch.isfinite(rho).all() or not torch.isfinite(v).all()
+        if not is_bad and max_value is not None:
+            is_bad = rho.abs().max() > max_value or v.abs().max() > max_value
+        if is_bad:
+            rho_hist[n + 2 :] = float("nan")
+            w_hist[n + 2 :] = float("nan")
+            v_hist[n + 2 :] = float("nan")
+            valid = False
+            break
+
+    return rho_hist, w_hist, v_hist, valid

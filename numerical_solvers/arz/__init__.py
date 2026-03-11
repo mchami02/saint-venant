@@ -33,7 +33,8 @@ def generate_one(
     bc_left: tuple[float, float] | None = None,
     bc_right: tuple[float, float] | None = None,
     bc_left_time: Callable[[float], tuple[float, float]] | None = None,
-) -> dict[str, torch.Tensor | float | int]:
+    max_value: float | None = None,
+) -> dict[str, torch.Tensor | float | int | bool]:
     """Solve one ARZ problem.
 
     Parameters
@@ -49,12 +50,13 @@ def generate_one(
     reconstruction : "constant" or "weno5".
     bc_left, bc_right : static Dirichlet values (rho, v).
     bc_left_time : time-varying left BC callable.
+    max_value : if set, terminate early when any value exceeds this threshold.
 
     Returns
     -------
     dict with keys:
         rho (nt+1, nx), v (nt+1, nx), w (nt+1, nx),
-        x (nx,), t (nt+1,), dx, dt, nt.
+        x (nx,), t (nt+1,), dx, dt, nt, valid (bool).
     """
     nx = rho0.shape[0]
     x = torch.arange(nx, device=rho0.device, dtype=rho0.dtype) * dx
@@ -63,7 +65,7 @@ def generate_one(
     w0 = v0 + pressure(rho0, gamma)
     rho_w0 = rho0 * w0
 
-    rho_hist, w_hist, v_hist = solve(
+    rho_hist, w_hist, v_hist, valid = solve(
         rho0,
         rho_w0,
         nx=nx,
@@ -77,6 +79,7 @@ def generate_one(
         bc_left=bc_left,
         bc_right=bc_right,
         bc_left_time=bc_left_time,
+        max_value=max_value,
     )
 
     t_arr = torch.arange(nt + 1, device=rho0.device, dtype=rho0.dtype) * dt
@@ -90,6 +93,7 @@ def generate_one(
         "dx": dx,
         "dt": dt,
         "nt": nt,
+        "valid": valid,
     }
 
 
@@ -107,6 +111,7 @@ def generate_n(
     reconstruction: str = "weno5",
     rho_range: tuple[float, float] = (0.1, 1.0),
     v_range: tuple[float, float] = (0.0, 1.0),
+    max_value: float = 10.0,
     seed: int | None = None,
     show_progress: bool = True,
     device: torch.device | str = "cpu",
@@ -153,12 +158,9 @@ def generate_n(
                 bc_type=bc_type,
                 flux_type=flux_type,
                 reconstruction=reconstruction,
+                max_value=max_value,
             )
-            if (
-                torch.isfinite(result["rho"]).all()
-                and torch.isfinite(result["v"]).all()
-                and torch.isfinite(result["w"]).all()
-            ):
+            if result["valid"]:
                 ic_xs_list.append(ic_params["xs"])
                 ic_rho_ks_list.append(ic_params["rho_ks"])
                 ic_v_ks_list.append(ic_params["v_ks"])
