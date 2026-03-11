@@ -54,9 +54,9 @@ class WaveNO(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_freq_t: int | None = 8,
-        num_freq_x: int | None = 8,
-        num_seg_frequencies: int | None = 8,
+        num_freq_t: int | None = None,
+        num_freq_x: int | None = None,
+        num_seg_frequencies: int | None = None,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
@@ -213,8 +213,16 @@ class WaveNO(nn.Module):
         # Stage 2: Query encoding
         t_flat = t_coords.reshape(-1)  # (B*nt*nx,)
         x_flat = x_coords.reshape(-1)  # (B*nt*nx,)
-        t_enc = self.fourier_t(t_flat)  # (B*nt*nx, F_t)
-        x_enc = self.fourier_x(x_flat)  # (B*nt*nx, F_x)
+        t_enc = (
+            self.fourier_t(t_flat)
+            if self.fourier_t is not None
+            else t_flat.unsqueeze(-1)
+        )
+        x_enc = (
+            self.fourier_x(x_flat)
+            if self.fourier_x is not None
+            else x_flat.unsqueeze(-1)
+        )
         query_features = torch.cat([t_enc, x_enc], dim=-1)
         query_emb = self.query_mlp(query_features)  # (B*nt*nx, H)
         query_emb = query_emb.reshape(B, nt, nx, self.hidden_dim)
@@ -295,7 +303,9 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
 
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
-        num_seg_frequencies=args.get("num_seg_frequencies", 8),
+        num_freq_t=args.get("num_freq_t", None),
+        num_freq_x=args.get("num_freq_x", None),
+        num_seg_frequencies=args.get("num_seg_frequencies", None),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),

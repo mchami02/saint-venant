@@ -70,7 +70,7 @@ class TimeEncoder(nn.Module):
     Args:
         hidden_dim: Hidden dimension of the MLP.
         output_dim: Output dimension (latent space dimension).
-        num_frequencies: Number of Fourier frequency bands.
+        num_frequencies: Number of Fourier frequency bands (None = raw scalar).
         num_layers: Number of MLP layers.
     """
 
@@ -78,15 +78,19 @@ class TimeEncoder(nn.Module):
         self,
         hidden_dim: int = 128,
         output_dim: int = 128,
-        num_frequencies: int = 32,
+        num_frequencies: int | None = 32,
         num_layers: int = 3,
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.fourier = FourierFeatures(num_frequencies=num_frequencies)
+        if num_frequencies is not None:
+            self.fourier = FourierFeatures(num_frequencies=num_frequencies)
+            in_dim = self.fourier.output_dim
+        else:
+            self.fourier = None
+            in_dim = 1  # raw scalar
 
         layers = []
-        in_dim = self.fourier.output_dim
         for i in range(num_layers):
             out_dim = output_dim if i == num_layers - 1 else hidden_dim
             layers.append(nn.Linear(in_dim, out_dim))
@@ -111,7 +115,10 @@ class TimeEncoder(nn.Module):
         # Fourier encode each time
         B, T = times.shape
         times_flat = times.reshape(-1)  # (B*T,)
-        encoded = self.fourier(times_flat)  # (B*T, fourier_dim)
+        if self.fourier is not None:
+            encoded = self.fourier(times_flat)  # (B*T, fourier_dim)
+        else:
+            encoded = times_flat.unsqueeze(-1)  # (B*T, 1)
         encoded = self.mlp(encoded)  # (B*T, output_dim)
         return encoded.reshape(B, T, -1)  # (B, T, output_dim)
 
@@ -126,7 +133,8 @@ class DiscontinuityEncoder(nn.Module):
         input_dim: Dimension of discontinuity features (default 3: x, rho_L, rho_R).
         hidden_dim: Hidden dimension of the MLP.
         output_dim: Output dimension (latent space dimension).
-        num_frequencies: Number of Fourier frequency bands for x coordinate.
+        num_frequencies: Number of Fourier frequency bands for x coordinate
+            (None = raw scalar).
         num_layers: Number of MLP layers.
         dropout: Dropout rate applied after GELU in MLP layers.
     """
@@ -136,7 +144,7 @@ class DiscontinuityEncoder(nn.Module):
         input_dim: int = 3,
         hidden_dim: int = 128,
         output_dim: int = 128,
-        num_frequencies: int = 16,
+        num_frequencies: int | None = 16,
         num_layers: int = 3,
         dropout: float = 0.0,
     ):
@@ -146,12 +154,17 @@ class DiscontinuityEncoder(nn.Module):
         self.output_dim = output_dim
 
         # Fourier features for x coordinate
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_frequencies, include_input=True
-        )
+        if num_frequencies is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_frequencies, include_input=True
+            )
+            spatial_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            spatial_dim = 1  # raw scalar
 
-        # Input dimension: Fourier features for x + remaining features
-        mlp_input_dim = self.fourier_x.output_dim + (input_dim - 1)
+        # Input dimension: spatial features for x + remaining features
+        mlp_input_dim = spatial_dim + (input_dim - 1)
 
         # Build MLP layers
         layers = []
@@ -188,10 +201,13 @@ class DiscontinuityEncoder(nn.Module):
         x_coord = discontinuities[:, :, 0]  # (B, D)
         extra_features = discontinuities[:, :, 1:]  # (B, D, input_dim-1)
 
-        # Apply Fourier features to x coordinate
-        x_flat = x_coord.reshape(-1)  # (B*D,)
-        x_fourier = self.fourier_x(x_flat)  # (B*D, fourier_dim)
-        x_fourier = x_fourier.reshape(B, D, -1)  # (B, D, fourier_dim)
+        # Encode x coordinate
+        if self.fourier_x is not None:
+            x_flat = x_coord.reshape(-1)  # (B*D,)
+            x_fourier = self.fourier_x(x_flat)  # (B*D, fourier_dim)
+            x_fourier = x_fourier.reshape(B, D, -1)  # (B, D, fourier_dim)
+        else:
+            x_fourier = x_coord.unsqueeze(-1)  # (B, D, 1)
 
         # Concatenate Fourier features with extra features
         features = torch.cat([x_fourier, extra_features], dim=-1)

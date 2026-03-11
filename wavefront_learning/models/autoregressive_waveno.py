@@ -58,11 +58,11 @@ class AutoregressiveWaveNOFull(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_seg_frequencies: int = 8,
+        num_seg_frequencies: int | None = None,
         num_seg_mlp_layers: int = 2,
         num_self_attn_layers: int = 2,
         num_heads: int = 4,
-        num_freq_pos: int = 8,
+        num_freq_pos: int | None = None,
         fno_hidden: int = 32,
         fno_modes: int = 16,
         fno_layers: int = 2,
@@ -113,11 +113,16 @@ class AutoregressiveWaveNOFull(nn.Module):
         )
 
         # === Stage 4: Trajectory MLP ===
-        self.fourier_pos = FourierFeatures(
-            num_frequencies=num_freq_pos, include_input=True
-        )
-        # Input: bp_emb (H) + fourier(pos) (F) + dt (1)
-        traj_input_dim = hidden_dim + self.fourier_pos.output_dim + 1
+        if num_freq_pos is not None:
+            self.fourier_pos = FourierFeatures(
+                num_frequencies=num_freq_pos, include_input=True
+            )
+            pos_dim = self.fourier_pos.output_dim
+        else:
+            self.fourier_pos = None
+            pos_dim = 1  # raw scalar
+        # Input: bp_emb (H) + pos_enc (F or 1) + dt (1)
+        traj_input_dim = hidden_dim + pos_dim + 1
         self.traj_mlp = nn.Sequential(
             nn.Linear(traj_input_dim, hidden_dim),
             nn.GELU(),
@@ -219,9 +224,12 @@ class AutoregressiveWaveNOFull(nn.Module):
             state = (state + self.fno(fno_in)).clamp(0.0, 1.0)  # (B, 1, nx)
 
             # c. Trajectory step: predict position delta
-            pos_enc = self.fourier_pos(positions.reshape(-1)).reshape(
-                B, D, -1
-            )  # (B, D, F)
+            if self.fourier_pos is not None:
+                pos_enc = self.fourier_pos(positions.reshape(-1)).reshape(
+                    B, D, -1
+                )  # (B, D, F)
+            else:
+                pos_enc = positions.unsqueeze(-1)  # (B, D, 1)
             dt_exp = dt.view(B, 1, 1).expand(B, D, 1)  # (B, D, 1)
             traj_in = torch.cat([bp_emb, pos_enc, dt_exp], dim=-1)  # (B, D, H+F+1)
             delta_pos = self.traj_mlp(traj_in).squeeze(-1).clamp(-0.1, 0.1)  # (B, D)
@@ -265,11 +273,11 @@ def build_autoregressive_waveno_full(args: dict) -> AutoregressiveWaveNOFull:
 
     return AutoregressiveWaveNOFull(
         hidden_dim=args.get("hidden_dim", 64),
-        num_seg_frequencies=args.get("num_seg_frequencies", 8),
+        num_seg_frequencies=args.get("num_seg_frequencies", None),
         num_seg_mlp_layers=args.get("num_seg_mlp_layers", 2),
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_heads=args.get("num_heads", 4),
-        num_freq_pos=args.get("num_freq_pos", 8),
+        num_freq_pos=args.get("num_freq_pos", None),
         fno_hidden=args.get("fno_hidden", 32),
         fno_modes=args.get("fno_modes", 16),
         fno_layers=args.get("fno_layers", 2),

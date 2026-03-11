@@ -102,12 +102,10 @@ class SegmentPhysicsEncoder(nn.Module):
 
         # Encode spatial features
         if self.fourier_x is not None:
-            x_center_enc = self.fourier_x(
-                x_center.reshape(-1)
-            ).reshape(B, K, -1)  # (B, K, F)
-            width_enc = self.fourier_x(
-                width.reshape(-1)
-            ).reshape(B, K, -1)  # (B, K, F)
+            x_center_enc = self.fourier_x(x_center.reshape(-1)).reshape(
+                B, K, -1
+            )  # (B, K, F)
+            width_enc = self.fourier_x(width.reshape(-1)).reshape(B, K, -1)  # (B, K, F)
         else:
             x_center_enc = x_center.unsqueeze(-1)  # (B, K, 1)
             width_enc = width.unsqueeze(-1)  # (B, K, 1)
@@ -117,15 +115,15 @@ class SegmentPhysicsEncoder(nn.Module):
             # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
             rho_width = ks * width  # (B, K)
             N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
-            total_mass = (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+            total_mass = (
+                (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+            )
             N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
             scalar_features = torch.stack(
                 [ks, lambda_k, flux_k, N_k_normalized], dim=-1
             )  # (B, K, 4)
         else:
-            scalar_features = torch.stack(
-                [ks, lambda_k, flux_k], dim=-1
-            )  # (B, K, 3)
+            scalar_features = torch.stack([ks, lambda_k, flux_k], dim=-1)  # (B, K, 3)
         features = torch.cat(
             [x_center_enc, width_enc, scalar_features], dim=-1
         )  # (B, K, 2F+3/4)
@@ -162,7 +160,7 @@ class DiscontinuityPhysicsEncoder(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 64,
-        num_frequencies: int = 8,
+        num_frequencies: int | None = 8,
         num_layers: int = 2,
         flux: Flux | None = None,
         dropout: float = 0.0,
@@ -170,13 +168,18 @@ class DiscontinuityPhysicsEncoder(nn.Module):
         super().__init__()
         self.flux = flux or DEFAULT_FLUX()
 
-        self.fourier_x = FourierFeatures(
-            num_frequencies=num_frequencies, include_input=True
-        )
+        if num_frequencies is not None:
+            self.fourier_x = FourierFeatures(
+                num_frequencies=num_frequencies, include_input=True
+            )
+            spatial_dim = self.fourier_x.output_dim
+        else:
+            self.fourier_x = None
+            spatial_dim = 1  # raw scalar
 
-        # Input: fourier(x_d) + 5 scalar features
+        # Input: spatial(x_d) + 5 scalar features
         # [rho_L, rho_R, lambda_L, lambda_R, s_d]
-        input_dim = self.fourier_x.output_dim + 5
+        input_dim = spatial_dim + 5
 
         layers = []
         in_dim = input_dim
@@ -217,8 +220,11 @@ class DiscontinuityPhysicsEncoder(nn.Module):
         lambda_R = self.flux.derivative(rho_R)  # (B, D)
         s_d = self.flux.shock_speed(rho_L, rho_R)  # (B, D)
 
-        # Fourier encode position
-        x_enc = self.fourier_x(x_d.reshape(-1)).reshape(B, D, -1)  # (B, D, F)
+        # Encode position
+        if self.fourier_x is not None:
+            x_enc = self.fourier_x(x_d.reshape(-1)).reshape(B, D, -1)  # (B, D, F)
+        else:
+            x_enc = x_d.unsqueeze(-1)  # (B, D, 1)
 
         # Stack scalar physics features
         scalars = torch.stack(
@@ -388,8 +394,14 @@ class CharacteristicFeatureComputer(nn.Module):
         # gradients everywhere, and maps to [-1, 1]. Replaces hard clamp which
         # destroyed information for distant segments (zero gradient outside range).
         features_raw = [
-            xi, char_shift, dist_left, dist_right, t_feat,
-            s_left_feat, s_right_feat, t_coll_feat,
+            xi,
+            char_shift,
+            dist_left,
+            dist_right,
+            t_feat,
+            s_left_feat,
+            s_right_feat,
+            t_coll_feat,
         ]
         features = []
         for i, feat in enumerate(features_raw):
@@ -489,9 +501,7 @@ class TimeConditioner(nn.Module):
         seg_emb_t = seg_emb.unsqueeze(1).expand(-1, nt, -1, -1)  # (B, nt, K, H)
 
         # Concatenate and produce FiLM parameters
-        film_input = torch.cat(
-            [t_enc_exp, seg_emb_t], dim=-1
-        )  # (B, nt, K, F_t + H)
+        film_input = torch.cat([t_enc_exp, seg_emb_t], dim=-1)  # (B, nt, K, F_t + H)
         film_params = self.film_net(film_input)  # (B, nt, K, 2*H)
         gamma, beta = film_params.chunk(2, dim=-1)  # each (B, nt, K, H)
 
