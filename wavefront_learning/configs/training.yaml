@@ -11,7 +11,7 @@ training_defaults:
   early_stopping_threshold: 0.99
   grad_clip_max_norm: 0.5
   kl_warmup_fraction: 0.2
-  plot_every_n_epochs: 5
+  plot_every_n_epochs: 99999
 
 # Default CLI argument values.
 # Priority: CLI flags > these YAML defaults > hardcoded argparse defaults.
