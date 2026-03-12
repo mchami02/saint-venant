@@ -197,7 +197,6 @@ def save_model(
     args: Namespace | dict,
     epoch: int,
     optimizer_state: dict | None = None,
-    logger=None,
 ) -> None:
     """Save model checkpoint.
 
@@ -207,7 +206,6 @@ def save_model(
         args: Training arguments to store (Namespace or dict).
         epoch: Current epoch number.
         optimizer_state: Optional optimizer state dict.
-        logger: Optional WandbLogger to log model artifact.
     """
     config = args if isinstance(args, dict) else vars(args)
     checkpoint = {
@@ -218,7 +216,3 @@ def save_model(
     if optimizer_state is not None:
         checkpoint["optimizer_state_dict"] = optimizer_state
     torch.save(checkpoint, save_path)
-
-    if logger is not None:
-        model_name = config.get("model", "model")
-        logger.log_model(model, model_name, metadata=config)

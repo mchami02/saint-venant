@@ -331,7 +331,7 @@ def _run_training_loop(
         if val_loss < best_val_loss * TRAINING_DEFAULTS.early_stopping_threshold:
             best_val_loss = val_loss
             patience_counter = 0
-            save_model(model, save_path, model_config, ep, logger=logger)
+            save_model(model, save_path, model_config, ep)
         else:
             patience_counter += 1
 
