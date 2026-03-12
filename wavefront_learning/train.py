@@ -128,6 +128,7 @@ def train_model(
         grid_config,
         args.plot,
         epoch_callback=epoch_callback,
+        ema_decay=getattr(args, "ema_decay", 0.0),
     )
 
     model = load_model(args.save_path, device, vars(args))

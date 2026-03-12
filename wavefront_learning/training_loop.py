@@ -3,6 +3,8 @@
 Extracted from train.py to keep orchestration separate from loop mechanics.
 """
 
+import copy
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -248,6 +250,30 @@ def _log_bias_params(model: nn.Module, log_dict: dict) -> None:
         log_dict["train/params/damping_sharpness"] = model.damping_sharpness.abs().item()
 
 
+def _ema_update(model: nn.Module, ema_state: dict, decay: float):
+    """Update EMA shadow parameters."""
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            ema_state[name].mul_(decay).add_(param.data, alpha=1.0 - decay)
+
+
+def _ema_swap(model: nn.Module, ema_state: dict) -> dict:
+    """Swap model params with EMA params. Returns original params for restoring."""
+    original = {}
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            original[name] = param.data.clone()
+            param.data.copy_(ema_state[name])
+    return original
+
+
+def _ema_restore(model: nn.Module, original: dict):
+    """Restore original model parameters after EMA swap."""
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            param.data.copy_(original[name])
+
+
 def _run_training_loop(
     model: nn.Module,
     train_loader: DataLoader,
@@ -266,6 +292,7 @@ def _run_training_loop(
     patience: int = TRAINING_DEFAULTS.early_stopping_patience,
     epoch_callback=None,
     extra_log: dict | None = None,
+    ema_decay: float = 0.0,
 ) -> float:
     """Shared epoch loop: train -> validate -> log -> plot -> early stop -> save.
 
@@ -294,6 +321,15 @@ def _run_training_loop(
     best_val_loss = float("inf")
     patience_counter = 0
 
+    # EMA setup
+    use_ema = ema_decay > 0
+    ema_state = None
+    if use_ema:
+        ema_state = {
+            name: param.data.clone()
+            for name, param in model.named_parameters()
+        }
+
     progress_bar = tqdm(range(num_epochs), desc=description)
 
     for epoch in progress_bar:
@@ -303,9 +339,20 @@ def _run_training_loop(
         train_loss, train_lc, train_metrics, train_samples = train_epoch(
             model, train_loader, loss_fn, optimizer
         )
-        val_loss, val_lc, val_metrics, val_samples = validate_epoch(
-            model, val_loader, loss_fn
-        )
+
+        # Update EMA after training epoch
+        if use_ema:
+            _ema_update(model, ema_state, ema_decay)
+            # Validate with EMA weights
+            original = _ema_swap(model, ema_state)
+            val_loss, val_lc, val_metrics, val_samples = validate_epoch(
+                model, val_loader, loss_fn
+            )
+            _ema_restore(model, original)
+        else:
+            val_loss, val_lc, val_metrics, val_samples = validate_epoch(
+                model, val_loader, loss_fn
+            )
 
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             scheduler.step(val_loss)
@@ -334,7 +381,12 @@ def _run_training_loop(
         if val_loss < best_val_loss * TRAINING_DEFAULTS.early_stopping_threshold:
             best_val_loss = val_loss
             patience_counter = 0
-            save_model(model, save_path, model_config, ep, logger=logger)
+            if use_ema:
+                original = _ema_swap(model, ema_state)
+                save_model(model, save_path, model_config, ep, logger=logger)
+                _ema_restore(model, original)
+            else:
+                save_model(model, save_path, model_config, ep, logger=logger)
         else:
             patience_counter += 1
 
