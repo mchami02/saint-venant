@@ -6,6 +6,9 @@ This is a standalone script that can be run with:
 Minimal arguments are required - sensible defaults are provided for all parameters.
 """
 
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 from configs.cli import parse_args
@@ -362,9 +365,19 @@ def train_model_two_phase(
     return model
 
 
+def _set_seed(seed: int = 42):
+    """Set random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def main():
     """Main entry point for training."""
     args = parse_args()
+    _set_seed(getattr(args, "seed", 42))
 
     # Create grid_config dict for plotting functions
     grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
