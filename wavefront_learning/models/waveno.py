@@ -167,7 +167,8 @@ class WaveNO(nn.Module):
             ]
         )
 
-        # Stage 5: Density head
+        # Stage 5: Density head (LayerNorm stabilizes magnitude across K)
+        self.pre_density_norm = nn.LayerNorm(hidden_dim)
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -288,6 +289,7 @@ class WaveNO(nn.Module):
             q = layer(q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask)
 
         # Stage 5: Density head
+        q = self.pre_density_norm(q)
         density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
         density = density.clamp(0.0, 1.0)
         output_grid = density.reshape(B, 1, nt, nx)
