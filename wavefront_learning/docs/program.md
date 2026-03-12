@@ -51,6 +51,8 @@ The `--exp autoresearch` flag groups all runs under the same W&B experiment. The
 - `wavefront_learning/plotting/` — visualization is fixed.
 - `wavefront_learning/logger.py` — logging utilities are fixed.
 
+**Fixed data parameters**: Never change `--n_samples` (500), `--max_steps` (4), `--max_test_steps` (10), or `--max_high_res` (5). These define the experiment protocol and must remain fixed across all runs. Improvements must come from architecture, loss, or training procedure — not from changing the data distribution.
+
 **Hard constraint — no autoregressive operations**: This project learns a neural operator that maps initial conditions to full space-time solutions in a single forward pass. There must NEVER be any autoregressive, time-stepping, or recurrent operations in the model. The model takes the IC and produces the entire `(nt, nx)` grid at once.
 
 **The goal: minimize the composite MSE score.** The model is evaluated on 3 scenarios, each weighted equally at 1/3:
