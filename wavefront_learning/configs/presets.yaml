@@ -136,6 +136,11 @@ loss_presets:
   mse_shock:
     - name: mse_shock
       weight: 1.0
+  mse_ic:
+    - name: mse
+      weight: 1.0
+    - name: ic
+      weight: 0.5
 
 # Plot presets.
 # Each preset lists which plots to generate.
