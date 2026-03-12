@@ -102,6 +102,8 @@ def train_epoch(
     train_loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
+    ema_state: dict | None = None,
+    ema_decay: float = 0.0,
 ) -> tuple[float, dict[str, float], dict[str, float] | None, dict[str, np.ndarray]]:
     """Train for one epoch.
 
@@ -110,6 +112,8 @@ def train_epoch(
         train_loader: Training data loader.
         loss_fn: Loss function.
         optimizer: Optimizer.
+        ema_state: EMA shadow parameters (updated per step if provided).
+        ema_decay: EMA decay rate for per-step updates.
 
     Returns:
         Tuple of (average_loss, loss_components, grid_metrics | None, samples).
@@ -126,6 +130,8 @@ def train_epoch(
         loss, pred, components = train_step(
             model, batch_input, batch_target, loss_fn, optimizer
         )
+        if ema_state is not None:
+            _ema_update(model, ema_state, ema_decay)
         total_loss += loss
         all_components.append(components)
 
@@ -337,12 +343,11 @@ def _run_training_loop(
             epoch_callback(epoch)
 
         train_loss, train_lc, train_metrics, train_samples = train_epoch(
-            model, train_loader, loss_fn, optimizer
+            model, train_loader, loss_fn, optimizer,
+            ema_state=ema_state, ema_decay=ema_decay,
         )
 
-        # Update EMA after training epoch
         if use_ema:
-            _ema_update(model, ema_state, ema_decay)
             # Validate with EMA weights
             original = _ema_swap(model, ema_state)
             val_loss, val_lc, val_metrics, val_samples = validate_epoch(
