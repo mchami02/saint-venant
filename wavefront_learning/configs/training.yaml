@@ -9,7 +9,7 @@ training_defaults:
   scheduler_threshold: 0.01
   early_stopping_patience: 15
   early_stopping_threshold: 0.99
-  grad_clip_max_norm: 1.0
+  grad_clip_max_norm: 0.5
   kl_warmup_fraction: 0.2
   plot_every_n_epochs: 5
 
