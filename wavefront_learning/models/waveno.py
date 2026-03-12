@@ -171,7 +171,7 @@ class WaveNO(nn.Module):
         self.pre_density_norm = nn.LayerNorm(hidden_dim)
         self.density_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
         )
