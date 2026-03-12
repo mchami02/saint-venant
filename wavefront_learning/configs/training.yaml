@@ -29,9 +29,10 @@ cli_defaults:
   loss: mse
 
   # Training
-  epochs: 100
+  epochs: 150
   batch_size: 16
   lr: 0.003
+  scheduler: cosine
 
   # Data
   n_samples: 1000
