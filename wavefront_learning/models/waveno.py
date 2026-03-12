@@ -120,6 +120,7 @@ class WaveNO(nn.Module):
         self.query_mlp = nn.Sequential(
             nn.Linear(query_input_dim, hidden_dim),
             nn.ReLU(),
+            nn.LayerNorm(hidden_dim),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
         )
