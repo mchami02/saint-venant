@@ -70,6 +70,7 @@ class WaveNO(nn.Module):
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
+        ff_mult: int = 4,
     ):
         super().__init__()
 
@@ -155,7 +156,8 @@ class WaveNO(nn.Module):
         self.cross_attn_layers = nn.ModuleList(
             [
                 BiasedCrossDecoderLayer(
-                    hidden_dim, num_heads=num_heads, dropout=dropout
+                    hidden_dim, num_heads=num_heads, dropout=dropout,
+                    ff_mult=ff_mult,
                 )
                 for _ in range(num_cross_layers)
             ]
@@ -315,6 +317,7 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
+        ff_mult=args.get("ff_mult", 4),
     )
     kwargs.update(flag_overrides)
     return WaveNO(**kwargs)
