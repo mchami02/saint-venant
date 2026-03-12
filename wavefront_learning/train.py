@@ -65,21 +65,26 @@ def train_model(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=TRAINING_DEFAULTS.scheduler_factor,
-        patience=TRAINING_DEFAULTS.scheduler_patience,
-        threshold=TRAINING_DEFAULTS.scheduler_threshold,
-    )
+    warmup_epochs = getattr(args, "warmup_epochs", 5)
+    target_lr = args.lr
+    scheduler_type = getattr(args, "scheduler", "plateau")
+    if scheduler_type == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=args.epochs - warmup_epochs, eta_min=1e-6
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=TRAINING_DEFAULTS.scheduler_factor,
+            patience=TRAINING_DEFAULTS.scheduler_patience,
+            threshold=TRAINING_DEFAULTS.scheduler_threshold,
+        )
 
     # Build list of per-epoch callbacks
     callbacks = []
 
-    # Linear LR warmup for first 5 epochs
-    warmup_epochs = getattr(args, "warmup_epochs", 5)
-    target_lr = args.lr
-
+    # Linear LR warmup
     def _warmup_callback(epoch):
         if epoch < warmup_epochs:
             warmup_lr = target_lr * (epoch + 1) / warmup_epochs

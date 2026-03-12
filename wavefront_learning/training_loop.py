@@ -307,7 +307,10 @@ def _run_training_loop(
             model, val_loader, loss_fn
         )
 
-        scheduler.step(val_loss)
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
         current_lr = optimizer.param_groups[0]["lr"]
 
         ep = epoch_offset + epoch + 1
