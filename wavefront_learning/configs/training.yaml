@@ -4,8 +4,8 @@
 # Training hyperparameters (used by training_loop.py and train.py).
 training_defaults:
   weight_decay: 0.0001
-  scheduler_factor: 0.5
-  scheduler_patience: 5
+  scheduler_factor: 0.3
+  scheduler_patience: 3
   scheduler_threshold: 0.01
   early_stopping_patience: 15
   early_stopping_threshold: 0.99
