@@ -151,6 +151,10 @@ class WaveNO(nn.Module):
                 flux=flux,
                 use_damping=use_damping,
             )
+            # Per-head bias scales: allow each head to learn its own bias strength.
+            # Some heads can ignore physics (scale→0) for segment-count invariance,
+            # others maintain strong guidance (scale>0).
+            self.head_bias_scales = nn.Parameter(torch.ones(num_heads))
 
         # Stage 4: Biased cross-attention layers
         self.cross_attn_layers = nn.ModuleList(
@@ -259,11 +263,11 @@ class WaveNO(nn.Module):
             char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
+            # Per-head scaling: (num_heads,) → (1, num_heads, 1, 1)
+            scales = self.head_bias_scales.view(1, self.num_heads, 1, 1)
             attn_mask = (
-                bias_flat.unsqueeze(1)
-                .expand(-1, self.num_heads, -1, -1)
-                .reshape(B * nt * self.num_heads, nx, K)
-            )
+                bias_flat.unsqueeze(1) * scales
+            ).reshape(B * nt * self.num_heads, nx, K)
         else:
             char_bias = None
             attn_mask = None
