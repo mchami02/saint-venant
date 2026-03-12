@@ -62,6 +62,7 @@ cli_defaults:
   # Model-specific
   initial_damping_sharpness: 5.0
   dropout: 0.01
+  ema_decay: 0.85
 
   # Teacher forcing (2-phase)
   teacher_forcing: 0.0
