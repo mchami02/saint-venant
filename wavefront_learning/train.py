@@ -73,6 +73,18 @@ def train_model(
     # Build list of per-epoch callbacks
     callbacks = []
 
+    # Linear LR warmup for first 5 epochs
+    warmup_epochs = getattr(args, "warmup_epochs", 5)
+    target_lr = args.lr
+
+    def _warmup_callback(epoch):
+        if epoch < warmup_epochs:
+            warmup_lr = target_lr * (epoch + 1) / warmup_epochs
+            for pg in optimizer.param_groups:
+                pg["lr"] = warmup_lr
+
+    callbacks.append(_warmup_callback)
+
     # KL annealing callback for CVAE models
     if hasattr(loss_fn, "set_kl_beta"):
         kl_warmup_epochs = max(
