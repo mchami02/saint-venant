@@ -48,6 +48,7 @@ class BiasedCrossDecoderLayer(nn.Module):
         self.feedforward = nn.Sequential(
             nn.Linear(hidden_dim, ff_dim),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(ff_dim, hidden_dim),
         )
         self.drop = nn.Dropout(dropout)
