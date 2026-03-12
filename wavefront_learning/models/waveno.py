@@ -170,10 +170,10 @@ class WaveNO(nn.Module):
         # Stage 5: Density head (LayerNorm stabilizes magnitude across K)
         self.pre_density_norm = nn.LayerNorm(hidden_dim)
         self.density_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim * 2),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim * 2, 1),
         )
         nn.init.zeros_(self.density_head[-1].weight)
         nn.init.constant_(self.density_head[-1].bias, 0.5)
