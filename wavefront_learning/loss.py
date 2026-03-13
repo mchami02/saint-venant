@@ -31,6 +31,7 @@ from losses.shock_proximity import ShockProximityLoss
 from losses.supervised_trajectory import SupervisedTrajectoryLoss
 from losses.trajectory_consistency import TrajectoryConsistencyLoss
 from losses.vae_reconstruction import VAEReconstructionLoss
+from losses.variational_pinn import VariationalPINNLoss
 from losses.wasserstein import WassersteinLoss
 
 # Registry of available loss functions
@@ -57,6 +58,7 @@ LOSSES: dict[str, type[BaseLoss]] = {
     "flow_matching": FlowMatchingLoss,
     "kl_divergence": KLDivergenceLoss,
     "shock_proximity": ShockProximityLoss,
+    "variational_pinn": VariationalPINNLoss,
 }
 
 
@@ -315,6 +317,10 @@ def create_loss_from_args(args) -> nn.Module:
         loss_kwargs["mse_shock"] = {
             "dx": args.dx,
             "min_component_size": getattr(args, "min_component_size", 5),
+        }
+        loss_kwargs["variational_pinn"] = {
+            "dt": args.dt,
+            "dx": args.dx,
         }
 
     return get_loss(args.loss, loss_kwargs=loss_kwargs)

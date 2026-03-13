@@ -267,12 +267,14 @@ class WaveNO(nn.Module):
             # At test time, narrower segments (high K) get stronger bias
             # to maintain attention concentration. Not applied during training
             # to avoid disrupting learned bias-scale relationships.
+            # Linear scaling: bias *= ref_width / width (clamped ≥ 1).
             if not self.training:
                 widths = (xs[:, 1:] - xs[:, :-1]).unsqueeze(1).unsqueeze(1)
                 valid_mask = pieces_mask.bool().unsqueeze(1).unsqueeze(1)
                 # Normalize relative to training width (~0.33 for K=3 avg)
                 ref_width = 0.33
-                norm_factor = (ref_width / widths.clamp(min=0.01)).sqrt()
+                norm_factor = ref_width / widths.clamp(min=0.01)
+                norm_factor = norm_factor.clamp(min=1.0)  # never weaken, only strengthen
                 char_bias = torch.where(valid_mask, char_bias * norm_factor, char_bias)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)

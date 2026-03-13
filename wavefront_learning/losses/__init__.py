@@ -58,6 +58,7 @@ from .shock_utils import filter_small_components
 from .supervised_trajectory import SupervisedTrajectoryLoss
 from .trajectory_consistency import TrajectoryConsistencyLoss
 from .vae_reconstruction import VAEReconstructionLoss
+from .variational_pinn import VariationalPINNLoss
 from .wasserstein import WassersteinLoss
 
 __all__ = [
@@ -99,6 +100,8 @@ __all__ = [
     "SelectionSupervisionLoss",
     # Shock proximity loss
     "ShockProximityLoss",
+    # Variational PINN
+    "VariationalPINNLoss",
     # Shock utils
     "filter_small_components",
 ]
