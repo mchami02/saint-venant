@@ -141,6 +141,11 @@ loss_presets:
       weight: 1.0
     - name: ic
       weight: 0.5
+  mse_ic_light:
+    - name: mse
+      weight: 1.0
+    - name: ic
+      weight: 0.3
 
 # Plot presets.
 # Each preset lists which plots to generate.
