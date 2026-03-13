@@ -263,6 +263,17 @@ class WaveNO(nn.Module):
             ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
             char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
 
+            # Width-normalize bias for K-invariant attention concentration:
+            # Narrower segments (high K) get proportionally stronger bias,
+            # compensating for attention dilution with more KV tokens.
+            widths = (xs[:, 1:] - xs[:, :-1]).unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+            valid_mask = pieces_mask.bool().unsqueeze(1).unsqueeze(1)  # (B, 1, 1, K)
+            char_bias = torch.where(
+                valid_mask,
+                char_bias / widths.clamp(min=0.01).sqrt(),
+                char_bias,
+            )
+
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
             # Per-head scaling: (num_heads,) → (1, num_heads, 1, 1)
             scales = self.head_bias_scales.view(1, self.num_heads, 1, 1)
