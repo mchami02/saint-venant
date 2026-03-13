@@ -157,20 +157,38 @@ LOOP FOREVER:
 1. Look at the git state: the current branch/commit we're on.
 2. Modify files with an experimental idea.
 3. git commit the changes.
-4. Run the experiment:
+4. Run the experiment using the **2-phase multi-seed protocol** (seeds 42, 123, 7):
+
+   **Phase 1 — Scout run** (1 seed):
    ```bash
    cd wavefront_learning
-   uv run python train.py --model WaveNO --n_samples 500 --epochs 100 --plot grid_residual --exp autoresearch --run_name "<description>" > run.log 2>&1
+   uv run python train.py --model WaveNO --n_samples 500 --epochs 200 --loss mse_ic_light --plot grid_residual --exp autoresearch --seed 42 --save_path model_s42.pth --run_name "<description> s42" > run.log 2>&1
    ```
    Redirect everything — do NOT use tee or let output flood your context.
+   Extract the composite score from `run.log`. If this single-seed composite is **more than 20% worse** than the current best mean, discard immediately — no need for more seeds.
+
+   **Phase 2 — Confirmation runs** (2 seeds in parallel):
+   Only if the scout run is within variance (not >20% worse):
+   ```bash
+   uv run python train.py ... --seed 123 --save_path model_s123.pth --run_name "<description> s123" > run2.log 2>&1 &
+   uv run python train.py ... --seed 7 --save_path model_s7.pth --run_name "<description> s7" > run3.log 2>&1 &
+   ```
+   Wait for both, then compute the **3-seed mean** composite score. This is the primary metric for keep/discard decisions.
+
+   **IMPORTANT**: Always use separate `--save_path` per seed (`model_s42.pth`, `model_s123.pth`, `model_s7.pth`) to prevent checkpoint overwrite corruption when running in parallel.
+
 5. Read out the results:
    ```bash
-   grep "mse:" run.log
+   grep -A2 "^Test Results:" run.log | grep "mse:"
+   grep -A2 "^High-Res Test" run.log | grep "mse:"
+   grep -A2 "^Step-Count Test" run.log | grep "mse:"
    ```
 6. If the grep output is empty or doesn't contain test results, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up on this idea.
 7. Compute the composite score from the 3 MSE scenarios and record the results in `wavefront_learning/results.tsv`. (NOTE: do not commit results.tsv, leave it untracked by git.)
-8. If the composite score improved (lower), you "advance" the branch, keeping the git commit.
-9. If the composite score is equal or worse, you `git reset --hard` back to where you started.
+8. If the 3-seed mean composite improved (lower), you "advance" the branch, keeping the git commit.
+9. If the 3-seed mean composite is equal or worse, you `git reset --hard` back to where you started.
+
+**Log file hygiene**: Only use `run.log`, `run2.log`, `run3.log`. Delete all three + model files (`model_s*.pth`) after extracting results from each experiment. Do not create per-experiment named log files.
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate.
 
