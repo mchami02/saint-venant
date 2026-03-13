@@ -71,6 +71,7 @@ class WaveNO(nn.Module):
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
         ff_mult: int = 4,
+        use_global_token: bool = False,
     ):
         super().__init__()
 
@@ -79,6 +80,7 @@ class WaveNO(nn.Module):
         self.use_char_bias = use_char_bias
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
+        self.use_global_token = use_global_token
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
@@ -285,6 +287,38 @@ class WaveNO(nn.Module):
             kv_padding_mask = kv_padding_mask.clone()
             kv_padding_mask[all_masked] = False
 
+        # Optional: append K-agnostic global summary token to KV
+        if self.use_global_token:
+            valid_kv = ~kv_padding_mask  # True = valid segment
+            n_valid = valid_kv.sum(dim=1, keepdim=True).clamp(min=1).float()
+            global_tok = (
+                (kv * valid_kv.unsqueeze(-1).float()).sum(dim=1, keepdim=True)
+                / n_valid.unsqueeze(-1)
+            )  # (B*nt, 1, H)
+            kv = torch.cat([kv, global_tok], dim=1)  # (B*nt, K+1, H)
+            kv_padding_mask = torch.cat(
+                [
+                    kv_padding_mask,
+                    torch.zeros(
+                        B * nt, 1, dtype=torch.bool, device=kv_padding_mask.device
+                    ),
+                ],
+                dim=1,
+            )  # (B*nt, K+1)
+            if attn_mask is not None:
+                attn_mask = torch.cat(
+                    [
+                        attn_mask,
+                        torch.zeros(
+                            attn_mask.shape[0],
+                            attn_mask.shape[1],
+                            1,
+                            device=attn_mask.device,
+                        ),
+                    ],
+                    dim=2,
+                )  # (B*nt*H, nx, K+1)
+
         for layer in self.cross_attn_layers:
             q = layer(q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask)
 
@@ -324,6 +358,7 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
         ff_mult=args.get("ff_mult", 4),
+        use_global_token=args.get("use_global_token", False),
     )
     kwargs.update(flag_overrides)
     return WaveNO(**kwargs)
