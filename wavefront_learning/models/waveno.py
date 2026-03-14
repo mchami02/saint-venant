@@ -277,6 +277,11 @@ class WaveNO(nn.Module):
                 norm_factor = ref_width / widths.clamp(min=0.01)
                 norm_factor = norm_factor.clamp(min=1.0)  # never weaken, only strengthen
                 char_bias = torch.where(valid_mask, char_bias * norm_factor, char_bias)
+                # Global K-dependent scaling on top of width normalization
+                K_actual = pieces_mask.sum(dim=1, keepdim=True).float()
+                K_ref = 3.0
+                k_scale = (K_actual / K_ref).clamp(min=1.0).sqrt()
+                char_bias = char_bias * k_scale.unsqueeze(1).unsqueeze(1)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
             # Per-head scaling: (num_heads,) → (1, num_heads, 1, 1)
@@ -306,7 +311,18 @@ class WaveNO(nn.Module):
         # Stage 5: Density head
         q = self.pre_density_norm(q)
         density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
-        density = density.clamp(0.0, 1.0)
+        if self.training:
+            density = density.clamp(0.0, 1.0)
+        else:
+            # Maximum principle: ρ(x,t) ∈ [min(ρ_IC), max(ρ_IC)]
+            valid_ks = ks.masked_fill(~pieces_mask.bool(), float('inf'))
+            rho_min = valid_ks.min(dim=1, keepdim=True).values.clamp(min=0.0)
+            valid_ks2 = ks.masked_fill(~pieces_mask.bool(), float('-inf'))
+            rho_max = valid_ks2.max(dim=1, keepdim=True).values.clamp(max=1.0)
+            # Reshape for (B*nt, nx): repeat per time step
+            rho_min = rho_min.unsqueeze(1).expand(B, nt, 1).reshape(B * nt, 1)
+            rho_max = rho_max.unsqueeze(1).expand(B, nt, 1).reshape(B * nt, 1)
+            density = density.clamp(rho_min, rho_max)
         output_grid = density.reshape(B, 1, nt, nx)
 
         result = {"output_grid": output_grid}
