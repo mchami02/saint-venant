@@ -16,3 +16,4 @@ build/
 wandb/
 *.npz
 launch.json
+tex/
