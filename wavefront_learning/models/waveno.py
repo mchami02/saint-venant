@@ -328,6 +328,11 @@ class WaveNO(nn.Module):
         result = self._forward_core(batch_input)
 
         if self.use_tta and not self.training:
+            # Skip TTA at high resolution where it degrades quality
+            nx = batch_input["t_coords"].shape[3]
+            if nx > 60:
+                return result
+
             # Build flipped input: (x → 1-x, ρ → 1-ρ)
             xs_flip = (1.0 - batch_input["xs"]).flip(1)
             ks_flip = (1.0 - batch_input["ks"]).flip(1)
