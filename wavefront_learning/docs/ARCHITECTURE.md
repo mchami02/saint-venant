@@ -2143,6 +2143,10 @@ Six ablation models isolate which architectural component drives the performance
 
 Ablation baseline that removes FiLM time conditioning, cross-segment attention, and trajectory prediction. Keeps self-attention over segments (contextualized embeddings) and collision-time damping (bias fades after wave interactions). Segment embeddings are static across time.
 
+**Per-head bias scales**: When `use_char_bias=True`, each attention head has a learnable scalar `head_bias_scale[h]` (initialized to 1.0) that multiplies the physics bias before it enters that head's attention logits. This lets some heads learn to ignore the physics bias (`scale→0`) while others amplify it, improving K-generalization.
+
+**Wider density head**: The density head uses `LayerNorm(H) → Linear(H, 2H) → ReLU → Dropout → Linear(2H, 1)` for increased capacity and stable inputs.
+
 ```
 xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
 seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
@@ -2150,12 +2154,14 @@ seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
 t_coords, x_coords → Fourier(t) || Fourier(x) → MLP → query_emb: (nt, nx, H)
 
 (t, x, xs, ks, flux) → backward char foot + collision-time damping → bias: (nt, nx, K)
+bias → per-head scale (head_bias_scale: (num_heads,)) → bias: (nt*heads, nx, K)
 
 seg_emb expanded to (nt, K, H)   [static across time]
 query (B*nt, nx, H), keys/values (B*nt, K, H), bias (B*nt*heads, nx, K)
 → BiasedCrossAttn × N_cross → query: (B*nt, nx, H)
 
-query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
+query → LayerNorm(H) → Linear(H, 2H) → ReLU → Dropout → Linear(2H, 1)
+→ clamp[0,1] → output_grid: (1, nt, nx)
 ```
 
 | Parameter | Default |

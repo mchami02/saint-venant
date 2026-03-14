@@ -41,6 +41,7 @@ Unless explicitly stated otherwise, all learning-related tasks are implemented i
 - Do not modify files outside the current task's scope.
 - Never merge or push directly to `main` under any circumstances.
 - **Keep code modular.** Each class or function should do one thing. In particular, loss classes must compute a single loss term — use presets in `loss.py` to compose multiple losses with weights. Never bundle unrelated computations into one class.
+- **Avoid compound shell commands.** Whenever possible, run commands without chaining them with `cd &&` or similar. Use absolute paths or set the working directory once instead. This reduces the number of approval prompts the user has to click through.
 
 ## File Maintenance
 

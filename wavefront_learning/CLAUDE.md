@@ -239,6 +239,12 @@ All configuration lives in `configs/` as YAML files with thin Python wrappers:
 
 **Unknown arg passthrough**: Any `--key value` pair not defined in argparse is automatically captured into the args namespace. This allows on-the-fly experimentation without modifying Python code (e.g., `--my_custom_param 42`).
 
+## Official Experiments
+
+When running official experiments (not quick sanity checks), always use:
+- `--n_samples 5000`
+- `--epochs 100`
+
 ## Dependencies
 
 Uses the same environment as `operator_learning/` with:

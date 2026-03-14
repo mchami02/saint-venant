@@ -9,8 +9,10 @@ Architecture:
     2. Raw (t, x) query encoding — MLP on raw coordinates
     2b. FiLM time conditioning on segment embeddings (default)
     3. LWRBias — shock/rarefaction-aware attention bias (no damping by default)
+       Per-head learnable bias scales allow some heads to ignore physics bias.
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
-    5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
+    5. Density head — LayerNorm → Linear(H→2H) → ReLU → Dropout → Linear(2H→1),
+       clamped to [0, 1]
 
 Ablation flags (use_char_bias, use_film, use_cross_seg_attn)
 allow toggling individual components for controlled experiments. See the
@@ -149,6 +151,7 @@ class WaveNO(nn.Module):
                 flux=flux,
                 use_damping=use_damping,
             )
+            self.head_bias_scale = nn.Parameter(torch.ones(num_heads))
 
         # Stage 4: Biased cross-attention layers
         self.cross_attn_layers = nn.ModuleList(
@@ -162,10 +165,11 @@ class WaveNO(nn.Module):
 
         # Stage 5: Density head
         self.density_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim * 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim * 2, 1),
         )
         nn.init.zeros_(self.density_head[-1].weight)
         nn.init.constant_(self.density_head[-1].bias, 0.5)
@@ -256,10 +260,9 @@ class WaveNO(nn.Module):
             char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
-            attn_mask = (
-                bias_flat.unsqueeze(1)
-                .expand(-1, self.num_heads, -1, -1)
-                .reshape(B * nt * self.num_heads, nx, K)
+            scale = self.head_bias_scale.reshape(1, self.num_heads, 1, 1)
+            attn_mask = (bias_flat.unsqueeze(1) * scale).reshape(
+                B * nt * self.num_heads, nx, K
             )
         else:
             char_bias = None
