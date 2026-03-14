@@ -511,6 +511,9 @@ def main():
 
     # Final test (standard + high-res)
     print("\nRunning final evaluation on test set...")
+    # Enable test-time augmentation (Greenshields symmetry averaging)
+    if hasattr(model, "use_tta"):
+        model.use_tta = True
     loss_fn = create_loss_from_args(args)
     test_model(
         model=model,

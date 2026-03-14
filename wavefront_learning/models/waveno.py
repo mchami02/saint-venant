@@ -79,6 +79,7 @@ class WaveNO(nn.Module):
         self.use_char_bias = use_char_bias
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
+        self.use_tta = False  # enable for test-time augmentation only
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
@@ -178,11 +179,11 @@ class WaveNO(nn.Module):
         nn.init.zeros_(self.density_head[-1].weight)
         nn.init.constant_(self.density_head[-1].bias, 0.5)
 
-    def forward(
+    def _forward_core(
         self,
         batch_input: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        """Forward pass.
+        """Core forward pass (single prediction).
 
         Args:
             batch_input: Dict containing:
@@ -311,6 +312,47 @@ class WaveNO(nn.Module):
         result = {"output_grid": output_grid}
         if char_bias is not None:
             result["characteristic_bias"] = char_bias
+        return result
+
+    def forward(
+        self,
+        batch_input: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Forward pass with eval-time symmetry augmentation.
+
+        During training, runs a single forward pass. During eval, exploits
+        the Greenshields flux symmetry f(ρ) = ρ(1-ρ): the transformation
+        (x → 1-x, ρ → 1-ρ) maps solutions to solutions. Averages the
+        original and flipped predictions for more robust output.
+        """
+        result = self._forward_core(batch_input)
+
+        if self.use_tta and not self.training:
+            # Build flipped input: (x → 1-x, ρ → 1-ρ)
+            xs_flip = (1.0 - batch_input["xs"]).flip(1)
+            ks_flip = (1.0 - batch_input["ks"]).flip(1)
+            mask_flip = batch_input["pieces_mask"].flip(1)
+
+            # Fix monotonicity: padded xs entries (originally 0, now 1.0
+            # after complement) end up at the start after flip. Cummin from
+            # the right pulls them down to the first valid boundary.
+            xs_flip = xs_flip.flip(1).cummin(dim=1).values.flip(1)
+
+            flipped_input = {
+                "xs": xs_flip,
+                "ks": ks_flip,
+                "pieces_mask": mask_flip,
+                "t_coords": batch_input["t_coords"],
+                "x_coords": 1.0 - batch_input["x_coords"],
+            }
+            result_flip = self._forward_core(flipped_input)
+
+            # Un-flip: if ρ(x,t) is the true solution, the flipped model
+            # predicts 1-ρ(x,t), so ρ = 1 - pred_flip
+            result["output_grid"] = (
+                result["output_grid"] + 1.0 - result_flip["output_grid"]
+            ) / 2.0
+
         return result
 
 
