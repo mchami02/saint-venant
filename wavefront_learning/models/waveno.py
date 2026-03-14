@@ -334,7 +334,7 @@ def build_waveno(args: dict) -> WaveNO:
     return _build_waveno(
         args,
         use_char_bias=True,
-        use_damping=False,
+        use_damping=True,
         use_film=True,
         use_cross_seg_attn=False,
     )
