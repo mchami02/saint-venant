@@ -81,6 +81,9 @@ cli_defaults:
   # Cell sampling
   cell_sampling_k: 0
 
+  # Reproducibility
+  seed: 42
+
   # Output
   save_path: wavefront_model.pth
   no_wandb: false

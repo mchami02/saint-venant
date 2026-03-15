@@ -6,6 +6,9 @@ This is a standalone script that can be run with:
 Minimal arguments are required - sensible defaults are provided for all parameters.
 """
 
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 from configs.cli import parse_args
@@ -350,9 +353,28 @@ def train_model_two_phase(
     return model
 
 
+_global_seed = 42
+
+
+def _worker_init_fn(worker_id: int) -> None:
+    """Seed each DataLoader worker for reproducibility."""
+    np.random.seed(_global_seed + worker_id)
+
+
+def _set_seed(seed: int) -> None:
+    """Set random seed for reproducibility across all libraries."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main():
     """Main entry point for training."""
     args = parse_args()
+    _set_seed(args.seed)
 
     # Create grid_config dict for plotting functions
     grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
@@ -404,7 +426,14 @@ def main():
         transform_override=args.transform,
         proximity_sigma=args.proximity_sigma,
         min_component_size=args.min_component_size,
+        random_seed=args.seed,
     )
+
+    # Seeded generator for reproducible DataLoader shuffling
+    global _global_seed
+    _global_seed = args.seed
+    g = torch.Generator()
+    g.manual_seed(args.seed)
 
     train_loader = DataLoader(
         train_dataset,
@@ -412,6 +441,8 @@ def main():
         shuffle=True,
         collate_fn=collate_wavefront_batch,
         num_workers=4,
+        generator=g,
+        worker_init_fn=_worker_init_fn,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -419,6 +450,7 @@ def main():
         shuffle=False,
         collate_fn=collate_wavefront_batch,
         num_workers=4,
+        worker_init_fn=_worker_init_fn,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -426,6 +458,7 @@ def main():
         shuffle=False,
         collate_fn=collate_wavefront_batch,
         num_workers=4,
+        worker_init_fn=_worker_init_fn,
     )
 
     print(

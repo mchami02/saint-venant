@@ -114,6 +114,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Training parameters
+    parser.add_argument("--seed", type=int, help="Random seed for reproducibility")
     parser.add_argument("--epochs", type=int, help="Number of epochs")
     parser.add_argument("--batch_size", type=int, help="Batch size")
     parser.add_argument("--lr", type=float, help="Learning rate")
