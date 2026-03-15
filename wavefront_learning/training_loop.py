@@ -388,10 +388,10 @@ def _run_training_loop(
             patience_counter = 0
             if use_ema:
                 original = _ema_swap(model, ema_state)
-                save_model(model, save_path, model_config, ep, logger=logger)
+                save_model(model, save_path, model_config, ep)
                 _ema_restore(model, original)
             else:
-                save_model(model, save_path, model_config, ep, logger=logger)
+                save_model(model, save_path, model_config, ep)
         else:
             patience_counter += 1
 

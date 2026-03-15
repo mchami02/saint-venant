@@ -18,8 +18,9 @@ To set up a new experiment, work with the user to:
    - `wavefront_learning/testing/test_running.py` — profiling and sanity checks.
    - `wavefront_learning/losses/` — browse available loss functions.
    - `wavefront_learning/models/base/` — shared building blocks used by WaveNO.
-4. **Initialize results.tsv**: Create `wavefront_learning/results.tsv` with just the header row. The baseline will be recorded after the first run.
-5. **Confirm and go**: Confirm setup looks good.
+4. **Disable train/val plots**: Edit `wavefront_learning/configs/training.yaml` and set `plot_every_n_epochs: 99999`. This skips the per-epoch train/val plot images that are never examined during autoresearch, saving ~50 MB of disk per run. Test plots from `test_model()` are unaffected.
+5. **Initialize results.tsv**: Create `wavefront_learning/results.tsv` with just the header row. The baseline will be recorded after the first run.
+6. **Confirm and go**: Confirm setup looks good.
 
 Once you get confirmation, kick off the experimentation.
 
@@ -197,6 +198,15 @@ The idea is that you are a completely autonomous researcher trying things out. I
 **Crashes**: If a run crashes (OOM, or a bug, etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
 
 **Research-first, not hyperparameter-first**: Prioritize correct architecture for the problem, appropriate loss functions, and deep analysis of where the model fails. Do NOT spend most of your time tuning hyperparameters (LR, dropout, scheduler settings, etc.). Instead: (1) analyze error patterns to understand *why* the model fails, (2) search online for what the research community does for this class of problems, (3) implement architectural or loss changes that address the root cause. Hyperparameter sweeps are low-value — a well-chosen architecture with default hyperparameters beats a poorly-chosen architecture with perfect hyperparameters.
+
+**Disk cleanup**: After each experiment completes, clean up wandb local data to prevent the disk from filling up:
+```bash
+# Delete the local wandb run directory (data is already synced to wandb cloud)
+rm -rf wavefront_learning/wandb/run-* wavefront_learning/wandb/offline-run-*
+# Clear the wandb artifact cache (model checkpoints cached locally)
+rm -rf ~/.cache/wandb/artifacts/obj/
+```
+These files accumulate ~50 MB per run (images) plus ~4 MB per model artifact. Over dozens of runs this will fill the disk. The data is already uploaded to W&B servers, so deleting the local copies is safe.
 
 **NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read the model code for new angles, re-read the CLAUDE.md for architectural patterns, try combining previous near-misses, try more radical architectural changes, explore different loss functions or training schedules. The loop runs until the human interrupts you, period.
 
