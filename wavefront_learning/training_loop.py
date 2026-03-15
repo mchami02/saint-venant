@@ -24,6 +24,34 @@ device = torch.device(
 )
 
 
+class EMA:
+    """Exponential Moving Average of model parameters.
+
+    Maintains shadow copies of all trainable parameters and updates them
+    each step as: shadow = decay * shadow + (1 - decay) * param.
+    Use swap() to temporarily replace model weights with EMA weights
+    for validation/checkpointing.
+    """
+
+    def __init__(self, model: nn.Module, decay: float = 0.85):
+        self.decay = decay
+        self.shadow = {
+            name: p.data.clone() for name, p in model.named_parameters() if p.requires_grad
+        }
+
+    def update(self, model: nn.Module) -> None:
+        """Update shadow parameters with current model parameters."""
+        for name, p in model.named_parameters():
+            if p.requires_grad and name in self.shadow:
+                self.shadow[name].mul_(self.decay).add_(p.data, alpha=1.0 - self.decay)
+
+    def swap(self, model: nn.Module) -> None:
+        """Swap model weights with shadow weights (call twice to restore)."""
+        for name, p in model.named_parameters():
+            if p.requires_grad and name in self.shadow:
+                p.data, self.shadow[name] = self.shadow[name], p.data.clone()
+
+
 def detach_output(pred):
     """Detach model output (handles both tensor and dict)."""
     if isinstance(pred, dict):
@@ -39,6 +67,7 @@ def train_step(
     batch_target: torch.Tensor,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
+    ema: EMA | None = None,
 ) -> tuple[float, dict | torch.Tensor, dict[str, float]]:
     """Execute a single training step.
 
@@ -48,6 +77,7 @@ def train_step(
         batch_target: Target tensor.
         loss_fn: Loss function.
         optimizer: Optimizer.
+        ema: Optional EMA instance to update after optimizer step.
 
     Returns:
         Tuple of (loss_value, prediction, loss_components).
@@ -91,6 +121,8 @@ def train_step(
         model.parameters(), max_norm=TRAINING_DEFAULTS.grad_clip_max_norm
     )
     optimizer.step()
+    if ema is not None:
+        ema.update(model)
 
     return loss.item(), detach_output(pred), components
 
@@ -100,6 +132,7 @@ def train_epoch(
     train_loader: DataLoader,
     loss_fn: nn.Module,
     optimizer: torch.optim.Optimizer,
+    ema: EMA | None = None,
 ) -> tuple[float, dict[str, float], dict[str, float] | None, dict[str, np.ndarray]]:
     """Train for one epoch.
 
@@ -108,6 +141,7 @@ def train_epoch(
         train_loader: Training data loader.
         loss_fn: Loss function.
         optimizer: Optimizer.
+        ema: Optional EMA instance passed to train_step.
 
     Returns:
         Tuple of (average_loss, loss_components, grid_metrics | None, samples).
@@ -122,7 +156,7 @@ def train_epoch(
 
     for batch_input, batch_target in tqdm(train_loader, desc="Training", leave=False):
         loss, pred, components = train_step(
-            model, batch_input, batch_target, loss_fn, optimizer
+            model, batch_input, batch_target, loss_fn, optimizer, ema=ema
         )
         total_loss += loss
         all_components.append(components)
@@ -266,6 +300,7 @@ def _run_training_loop(
     patience: int = TRAINING_DEFAULTS.early_stopping_patience,
     epoch_callback=None,
     extra_log: dict | None = None,
+    ema: EMA | None = None,
 ) -> float:
     """Shared epoch loop: train -> validate -> log -> plot -> early stop -> save.
 
@@ -275,7 +310,7 @@ def _run_training_loop(
         val_loader: Validation data loader.
         loss_fn: Loss function.
         optimizer: Optimizer.
-        scheduler: LR scheduler (ReduceLROnPlateau).
+        scheduler: LR scheduler (ReduceLROnPlateau or CosineAnnealingLR).
         num_epochs: Number of epochs to train.
         save_path: Path to save best model checkpoint.
         model_config: Model config dict (passed to save_model).
@@ -287,6 +322,7 @@ def _run_training_loop(
         patience: Early stopping patience (number of epochs without improvement).
         epoch_callback: Called with (epoch_index) before each epoch.
         extra_log: Extra metrics dict logged every epoch (e.g. {"phase": 1}).
+        ema: Optional EMA instance for weight averaging.
 
     Returns:
         Best validation loss achieved.
@@ -301,13 +337,20 @@ def _run_training_loop(
             epoch_callback(epoch)
 
         train_loss, train_lc, train_metrics, train_samples = train_epoch(
-            model, train_loader, loss_fn, optimizer
+            model, train_loader, loss_fn, optimizer, ema=ema
         )
+
+        # Swap to EMA weights for validation
+        if ema is not None:
+            ema.swap(model)
         val_loss, val_lc, val_metrics, val_samples = validate_epoch(
             model, val_loader, loss_fn
         )
 
-        scheduler.step(val_loss)
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
         current_lr = optimizer.param_groups[0]["lr"]
 
         ep = epoch_offset + epoch + 1
@@ -334,6 +377,10 @@ def _run_training_loop(
             save_model(model, save_path, model_config, ep)
         else:
             patience_counter += 1
+
+        # Swap back to training weights
+        if ema is not None:
+            ema.swap(model)
 
         if patience_counter >= patience:
             print(f"\nEarly stopping at epoch {ep}")

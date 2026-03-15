@@ -23,7 +23,7 @@ from testing import (
     test_model,
 )
 from torch.utils.data import DataLoader
-from training_loop import _run_training_loop
+from training_loop import EMA, _run_training_loop
 
 device = torch.device(
     "cuda"
@@ -32,6 +32,30 @@ device = torch.device(
     if torch.backends.mps.is_available()
     else "cpu"
 )
+
+
+def create_scheduler(optimizer, args, num_epochs):
+    """Create LR scheduler based on args.scheduler ('cosine' or 'plateau')."""
+    sched_type = getattr(args, "scheduler", "cosine")
+    if sched_type == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=num_epochs, eta_min=1e-6
+        )
+    return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=TRAINING_DEFAULTS.scheduler_factor,
+        patience=TRAINING_DEFAULTS.scheduler_patience,
+        threshold=TRAINING_DEFAULTS.scheduler_threshold,
+    )
+
+
+def create_ema(model, args):
+    """Create EMA instance if ema_decay > 0."""
+    decay = getattr(args, "ema_decay", 0)
+    if decay > 0:
+        return EMA(model, decay=decay)
+    return None
 
 
 def train_model(
@@ -62,13 +86,8 @@ def train_model(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=TRAINING_DEFAULTS.scheduler_factor,
-        patience=TRAINING_DEFAULTS.scheduler_patience,
-        threshold=TRAINING_DEFAULTS.scheduler_threshold,
-    )
+    scheduler = create_scheduler(optimizer, args, args.epochs)
+    ema = create_ema(model, args)
 
     # Build list of per-epoch callbacks
     callbacks = []
@@ -108,6 +127,7 @@ def train_model(
         grid_config,
         args.plot,
         epoch_callback=epoch_callback,
+        ema=ema,
     )
 
     model = load_model(args.save_path, device, vars(args))
@@ -160,13 +180,8 @@ def train_model_two_phase_tf(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=TRAINING_DEFAULTS.scheduler_factor,
-        patience=TRAINING_DEFAULTS.scheduler_patience,
-        threshold=TRAINING_DEFAULTS.scheduler_threshold,
-    )
+    scheduler = create_scheduler(optimizer, args, args.tf_phase1_epochs)
+    ema = create_ema(model, args)
 
     best = _run_training_loop(
         model,
@@ -183,6 +198,7 @@ def train_model_two_phase_tf(
         args.plot,
         description="Phase 1 (TF=1.0)",
         extra_log={"train/teacher_forcing_ratio": 1.0, "train/noise_std": noise_std},
+        ema=ema,
     )
 
     model = load_model(phase1_save, device, config)
@@ -202,13 +218,8 @@ def train_model_two_phase_tf(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=TRAINING_DEFAULTS.scheduler_factor,
-        patience=TRAINING_DEFAULTS.scheduler_patience,
-        threshold=TRAINING_DEFAULTS.scheduler_threshold,
-    )
+    scheduler = create_scheduler(optimizer, args, args.tf_phase2_epochs)
+    ema = create_ema(model, args)
 
     best = _run_training_loop(
         model,
@@ -226,6 +237,7 @@ def train_model_two_phase_tf(
         description=f"Phase 2 (TF={tf2})",
         epoch_offset=args.tf_phase1_epochs,
         extra_log={"train/teacher_forcing_ratio": tf2, "train/noise_std": noise_std},
+        ema=ema,
     )
 
     model = load_model(args.save_path, device, config)
@@ -275,13 +287,8 @@ def train_model_two_phase(
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=TRAINING_DEFAULTS.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=TRAINING_DEFAULTS.scheduler_factor,
-        patience=TRAINING_DEFAULTS.scheduler_patience,
-        threshold=TRAINING_DEFAULTS.scheduler_threshold,
-    )
+    scheduler = create_scheduler(optimizer, args, args.ld_phase1_epochs)
+    ema = create_ema(model, args)
 
     best = _run_training_loop(
         model,
@@ -299,6 +306,7 @@ def train_model_two_phase(
         description="Phase 1 (VAE)",
         epoch_callback=vae_loss.set_epoch,
         extra_log={"phase": 1},
+        ema=ema,
     )
 
     model = load_model(phase1_save, device, config)
@@ -318,13 +326,8 @@ def train_model_two_phase(
         lr=args.lr,
         weight_decay=TRAINING_DEFAULTS.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=TRAINING_DEFAULTS.scheduler_factor,
-        patience=TRAINING_DEFAULTS.scheduler_patience,
-        threshold=TRAINING_DEFAULTS.scheduler_threshold,
-    )
+    scheduler = create_scheduler(optimizer, args, args.ld_phase2_epochs)
+    ema = create_ema(model, args)
 
     best = _run_training_loop(
         model,
@@ -342,6 +345,7 @@ def train_model_two_phase(
         description="Phase 2 (Flow)",
         epoch_offset=args.ld_phase1_epochs,
         extra_log={"phase": 2},
+        ema=ema,
     )
 
     model = load_model(args.save_path, device, config)

@@ -2127,11 +2127,11 @@ Six ablation models isolate which architectural component drives the performance
 | `WaveNOFullIndepTraj` | `independent_traj=True` | Bypasses `BreakpointEvolution`; encodes raw discontinuities via `DiscontinuityEncoder` for trajectory prediction |
 | `WaveNOFullDisc` | `use_discontinuities=True` | Uses discontinuities as tokens instead of segments: `DiscontinuityPhysicsEncoder` for encoding, disc-based characteristic bias, trajectory directly from disc embeddings |
 | `ShockAwareWaveNOFull` | `predict_proximity=True` | Adds a second MLP head (proximity head) that predicts a sigmoid-activated shock proximity field from the same cross-attention features as the density head |
-| `WaveNO` | Standalone class | Strips WaveNOFull to a minimal pipeline: self-attention + Fourier queries + characteristic bias with damping + biased cross-attention + density head. No FiLM, no cross-segment attention, no trajectories |
+| `WaveNO` | Standalone class | Default variant: bias + damping + FiLM + per-head bias scales + LayerNorm in query MLP + wider density head (GELU). No trajectories |
 | `WaveNOBare` | `use_char_bias=False, use_damping=False` | Bare minimum baseline: unbiased cross-attention, no extras |
 | `WaveNOBiasOnly` | `use_char_bias=True, use_damping=False` | + characteristic bias (no damping) |
-| `WaveNOBiasDamp` | `use_char_bias=True, use_damping=True` | + characteristic bias + collision-time damping (= WaveNO) |
-| `WaveNODamp` | `+ use_film=True` | + bias + damping + FiLM time conditioning |
+| `WaveNOBiasDamp` | `use_char_bias=True, use_damping=True` | + characteristic bias + collision-time damping |
+| `WaveNODamp` | `+ use_film=True` | + bias + damping + FiLM time conditioning (= WaveNO default) |
 | `WaveNODampCrossAttn` | `+ use_cross_seg_attn=True` | + bias + damping + cross-segment attention |
 | `WaveNOAll` | all flags True | All components except trajectories |
 | `WaveNOFiLMOnly` | `use_film=True` only | FiLM without characteristic bias |
@@ -2141,38 +2141,44 @@ Six ablation models isolate which architectural component drives the performance
 
 **Location**: `models/waveno.py`
 
-Ablation baseline that removes FiLM time conditioning, cross-segment attention, and trajectory prediction. Keeps self-attention over segments (contextualized embeddings) and collision-time damping (bias fades after wave interactions). Segment embeddings are static across time.
+Default WaveNO variant: LWR bias with collision-time damping, FiLM time conditioning, per-head learnable bias scales, LayerNorm in query MLP, and wider density head with GELU. No cross-segment attention, no trajectories.
+
+**Per-head bias scales**: When `use_char_bias=True`, each attention head has a learnable scalar `head_bias_scale[h]` (initialized to 1.0) that multiplies the physics bias before it enters that head's attention logits. This lets some heads learn to ignore the physics bias (`scale→0`) while others amplify it, improving K-generalization.
+
+**Query MLP**: `Linear → ReLU → LayerNorm → Dropout → Linear` — LayerNorm stabilizes query embeddings before cross-attention.
+
+**Wider density head**: `LayerNorm(H) → Linear(H, 2H) → GELU → Dropout → Linear(2H, 1)` for increased capacity and stable inputs.
+
+**Training config**: Cosine annealing LR scheduler, EMA (decay=0.85), grad clip 0.5, batch size 16, lr 0.003, dropout 0.01.
 
 ```
 xs, ks, pieces_mask → SegmentPhysicsEncoder → seg_emb: (K, H)
 seg_emb → SelfAttention(EncoderLayer × L) → contextualized seg_emb: (K, H)
 
-t_coords, x_coords → Fourier(t) || Fourier(x) → MLP → query_emb: (nt, nx, H)
+t_coords, x_coords → Fourier(t) || Fourier(x) → Linear → ReLU → LayerNorm → Dropout → Linear → query_emb: (nt, nx, H)
+
+FiLM: seg_emb + t_unique → TimeConditioner → kv: (nt, K, H)
 
 (t, x, xs, ks, flux) → backward char foot + collision-time damping → bias: (nt, nx, K)
+bias → per-head scale (head_bias_scale: (num_heads,)) → bias: (nt*heads, nx, K)
 
-seg_emb expanded to (nt, K, H)   [static across time]
 query (B*nt, nx, H), keys/values (B*nt, K, H), bias (B*nt*heads, nx, K)
 → BiasedCrossAttn × N_cross → query: (B*nt, nx, H)
 
-query → DensityHead(MLP) → clamp[0,1] → output_grid: (1, nt, nx)
+query → LayerNorm(H) → Linear(H, 2H) → GELU → Dropout → Linear(2H, 1)
+→ clamp[0,1] → output_grid: (1, nt, nx)
 ```
 
 | Parameter | Default |
 |-----------|---------|
-| `hidden_dim` | 64 |
-| `num_freq_t` | 8 |
-| `num_freq_x` | 8 |
-| `num_seg_frequencies` | 8 |
-| `num_seg_mlp_layers` | 2 |
-| `num_self_attn_layers` | 2 |
-| `num_cross_layers` | 2 |
+| `hidden_dim` | 96 |
+| `num_self_attn_layers` | 3 |
+| `num_cross_layers` | 3 |
 | `num_heads` | 4 |
-| `bias_margin` | 0.0 |
-| `bias_growth_rate` | 100.0 |
-| `bias_time_spread` | 3.0 |
 | `local_features` | True |
-| `dropout` | 0.05 |
+| `dropout` | 0.01 |
+| `use_damping` | True |
+| `use_film` | True |
 
 **Output**: `{output_grid: (B,1,nt,nx), characteristic_bias: (B,nt,nx,K)}`
 **Loss preset**: default `mse`. **Plot preset**: `grid_minimal`. **Transform**: `null`.

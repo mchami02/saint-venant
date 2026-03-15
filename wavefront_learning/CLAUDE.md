@@ -219,6 +219,8 @@ uv run python train.py --model DeepONet --epochs 0 --no_wandb --n_samples 20
 ```
 Do **not** rely on a `--model_path` for quick verification.
 
+**Parallel experiments**: When running multiple experiments in parallel (e.g. sanity checks for different models), always pass a unique `--save_path` for each. The default save path is shared, so concurrent runs will overwrite each other's checkpoints.
+
 ## Code Style Guidelines
 
 - **File size limit**: Keep files under 600 lines. If a file grows beyond this, split it into logical modules.
