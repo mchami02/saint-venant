@@ -994,13 +994,15 @@ Per-segment attention bias using LWR interface dynamics (shock/rarefaction class
 |-----------|------|---------|---------|
 | `damping_sharpness` | `nn.Parameter` | `5.0` | Collision-time sigmoid sharpness (learnable, only when `use_damping=True`) |
 | `use_damping` | `bool` | `True` | Toggle collision-time damping |
+| `eps` | `float` | `1e-6` | Small constant to avoid division by zero in similarity variable |
 
 For each interface between segments $k$ and $k+1$:
 
 $$s_{right}^{(k)} = \begin{cases} s & \text{shock} \\ \lambda_R & \text{rarefaction} \end{cases}, \quad s_{left}^{(k+1)} = \begin{cases} s & \text{shock} \\ \lambda_L & \text{rarefaction} \end{cases}$$
 
-$$\text{penalty}_{left}(t, x, k) = \text{ReLU}(x - (x_d + s_{right}^{(k)} \cdot t))$$
-$$\text{penalty}_{right}(t, x, k+1) = \text{ReLU}((x_d + s_{left}^{(k+1)} \cdot t) - x)$$
+$$\xi = \frac{x - x_d}{t + \varepsilon}$$
+$$\text{penalty}_{left}(t, x, k) = \text{ReLU}(\xi - s_{right}^{(k)})$$
+$$\text{penalty}_{right}(t, x, k+1) = \text{ReLU}(s_{left}^{(k+1)} - \xi)$$
 
 Optional per-segment collision-time damping (`use_damping=True`, $t_{coll}$ computed analytically per segment):
 
@@ -1014,8 +1016,9 @@ query: (t_coords: (*spatial), x_coords: (*spatial))
 → lam = flux.derivative(ks)                                              → (K,)
 → is_shock = lam[:-1] > lam[1:]                                          → (K-1,)
 → speed_right = where(is_shock, s, lam_R)                                 → (K-1,)
-→ penalty_left  = relu(x - (x_d + speed_R * t))                          → (*spatial, K-1)
-→ penalty_right = relu((x_d + speed_L * t) - x)                          → (*spatial, K-1)
+→ xi = (x - x_d) / (t + eps)                                              → (*spatial, K-1)
+→ penalty_left  = relu(xi - speed_R)                                      → (*spatial, K-1)
+→ penalty_right = relu(speed_L - xi)                                      → (*spatial, K-1)
 → bias = -(pad(penalty_left, right=1) + pad(penalty_right, left=1))       → (*spatial, K)
 → if use_damping:
 →   t_coll = _compute_collision_times(xs, lam)                            → (K,)

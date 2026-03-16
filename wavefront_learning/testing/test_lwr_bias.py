@@ -62,8 +62,9 @@ class TestShockBiasAtT0:
         ic = _make_ic([0.0, 0.5, 1.0], [0.2, 0.8])
         t, x = _query_at([0.0], [0.8])
         bias = bias_mod(ic, (t, x))
-        # Left segment (k=0): dist = 0.8 - 0.5 = 0.3, bias = -0.3
-        assert bias[0, 0, 0, 0].item() == pytest.approx(-0.3, abs=1e-5)
+        # At t≈0: xi = (0.8 - 0.5) / 1e-6 = 3e5, shock speed = 0.0
+        # penalty = relu(3e5 - 0.0) = 3e5, bias = -3e5
+        assert bias[0, 0, 0, 0].item() == pytest.approx(-3e5, rel=1e-3)
         # Right segment (k=1): query inside -> should be 0
         assert bias[0, 0, 0, 1].item() == pytest.approx(0.0, abs=1e-5)
 
@@ -91,15 +92,14 @@ class TestBiasAtLaterTime:
     """Boundary moves with shock speed; distances shift accordingly."""
 
     def test_shock_boundary_moves(self, flux):
-        """Shock at x=0.5 with speed s. At t>0, boundary has shifted."""
+        """Shock at x=0.5 with speed s. At t>0, similarity variable."""
         bias_mod = LWRBias(flux=flux, use_damping=False)
         ic = _make_ic([0.0, 0.5, 1.0], [0.2, 0.8])
         # shock speed s = 1 - 0.2 - 0.8 = 0.0 (Greenshields analytical)
-        # At t=0.5: boundary = 0.5 + 0.0*0.5 = 0.5
+        # At t=0.5: xi = (0.7 - 0.5) / 0.5 = 0.4, penalty = relu(0.4 - 0.0) = 0.4
         t, x = _query_at([0.5], [0.7])
         bias = bias_mod(ic, (t, x))
-        # Left seg: dist = 0.7 - 0.5 = 0.2
-        assert bias[0, 0, 0, 0].item() == pytest.approx(-0.2, abs=1e-5)
+        assert bias[0, 0, 0, 0].item() == pytest.approx(-0.4, abs=1e-5)
 
     def test_nonzero_shock_speed(self, flux):
         """Shock with nonzero speed shifts the boundary over time."""
@@ -117,20 +117,19 @@ class TestBiasAtLaterTime:
 class TestDampingOnVsOff:
     """With damping: bias fades after collision time. Without: constant."""
 
-    def test_damping_off_constant(self, flux):
-        """Without damping, bias does not fade even at large t."""
+    def test_damping_off_scales_as_inv_t(self, flux):
+        """Without damping, bias scales as 1/t (similarity variable)."""
         bias_mod = LWRBias(flux=flux, use_damping=False)
         ic = _make_ic([0.0, 0.5, 1.0], [0.2, 0.8])
-        # Query far in time at same spatial point
-        t_early, x = _query_at([0.0], [0.8])
-        t_late, _ = _query_at([10.0], [0.8])
-        bias_early = bias_mod(ic, (t_early, x))
-        bias_late = bias_mod(ic, (t_late, x))
-        # Without damping, the distance-based part is the same
-        # (shock speed = 0 for this IC, so boundary stays at 0.5)
-        assert bias_early[0, 0, 0, 0].item() == pytest.approx(
-            bias_late[0, 0, 0, 0].item(), abs=1e-5
-        )
+        # shock speed = 0.0, x_d = 0.5, query at x=0.8
+        # At t=1.0: xi = 0.3/1.0 = 0.3, bias = -0.3
+        # At t=2.0: xi = 0.3/2.0 = 0.15, bias = -0.15
+        t1, x = _query_at([1.0], [0.8])
+        t2, _ = _query_at([2.0], [0.8])
+        bias_t1 = bias_mod(ic, (t1, x))
+        bias_t2 = bias_mod(ic, (t2, x))
+        ratio = bias_t1[0, 0, 0, 0].item() / bias_t2[0, 0, 0, 0].item()
+        assert ratio == pytest.approx(2.0, abs=1e-4)
 
     def test_damping_on_fades(self, flux):
         """With damping, bias magnitude decreases after collision time."""
@@ -145,6 +144,24 @@ class TestDampingOnVsOff:
         # Early bias should be more negative than late (late is damped toward 0)
         assert abs(bias_early[0, 0, 0, 0].item()) > abs(
             bias_late[0, 0, 0, 0].item()
+        )
+
+
+class TestSimilarityInvariance:
+    """Two queries with same ξ but different (t, x) produce identical bias."""
+
+    def test_same_xi_same_bias(self, flux):
+        bias_mod = LWRBias(flux=flux, use_damping=False)
+        ic = _make_ic([0.0, 0.5, 1.0], [0.2, 0.8])
+        # shock speed = 0.0, x_d = 0.5
+        # Query A: t=1.0, x=0.8 -> xi = 0.3/1.0 = 0.3
+        # Query B: t=2.0, x=1.1 -> xi = 0.6/2.0 = 0.3
+        t_a, x_a = _query_at([1.0], [0.8])
+        t_b, x_b = _query_at([2.0], [1.1])
+        bias_a = bias_mod(ic, (t_a, x_a))
+        bias_b = bias_mod(ic, (t_b, x_b))
+        assert bias_a[0, 0, 0, 0].item() == pytest.approx(
+            bias_b[0, 0, 0, 0].item(), abs=1e-5
         )
 
 
