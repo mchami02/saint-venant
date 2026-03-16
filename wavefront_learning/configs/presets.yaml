@@ -46,6 +46,7 @@ model_plot_preset:
   ShockAwareWaveNOFull: traj_residual
   AutoregressiveWaveNOFull: traj_residual
   NeuralFVSolver: grid_residual
+  Godunov: grid_residual
 
 # Model -> input transform.
 # String key into TRANSFORMS registry in data/transforms.py.
@@ -92,6 +93,7 @@ model_transform:
   ShockAwareDeepONet: ToGridInput
   NeuralFVSolver: ToGridNoCoords
   LNO: ToGridNoCoords
+  Godunov: null
 
 # Loss presets.
 # Each preset is a list of entries with name, weight, and optional kwargs.

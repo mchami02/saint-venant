@@ -17,6 +17,7 @@ This document describes the neural network architectures and loss functions used
    - [LatentDiffusionDeepONet](#latentdiffusiondeeponet)
    - [NeuralFVSolver](#neuralfvsolver)
    - [LNO](#lno)
+   - [Godunov](#godunov)
 3. [Losses](#losses)
    - [Unified Loss Interface](#unified-loss-interface)
    - [Flux Functions](#flux-functions)
@@ -1448,6 +1449,36 @@ h (C, nx) --+--> Skip: Conv1d(C, C, 1) -----------------------------> sum -> GEL
 | `max_displacement` | 0.1 | Displacement clamp (fraction of domain) |
 
 Uses `ToGridNoCoords` transform, default `mse` loss preset, `grid_residual` plot preset.
+
+---
+
+### Godunov
+
+**Location**: `models/godunov.py`
+
+Classical Godunov finite-volume solver wrapped as an `nn.Module` with **no trainable parameters**. Provides a numerical baseline for direct comparison against neural operators on the same evaluation pipeline.
+
+#### Algorithm
+
+For each sample in the batch:
+1. Reconstruct `PiecewiseConstant` IC from `xs` (breakpoints) and `ks` (piece values)
+2. Build `nfv.problem.Problem` with Greenshield flux
+3. Solve with `FVM(Godunov)` using IC-based Dirichlet boundary conditions (ghost cells)
+4. Update rule per cell: `k(t+1)[i] = k(t)[i] + (dt/dx) * (F[i] - F[i+1])` where `F` is the exact Godunov flux
+
+#### Pseudocode
+
+```
+xs: (max_pieces+1,), ks: (max_pieces,), pieces_mask: (max_pieces,)
+→ PiecewiseConstant ICs (per sample)
+→ nfv.Problem(nx, nt, dx, dt, ics, Greenshield)
+→ problem.solve(FVM(Godunov), boundaries="ic")
+→ output_grid: (1, nt, nx)
+```
+
+Grid parameters (`nx`, `nt`, `dx`, `dt`) are read from the input dict at inference time, so the solver works at any resolution.
+
+Uses `null` transform (raw dict input), default `mse` loss preset, `grid_residual` plot preset.
 
 ---
 
