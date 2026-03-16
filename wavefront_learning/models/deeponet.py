@@ -4,8 +4,8 @@ Standard DeepONet with branch (IC encoder) and trunk (coordinate encoder)
 networks connected via dot product. Used as a baseline for comparison
 against wavefront-specific architectures.
 
-Input: dict with "grid_input" key containing tensor of shape (B, 3, nt, nx)
-       from ToGridInputTransform. Channels are [ic_masked, t_coords, x_coords].
+Input: dict with "xs" (B, K+1), "ks" (B, K), "pieces_mask" (B, K),
+       "t_coords" (B, 1, nt, nx), "x_coords" (B, 1, nt, nx).
 Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
 """
 
@@ -16,13 +16,13 @@ import torch.nn as nn
 class DeepONet(nn.Module):
     """Classic DeepONet with branch-trunk dot product.
 
-    Branch network encodes the initial condition (flattened IC at t=0).
+    Branch network encodes the piecewise-constant IC (breakpoints + values).
     Trunk network encodes query (t, x) coordinates.
     Output is the dot product of branch and trunk embeddings.
 
     Args:
-        nx: Number of spatial grid points (branch input size).
-        nt: Number of time steps.
+        max_discontinuities: Maximum number of discontinuities (determines
+            branch input size: 2*max_discontinuities + 1).
         hidden_dim: Hidden layer width for both networks.
         latent_dim: Dimension of the latent space (dot product size).
         num_branch_layers: Number of hidden layers in branch network.
@@ -31,20 +31,20 @@ class DeepONet(nn.Module):
 
     def __init__(
         self,
-        nx: int,
-        nt: int,
+        max_discontinuities: int = 10,
         hidden_dim: int = 128,
         latent_dim: int = 64,
         num_branch_layers: int = 4,
         num_trunk_layers: int = 4,
     ):
         super().__init__()
-        self.nx = nx
-        self.nt = nt
         self.latent_dim = latent_dim
 
-        # Branch network: IC (nx,) -> (latent_dim,)
-        branch_layers = [nn.Linear(nx, hidden_dim), nn.GELU()]
+        # Branch input: xs (max_disc+1) + ks*mask (max_disc) = 2*max_disc + 1
+        branch_input_dim = 2 * max_discontinuities + 1
+
+        # Branch network: flat IC -> (latent_dim,)
+        branch_layers = [nn.Linear(branch_input_dim, hidden_dim), nn.GELU()]
         for _ in range(num_branch_layers - 1):
             branch_layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.GELU()])
         branch_layers.append(nn.Linear(hidden_dim, latent_dim))
@@ -64,37 +64,39 @@ class DeepONet(nn.Module):
         """Forward pass.
 
         Args:
-            x: Input dict with "grid_input" tensor of shape (B, 3, nt, nx)
-               where channels are [ic_masked, t_coords, x_coords].
+            x: Input dict with:
+                - "xs": (B, K+1) breakpoint positions
+                - "ks": (B, K) piece values
+                - "pieces_mask": (B, K) validity mask
+                - "t_coords": (B, 1, nt, nx) time coordinates
+                - "x_coords": (B, 1, nt, nx) space coordinates
 
         Returns:
             Dict with "output_grid" of shape (B, 1, nt, nx).
         """
-        grid = x["grid_input"]
-        B = grid.shape[0]
+        xs = x["xs"]  # (B, K+1)
+        ks = x["ks"]  # (B, K)
+        pieces_mask = x["pieces_mask"]  # (B, K)
+        t_coords = x["t_coords"].squeeze(1)  # (B, nt, nx)
+        x_coords = x["x_coords"].squeeze(1)  # (B, nt, nx)
 
-        # Extract initial condition from first channel at t=0
-        ic = grid[:, 0, 0, :]  # (B, nx)
+        B, nt, nx = t_coords.shape
 
-        # Extract coordinate grids
-        t_coords = grid[:, 1, :, :]  # (B, nt, nx)
-        x_coords = grid[:, 2, :, :]  # (B, nt, nx)
-
-        # Branch: encode IC
-        branch_out = self.branch(ic)  # (B, latent_dim)
+        # Branch: encode IC from breakpoints and masked values
+        branch_input = torch.cat([xs, ks * pieces_mask], dim=-1)  # (B, 2K+1)
+        branch_out = self.branch(branch_input)  # (B, latent_dim)
 
         # Trunk: encode all (t, x) query points
-        # Stack coordinates: (B, nt, nx, 2)
-        coords = torch.stack([t_coords, x_coords], dim=-1)
+        coords = torch.stack([t_coords, x_coords], dim=-1)  # (B, nt, nx, 2)
         coords_flat = coords.reshape(B, -1, 2)  # (B, nt*nx, 2)
         trunk_out = self.trunk(coords_flat)  # (B, nt*nx, latent_dim)
 
-        # Dot product: branch (B, 1, latent_dim) * trunk (B, nt*nx, latent_dim)
+        # Dot product: branch (B, latent_dim) x trunk (B, nt*nx, latent_dim)
         out = torch.einsum("bp,bnp->bn", branch_out, trunk_out)  # (B, nt*nx)
         out = out + self.bias
 
         # Reshape to grid
-        out = out.reshape(B, 1, self.nt, self.nx)
+        out = out.reshape(B, 1, nt, nx)
 
         return {"output_grid": out}
 
@@ -104,23 +106,20 @@ def build_deeponet(args: dict) -> DeepONet:
 
     Args:
         args: Configuration dictionary. Supported keys:
-            - nx: Spatial grid points (default: 50)
-            - nt: Time steps (default: 250)
+            - max_discontinuities: Max IC discontinuities (default: 10)
             - hidden_dim: Hidden layer width (default: 128)
             - latent_dim: Latent/dot-product dimension (default: 64)
             - num_branch_layers: Branch MLP depth (default: 4)
             - num_trunk_layers: Trunk MLP depth (default: 4)
     """
-    nx = args.get("nx", 50)
-    nt = args.get("nt", 250)
+    max_discontinuities = args.get("max_discontinuities", 10)
     hidden_dim = args.get("hidden_dim", 128)
     latent_dim = args.get("latent_dim", 64)
     num_branch_layers = args.get("num_branch_layers", 4)
     num_trunk_layers = args.get("num_trunk_layers", 4)
 
     return DeepONet(
-        nx=nx,
-        nt=nt,
+        max_discontinuities=max_discontinuities,
         hidden_dim=hidden_dim,
         latent_dim=latent_dim,
         num_branch_layers=num_branch_layers,

@@ -29,6 +29,7 @@ model_plot_preset:
   CTTFiLM: traj_existence
   CTTSeg: traj_existence
   CharNO: charno
+  DeepONet: grid_minimal
   WaveNO: grid_minimal
   WaveNOBare: grid_minimal
   WaveNOBiasOnly: grid_minimal
@@ -55,7 +56,7 @@ model_transform:
   AutoregressiveFNO: ToGridNoCoords
   AutoregressiveRealFNO: ToGridNoCoords
   AutoregressiveWaveNOFull: ToGridNoCoords
-  DeepONet: ToGridInput
+  DeepONet: null
   EncoderDecoder: ToGridInput
   EncoderDecoderCross: ToGridInput
   ECARZ: ToGridInput

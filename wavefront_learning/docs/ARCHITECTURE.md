@@ -321,13 +321,13 @@ branch_emb: (H,) + coord_emb  →  BilinearFusion + SkipPaths
 
 **Location**: `models/deeponet.py`
 
-Classic DeepONet architecture used as a baseline. Branch network encodes the initial condition, trunk network encodes query coordinates, and their dot product produces the output.
+Classic DeepONet architecture used as a baseline. Branch network encodes the piecewise-constant IC (breakpoints `xs` and segment values `ks`), trunk network encodes query coordinates, and their dot product produces the output.
 
 #### Pseudocode
 
 ```
-grid_input: (3, nt, nx)  →  extract IC at t=0: (nx,), coords: (nt*nx, 2)
-IC: (nx,)           →  BranchMLP([Linear + GELU] × L → Linear)  →  (p,)
+xs: (K+1,), ks: (K,), pieces_mask: (K,)  →  concat [xs, ks * mask]: (2K+1,)
+IC_flat: (2K+1,)    →  BranchMLP([Linear + GELU] × L → Linear)  →  (p,)
 coords: (nt*nx, 2)  →  TrunkMLP([Linear + GELU] × L → Linear)  →  (nt*nx, p)
 →  dot product + bias: Σ_k branch_k · trunk_k + β  →  reshape to (1, nt, nx)
 ```
@@ -340,7 +340,7 @@ where $b_k$ is the $k$-th branch output, $\tau_k$ is the $k$-th trunk output, an
 
 #### Input/Output Format
 
-**Input**: tensor $(3, n_t, n_x)$ from `ToGridInputTransform` — channels: [ic_masked, t_coords, x_coords]
+**Input**: dict with `xs` $(K+1,)$, `ks` $(K,)$, `pieces_mask` $(K,)$, `t_coords` $(1, n_t, n_x)$, `x_coords` $(1, n_t, n_x)$
 
 **Output** (dictionary):
 - `output_grid`: $(1, n_t, n_x)$ - predicted solution
@@ -349,6 +349,7 @@ where $b_k$ is the $k$-th branch output, $\tau_k$ is the $k$-th trunk output, an
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `max_discontinuities` | 10 | Max IC discontinuities (branch input = 2K+1) |
 | `hidden_dim` | 128 | Hidden layer width |
 | `latent_dim` | 64 | Dot-product dimension |
 | `num_branch_layers` | 4 | Branch MLP depth |
@@ -2059,7 +2060,7 @@ loss = get_loss("pde_shocks", loss_kwargs={
 | ClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | TrajTransformer with shock/rarefaction classifier |
 | ClassifierAllTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with dynamic boundary tokens (time-varying cross-attention) |
 | BiasedClassifierTrajTransformer | Discontinuities + coordinates | Positions + Existence + Full grid | Classifier variant with characteristic attention bias for resolution generalization |
-| DeepONet | Grid tensor $(3, n_t, n_x)$ | Full grid | Classic baseline (branch-trunk dot product) |
+| DeepONet | IC segments (xs, ks) + coordinates | Full grid | Classic baseline (branch-trunk dot product) |
 | FNO | Grid tensor $(3, n_t, n_x)$ | Full grid | Fourier Neural Operator baseline |
 | EncoderDecoder | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + axial attention decoder |
 | EncoderDecoderCross | Grid tensor $(3, n_t, n_x)$ | Full grid | Transformer encoder + cross-attention decoder |
