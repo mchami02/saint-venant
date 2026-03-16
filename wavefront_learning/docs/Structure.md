@@ -42,6 +42,7 @@ wavefront_learning/
 │   ├── autoregressive_fno.py     # AutoregressiveFNO + AutoregressiveRealFNO (1D spatial FNO, autoregressive in time)
 │   ├── autoregressive_waveno.py  # AutoregressiveWaveNO (segment-aware FNO + trajectory prediction, autoregressive in time)
 │   ├── fno_wrapper.py            # FNO wrapper (neuralop FNO with dict interface)
+│   ├── godunov.py                # GodunovSolver: classical FV baseline (no trainable params)
 │   ├── encoder_decoder.py        # Transformer encoder-decoder (axial/cross variants)
 │   ├── charno.py                 # CharNO: Characteristic Neural Operator (Lax-Hopf softmin)
 │   ├── waveno.py                 # WaveNO: Wavefront Neural Operator (default: bias + FiLM, ablation variants)
@@ -211,6 +212,8 @@ wavefront_learning/
   - `AutoregressiveWaveNOFull`, `build_autoregressive_waveno_full()`
 - **fno_wrapper.py** — Wraps neuralop FNO with dict interface.
   - `FNOWrapper`, `build_fno()`
+- **godunov.py** — Classical Godunov FV solver as nn.Module (no trainable parameters).
+  - `GodunovSolver`, `build_godunov()`
 - **encoder_decoder.py** — Transformer encoder-decoder.
   - `EncoderDecoder`, `build_encoder_decoder()`, `build_encoder_decoder_cross()`
 - **charno.py** — Characteristic Neural Operator (Lax-Hopf softmin selection).
