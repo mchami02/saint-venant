@@ -477,8 +477,13 @@ def main():
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {num_params:,}")
 
-    # Run sanity check before logging
-    run_sanity_check(model, train_loader, val_loader, args, device)
+    # Non-trainable models: skip sanity check and force epochs=0
+    if num_params == 0:
+        print("Non-trainable model — skipping sanity check, forcing epochs=0")
+        args.epochs = 0
+    else:
+        # Run sanity check before logging
+        run_sanity_check(model, train_loader, val_loader, args, device)
 
     # Initialize logger (no-ops when args.no_wandb is True)
     wandb_project = "arz_learning" if args.equation == "ARZ" else "wavefront-learning"
@@ -525,11 +530,13 @@ def main():
         plot_preset=args.plot,
     )
 
-    # Log final model
-    logger.log_model(model, args.model, metadata=vars(args))
+    # Log final model (skip for non-trainable models)
+    if num_params > 0:
+        logger.log_model(model, args.model, metadata=vars(args))
     logger.finish()
 
-    print(f"\nModel saved to: {args.save_path}")
+    if num_params > 0:
+        print(f"\nModel saved to: {args.save_path}")
 
 
 if __name__ == "__main__":
