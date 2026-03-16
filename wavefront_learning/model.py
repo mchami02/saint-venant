@@ -19,6 +19,7 @@ from models.encoder_decoder import (
     build_encoder_decoder_cross,
 )
 from models.fno_wrapper import build_fno
+from models.godunov import build_godunov
 from models.hybrid_deeponet import build_hybrid_deeponet
 from models.latent_diffusion_deeponet import build_ld_deeponet
 from models.lno import build_lno
@@ -111,6 +112,7 @@ MODELS = {
     "ShockAwareDeepONet": build_shock_aware_deeponet,
     "NeuralFVSolver": build_neural_fv_solver,
     "LNO": build_lno,
+    "Godunov": build_godunov,
 }
 
 
