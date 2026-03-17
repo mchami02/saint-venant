@@ -11,6 +11,9 @@ from nfv.initial_conditions import PiecewiseConstant
 class PiecewiseRandom(PiecewiseConstant):
     """Piecewise constant IC with random breakpoint locations.
 
+    At most one breakpoint is placed per computational cell, so every
+    discontinuity is resolved on the grid.
+
     Parameters
     ----------
     ks : list[float]
@@ -19,16 +22,35 @@ class PiecewiseRandom(PiecewiseConstant):
         Passed through to PiecewiseConstant.
     rng : np.random.Generator or None
         If provided, used for reproducible random breakpoints.
-        If None, falls back to np.random.rand (legacy behavior).
+        If None, falls back to np.random global state (legacy behavior).
+    nx : int
+        Number of spatial cells.  Required so that breakpoints can be
+        distributed with at most one per cell.
     """
 
-    def __init__(self, ks, x_noise=False, rng=None):
+    def __init__(self, ks, x_noise=False, rng=None, nx=None):
         super().__init__(ks, x_noise)
+        n_breaks = len(ks) - 1
+        if n_breaks == 0:
+            self.xs = np.array([0.0, 1.0])
+            return
+        if nx is None:
+            raise ValueError("nx is required for PiecewiseRandom")
+        if n_breaks > nx:
+            raise ValueError(
+                f"Cannot place {n_breaks} breakpoints in {nx} cells "
+                "(need n_breaks <= nx)"
+            )
+        # Pick n_breaks distinct cells, then place one breakpoint uniformly
+        # within each chosen cell so no two breakpoints share a cell.
         if rng is not None:
-            xs = rng.random(len(ks) - 1)
+            cells = rng.choice(nx, size=n_breaks, replace=False)
+            offsets = rng.random(n_breaks)
         else:
-            xs = np.random.rand(len(ks) - 1)
-        xs = np.sort(xs)
+            cells = np.random.choice(nx, size=n_breaks, replace=False)
+            offsets = np.random.rand(n_breaks)
+        cells = np.sort(cells)
+        xs = (cells + offsets) / nx
         self.xs = np.concatenate([[0], xs, [1]])
 
 
@@ -48,6 +70,7 @@ def random_piecewise(
     k: int,
     rng: np.random.Generator | None = None,
     rho_range: tuple[float, float] = (0.0, 1.0),
+    nx: int | None = None,
 ) -> tuple[list[float], list[float]]:
     """Generate a random k-piecewise-constant IC.
 
@@ -59,6 +82,9 @@ def random_piecewise(
         If provided, used for reproducibility. Falls back to np.random.rand.
     rho_range : (min, max)
         Range for sampled density values.
+    nx : int or None
+        Number of spatial cells.  When provided, breakpoints are placed with
+        at most one per cell.  Required when k > 1.
 
     Returns
     -------
@@ -67,12 +93,28 @@ def random_piecewise(
     rho_lo, rho_hi = rho_range
     if rng is not None:
         ks = (rng.random(k) * (rho_hi - rho_lo) + rho_lo).tolist()
-        xs = rng.random(k - 1)
     else:
         ks = (np.random.rand(k) * (rho_hi - rho_lo) + rho_lo).tolist()
-        xs = np.random.rand(k - 1)
-    xs = np.sort(xs)
-    xs = np.concatenate([[0], xs, [1]]).tolist()
+
+    n_breaks = k - 1
+    if n_breaks == 0:
+        return ks, [0.0, 1.0]
+    if nx is None:
+        raise ValueError("nx is required for random_piecewise when k > 1")
+    if n_breaks > nx:
+        raise ValueError(
+            f"Cannot place {n_breaks} breakpoints in {nx} cells "
+            "(need n_breaks <= nx)"
+        )
+    if rng is not None:
+        cells = rng.choice(nx, size=n_breaks, replace=False)
+        offsets = rng.random(n_breaks)
+    else:
+        cells = np.random.choice(nx, size=n_breaks, replace=False)
+        offsets = np.random.rand(n_breaks)
+    cells = np.sort(cells)
+    xs = ((cells + offsets) / nx).tolist()
+    xs = [0.0] + xs + [1.0]
     return ks, xs
 
 

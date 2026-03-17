@@ -112,6 +112,7 @@ def generate_n(
             ],
             x_noise=False,
             rng=rng,
+            nx=nx,
         )
         for _ in range(n)
     ]
