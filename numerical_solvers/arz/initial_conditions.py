@@ -98,13 +98,21 @@ def random_piecewise(
     v0 : 1-D tensor — initial velocity.
     ic_params : dict with keys "xs", "rho_ks", "v_ks".
     """
+    nx = len(x)
     x_min, x_max = x.min().item(), x.max().item()
-    dx = (x[1] - x[0]).item() if len(x) > 1 else 0.0
+    dx = (x[1] - x[0]).item() if nx > 1 else 0.0
     L = x_max - x_min
 
-    # Random breakpoints (sorted, within domain)
-    breaks = torch.rand(k - 1, generator=rng) * L + x_min
-    breaks = breaks.sort().values.tolist()
+    n_breaks = k - 1
+    if n_breaks > nx:
+        raise ValueError(
+            f"Cannot place {n_breaks} breakpoints in {nx} cells "
+            "(need n_breaks <= nx)"
+        )
+    # Pick n_breaks distinct cells, place one breakpoint within each
+    cell_indices = torch.randperm(nx, generator=rng)[:n_breaks].sort().values
+    offsets = torch.rand(n_breaks, generator=rng)
+    breaks = ((cell_indices + offsets) * dx + x_min).tolist()
     # Append a sentinel past the right boundary
     breaks.append(x_max + 1.0)
 
