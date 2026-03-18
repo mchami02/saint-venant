@@ -1,4 +1,4 @@
-"""LWR-aware per-segment attention bias.
+"""LWR-aware per-segment attention bias (similarity-variable formulation).
 
 Computes a physics-informed attention bias for each IC segment based on
 shock/rarefaction classification at interfaces. Unlike the backward-
@@ -7,15 +7,19 @@ single characteristic foot per segment), this module uses the actual
 interface dynamics:
 
 - **Shock** (λ_L > λ_R): one-sided penalty from the Rankine-Hugoniot
-  trajectory ``x_d + s·t``.
-- **Rarefaction** (λ_L ≤ λ_R): one-sided penalty from the far fan edge,
-  leaving the interior of the fan unpenalized (both segments attend).
+  shock speed ``s``.
+- **Rarefaction** (λ_L ≤ λ_R): one-sided penalty from the far fan edge
+  speed, leaving the interior of the fan unpenalized (both segments attend).
 
-The bias at each query point is ``-relu(dist)``: zero where a segment
-has influence, negative distance elsewhere. When ``use_damping=True``,
-the bias is multiplied by a sigmoid that fades it after the estimated
-collision time:
-``-relu(dist) * sigmoid(damping_sharpness * (t_coll - t))``.
+Penalties are computed in the self-similar coordinate ``ξ = (x - x_d) / (t + ε)``
+rather than physical space. This makes the bias dimensionless, time-invariant,
+and scale-invariant — improving OOD generalization across domain sizes and
+time horizons.
+
+The bias at each query point is ``-relu(ξ - speed)``: zero where a segment
+has influence, negative elsewhere. When ``use_damping=True``, the bias is
+multiplied by a sigmoid that fades it after the estimated collision time:
+``-relu(ξ - speed) * sigmoid(damping_sharpness * (t_coll - t))``.
 """
 
 import torch
@@ -29,18 +33,18 @@ class LWRBias(nn.Module):
     """Per-segment attention bias from LWR interface dynamics.
 
     For each interface between segments k and k+1 the module classifies
-    the wave (shock vs rarefaction) and computes a one-sided linear
-    distance penalty on each adjacent segment.  Penalties are accumulated
-    across all interfaces so that each segment's bias is the sum of
-    contributions from its left and right boundaries.
+    the wave (shock vs rarefaction) and computes a one-sided penalty in
+    the self-similar coordinate ``ξ = (x - x_d) / (t + ε)``.  Penalties
+    are accumulated across all interfaces so that each segment's bias is
+    the sum of contributions from its left and right boundaries.
 
     The bias for a segment at query point (t, x) is::
 
-        bias = -relu(dist)                           # use_damping=False
-        bias = -relu(dist) * σ(β * (t_coll - t))     # use_damping=True
+        bias = -relu(ξ - speed)                      # use_damping=False
+        bias = -relu(ξ - speed) * σ(β * (t_coll - t)) # use_damping=True
 
-    where ``dist`` is the one-sided distance past the boundary trajectory
-    and ``t_coll`` is the per-segment analytical collision time.
+    where ``ξ`` is the similarity variable and ``t_coll`` is the
+    per-segment analytical collision time.
 
     Args:
         initial_damping_sharpness: Initial sharpness of the sigmoid
@@ -49,6 +53,8 @@ class LWRBias(nn.Module):
             Defaults to ``GreenshieldsFlux()``.
         use_damping: If True, multiply the bias by a sigmoid that fades
             it after the estimated collision time.  Default True.
+        eps: Small constant added to ``t`` to avoid division by zero
+            in the similarity variable computation.  Default 1e-6.
     """
 
     def __init__(
@@ -56,9 +62,11 @@ class LWRBias(nn.Module):
         initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
         use_damping: bool = True,
+        eps: float = 1e-6,
     ):
         super().__init__()
         self.use_damping = use_damping
+        self.eps = eps
         if use_damping:
             self.damping_sharpness = nn.Parameter(
                 torch.tensor(initial_damping_sharpness)
@@ -124,12 +132,10 @@ class LWRBias(nn.Module):
         t_exp = t_coords.unsqueeze(-1)  # (B, *spatial, 1)
         x_exp = x_coords.unsqueeze(-1)  # (B, *spatial, 1)
 
-        # -- one-sided linear distance penalties at each interface --------------
-        boundary_right = x_d + speed_right * t_exp  # (B, *spatial, K-1)
-        penalty_left_seg = torch.relu(x_exp - boundary_right)
-
-        boundary_left = x_d + speed_left * t_exp  # (B, *spatial, K-1)
-        penalty_right_seg = torch.relu(boundary_left - x_exp)
+        # -- one-sided penalties in similarity variable ξ = (x - x_d)/(t + ε) --
+        xi = (x_exp - x_d) / (t_exp + self.eps)  # (B, *spatial, K-1)
+        penalty_left_seg = torch.relu(xi - speed_right)
+        penalty_right_seg = torch.relu(speed_left - xi)
 
         # -- accumulate onto K segments with F.pad ----------------------------
         # penalty_left_seg  affects segments 0..K-2 → pad right by 1
