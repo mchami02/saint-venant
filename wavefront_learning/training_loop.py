@@ -33,6 +33,30 @@ def detach_output(pred):
     return pred.detach()
 
 
+def _clip_grad_norm(model: nn.Module, max_norm: float) -> None:
+    """Clip gradient norms, handling complex-valued parameters (e.g. FNO)."""
+    params = [p for p in model.parameters() if p.grad is not None]
+    if not params:
+        return
+    has_complex = any(p.grad.is_complex() for p in params)
+    if not has_complex:
+        torch.nn.utils.clip_grad_norm_(params, max_norm)
+        return
+    # Manual clipping: compute total norm over real + complex grads
+    norms = []
+    for p in params:
+        g = p.grad
+        if g.is_complex():
+            norms.append(g.real.norm() ** 2 + g.imag.norm() ** 2)
+        else:
+            norms.append(g.norm() ** 2)
+    total_norm = torch.sqrt(sum(norms))
+    clip_coef = max_norm / (total_norm + 1e-6)
+    if clip_coef < 1:
+        for p in params:
+            p.grad.detach().mul_(clip_coef)
+
+
 def train_step(
     model: nn.Module,
     batch_input: dict | torch.Tensor,
@@ -87,9 +111,7 @@ def train_step(
 
     # Backward pass
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(
-        model.parameters(), max_norm=TRAINING_DEFAULTS.grad_clip_max_norm
-    )
+    _clip_grad_norm(model, TRAINING_DEFAULTS.grad_clip_max_norm)
     optimizer.step()
 
     return loss.item(), detach_output(pred), components

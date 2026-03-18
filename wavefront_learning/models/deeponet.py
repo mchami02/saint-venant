@@ -11,6 +11,7 @@ Output: dict {"output_grid": tensor of shape (B, 1, nt, nx)}
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class DeepONet(nn.Module):
@@ -61,30 +62,36 @@ class DeepONet(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1))
 
     def forward(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Forward pass.
+        """Forward pass (resolution-agnostic).
 
         Args:
             x: Input dict with "grid_input" tensor of shape (B, 3, nt, nx)
                where channels are [ic_masked, t_coords, x_coords].
+               nt and nx may differ from training resolution.
 
         Returns:
             Dict with "output_grid" of shape (B, 1, nt, nx).
         """
         grid = x["grid_input"]
         B = grid.shape[0]
+        nt_actual = grid.shape[2]
+        nx_actual = grid.shape[3]
 
         # Extract initial condition from first channel at t=0
-        ic = grid[:, 0, 0, :]  # (B, nx)
+        ic = grid[:, 0, 0, :]  # (B, nx_actual)
+
+        # Pool IC to training resolution if evaluating at higher res
+        if ic.shape[1] != self.nx:
+            ic = F.adaptive_avg_pool1d(ic.unsqueeze(1), self.nx).squeeze(1)
 
         # Extract coordinate grids
-        t_coords = grid[:, 1, :, :]  # (B, nt, nx)
-        x_coords = grid[:, 2, :, :]  # (B, nt, nx)
+        t_coords = grid[:, 1, :, :]  # (B, nt_actual, nx_actual)
+        x_coords = grid[:, 2, :, :]  # (B, nt_actual, nx_actual)
 
         # Branch: encode IC
         branch_out = self.branch(ic)  # (B, latent_dim)
 
         # Trunk: encode all (t, x) query points
-        # Stack coordinates: (B, nt, nx, 2)
         coords = torch.stack([t_coords, x_coords], dim=-1)
         coords_flat = coords.reshape(B, -1, 2)  # (B, nt*nx, 2)
         trunk_out = self.trunk(coords_flat)  # (B, nt*nx, latent_dim)
@@ -93,8 +100,8 @@ class DeepONet(nn.Module):
         out = torch.einsum("bp,bnp->bn", branch_out, trunk_out)  # (B, nt*nx)
         out = out + self.bias
 
-        # Reshape to grid
-        out = out.reshape(B, 1, self.nt, self.nx)
+        # Reshape to actual evaluation grid
+        out = out.reshape(B, 1, nt_actual, nx_actual)
 
         return {"output_grid": out}
 
