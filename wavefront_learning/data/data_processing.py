@@ -638,6 +638,19 @@ def get_wavefront_data(
                     if cached_ic_v_ks is not None:
                         cached_ic_v_ks = cached_ic_v_ks[good_mask]
 
+                # Randomly select n samples (seed-dependent) instead of
+                # always taking the first n, so different seeds get
+                # different subsets from the same cache.
+                if len(cached_grids) > n:
+                    idx = np.random.choice(len(cached_grids), n, replace=False)
+                    cached_grids = cached_grids[idx]
+                    if cached_ic_xs is not None:
+                        cached_ic_xs = cached_ic_xs[idx]
+                    if cached_ic_ks is not None:
+                        cached_ic_ks = cached_ic_ks[idx]
+                    if cached_ic_v_ks is not None:
+                        cached_ic_v_ks = cached_ic_v_ks[idx]
+
                 available = cached_grids[:n]
                 if len(available) > 0:
                     valid_grids.append(available)
