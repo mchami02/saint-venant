@@ -78,11 +78,13 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Equation selection
+    _equation_map = {"lwr": "LWR", "arz": "ARZ", "euler": "Euler"}
     parser.add_argument(
         "--equation",
-        type=str,
-        choices=["LWR", "ARZ", "Euler"],
-        help="Equation system (LWR = scalar traffic, ARZ = 2-component density+velocity, Euler = compressible gas dynamics)",
+        type=lambda s: _equation_map[s.lower()],
+        choices=list(_equation_map.values()),
+        metavar="{lwr,arz,euler}",
+        help="Equation system (lwr = scalar traffic, arz = 2-component density+velocity, euler = compressible gas dynamics)",
     )
     parser.add_argument(
         "--gamma", type=float, help="ARZ pressure exponent (default: 1.0)"
