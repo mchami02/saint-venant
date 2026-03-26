@@ -229,15 +229,21 @@ def build_encoder_decoder_cross(args: dict) -> EncoderDecoder:
 
 
 def build_ecarz(args: dict) -> EncoderDecoder:
-    """Build EncoderDecoderCross with 2-channel output for ARZ equations.
+    """Build EncoderDecoderCross for multi-channel equations (ARZ/Euler).
 
-    Same architecture as EncoderDecoderCross but outputs (B, 2, nt, nx)
-    for the two ARZ components (rho, v). Uses n_ic_channels=2 to accept
-    both rho and v initial conditions.
+    Automatically adapts to the equation type:
+    - ARZ: output_dim=2, n_ic_channels=2 (rho, v)
+    - Euler: output_dim=3, n_ic_channels=3 (rho, u, p)
 
     Args:
         args: Configuration dictionary. Same keys as build_encoder_decoder.
     """
+    eq = args.get("equation", "ARZ")
+    if eq == "Euler":
+        n_channels = 3
+    else:
+        n_channels = 2
+
     return EncoderDecoder(
         hidden_dim=args.get("hidden_dim", 64),
         layers_encoder=args.get("layers_encoder", 2),
@@ -248,6 +254,6 @@ def build_ecarz(args: dict) -> EncoderDecoder:
         nx=args.get("nx"),
         dt=args.get("dt"),
         dx=args.get("dx"),
-        output_dim=2,
-        n_ic_channels=2,
+        output_dim=n_channels,
+        n_ic_channels=n_channels,
     )

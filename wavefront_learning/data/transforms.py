@@ -107,6 +107,32 @@ class ToGridInputTransform:
                 ic_out_v = ic_expanded_v.clone()
             ic_channels.append(ic_out_v)
 
+        # If pressure IC is present (Euler), reconstruct p channel
+        if "xs_p" in input_data:
+            xs_p = input_data["xs_p"]
+            ks_p = input_data["ks_p"]
+            mask_p = input_data["pieces_mask_p"]
+
+            ic_grid_p = torch.zeros(self.nx, dtype=torch.float32)
+            n_pieces_p = int(mask_p.sum().item())
+            for i in range(n_pieces_p):
+                x_left = xs_p[i]
+                x_right = xs_p[i + 1]
+                val = ks_p[i]
+                ic_grid_p[(x_positions >= x_left) & (x_positions < x_right)] = val
+            if n_pieces_p > 0:
+                ic_grid_p[x_positions >= xs_p[n_pieces_p - 1]] = ks_p[n_pieces_p - 1]
+
+            ic_expanded_p = (
+                ic_grid_p[None, :].expand(self.nt, self.nx).unsqueeze(0)
+            )
+            if self.mask_ic:
+                ic_out_p = ic_expanded_p.clone()
+                ic_out_p[:, 1:, :] = -1
+            else:
+                ic_out_p = ic_expanded_p.clone()
+            ic_channels.append(ic_out_p)
+
         # Stack channels
         if self.include_coords:
             # [ic_channels..., t_coords, x_coords] -> (n_ic+2, nt, nx)

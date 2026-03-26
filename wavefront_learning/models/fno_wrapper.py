@@ -26,8 +26,20 @@ class FNOWrapper(nn.Module):
         return {"output_grid": out}
 
 
+def _equation_channels(args: dict) -> int:
+    """Return number of IC/output channels for the equation type."""
+    eq = args.get("equation", "LWR")
+    if eq == "Euler":
+        return 3
+    if eq == "ARZ":
+        return 2
+    return 1
+
+
 def build_fno(args: dict) -> FNOWrapper:
     """Build FNO model from configuration dict.
+
+    Automatically adapts in/out channels to the equation type.
 
     Args:
         args: Configuration dictionary. Supported keys:
@@ -35,16 +47,18 @@ def build_fno(args: dict) -> FNOWrapper:
             - n_modes_x: Fourier modes in space dimension (default: 8)
             - hidden_channels: FNO hidden width (default: 16)
             - n_layers: Number of FNO layers (default: 2)
+            - equation: Equation type ("LWR", "ARZ", or "Euler")
     """
     n_modes_t = args.get("n_modes_t", 32)
     n_modes_x = args.get("n_modes_x", 16)
     hidden_channels = args.get("hidden_channels", 32)
     n_layers = args.get("n_layers", 2)
+    n_channels = _equation_channels(args)
 
     return FNOWrapper(
         n_modes=(n_modes_t, n_modes_x),
         hidden_channels=hidden_channels,
-        in_channels=1,
-        out_channels=1,
+        in_channels=n_channels,
+        out_channels=n_channels,
         n_layers=n_layers,
     )

@@ -54,12 +54,13 @@ def upload_grids(
     ic_xs: np.ndarray | None = None,
     ic_ks: np.ndarray | None = None,
     ic_v_ks: np.ndarray | None = None,
+    ic_p_ks: np.ndarray | None = None,
 ) -> None:
     """Upload grids to the shared mchami/grids repository.
 
     Args:
-        grids: Grid data of shape (n_samples, nt, nx) for LWR
-            or (n_samples, 2, nt, nx) for ARZ.
+        grids: Grid data of shape (n_samples, nt, nx) for LWR,
+            (n_samples, 2, nt, nx) for ARZ, or (n_samples, 3, nt, nx) for Euler.
         nx: Number of spatial grid points.
         nt: Number of time steps.
         dx: Spatial step size.
@@ -69,12 +70,17 @@ def upload_grids(
         solver: Solver name (default: LaxHopf).
         flux: Flux name (default: Greenshields).
         repo_id: HuggingFace repo ID.
-        equation: Equation system ("LWR" or "ARZ").
+        equation: Equation system ("LWR", "ARZ", or "Euler").
         ic_xs: IC breakpoint positions, shape (n_samples, k+1).
         ic_ks: IC piece values, shape (n_samples, k).
-        ic_v_ks: IC velocity piece values for ARZ, shape (n_samples, k).
+        ic_v_ks: IC velocity piece values for ARZ/Euler, shape (n_samples, k).
+        ic_p_ks: IC pressure piece values for Euler, shape (n_samples, k).
     """
-    if equation == "ARZ":
+    if equation == "Euler":
+        assert grids.shape[1:] == (3, nt, nx), (
+            f"Euler grids expected shape (n, 3, {nt}, {nx}), got {grids.shape}"
+        )
+    elif equation == "ARZ":
         assert grids.shape[1:] == (2, nt, nx), (
             f"ARZ grids expected shape (n, 2, {nt}, {nx}), got {grids.shape}"
         )
@@ -85,7 +91,7 @@ def upload_grids(
     n_samples = grids.shape[0]
 
     config_id = _make_config_id(solver, flux, nx, nt, dx, dt, max_steps, only_shocks)
-    path_prefix = "arz" if equation == "ARZ" else "lwr"
+    path_prefix = {"Euler": "euler", "ARZ": "arz"}.get(equation, "lwr")
     data_path = f"{path_prefix}/{config_id}.npz"
 
     # 1) Save grids and optional IC params locally
@@ -96,6 +102,8 @@ def upload_grids(
         save_dict["ic_ks"] = ic_ks
     if ic_v_ks is not None:
         save_dict["ic_v_ks"] = ic_v_ks
+    if ic_p_ks is not None:
+        save_dict["ic_p_ks"] = ic_p_ks
     np.savez_compressed("tmp_grids.npz", **save_dict)
 
     # 2) Upload/overwrite only this file
@@ -220,6 +228,7 @@ def download_grids(
         "ic_xs": data["ic_xs"] if "ic_xs" in data else None,
         "ic_ks": data["ic_ks"] if "ic_ks" in data else None,
         "ic_v_ks": data["ic_v_ks"] if "ic_v_ks" in data else None,
+        "ic_p_ks": data["ic_p_ks"] if "ic_p_ks" in data else None,
     }
 
 

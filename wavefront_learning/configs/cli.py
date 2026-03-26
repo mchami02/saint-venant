@@ -81,8 +81,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--equation",
         type=str,
-        choices=["LWR", "ARZ"],
-        help="Equation system (LWR = scalar traffic, ARZ = 2-component density+velocity)",
+        choices=["LWR", "ARZ", "Euler"],
+        help="Equation system (LWR = scalar traffic, ARZ = 2-component density+velocity, Euler = compressible gas dynamics)",
     )
     parser.add_argument(
         "--gamma", type=float, help="ARZ pressure exponent (default: 1.0)"
@@ -103,6 +103,11 @@ def parse_args() -> argparse.Namespace:
         "--bc_type",
         type=str,
         help="ARZ boundary condition type (default: zero_gradient)",
+    )
+    parser.add_argument(
+        "--euler_gamma",
+        type=float,
+        help="Euler heat capacity ratio (default: 1.4)",
     )
 
     # Loss selection

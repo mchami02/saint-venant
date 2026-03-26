@@ -23,6 +23,7 @@ import torch.nn as nn
 from .base.arz_bias import ARZBias
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
+from .base.euler_bias import EulerBias, EulerSegmentEncoder
 from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.lwr_bias import LWRBias
@@ -40,11 +41,11 @@ def _get_pde_bias(
     """Return the appropriate PDE-aware attention bias module.
 
     Args:
-        bias_type: ``"lwr"`` or ``"arz"``.
+        bias_type: ``"lwr"``, ``"arz"``, or ``"euler"``.
         flux: Flux instance (used by LWR only).
         use_damping: Enable collision-time damping (LWR only).
         initial_damping_sharpness: Damping sharpness (LWR only).
-        gamma: Pressure exponent (ARZ only).
+        gamma: Pressure exponent (ARZ) or heat capacity ratio (Euler).
 
     Returns:
         Instantiated bias module.
@@ -57,6 +58,8 @@ def _get_pde_bias(
         )
     if bias_type == "arz":
         return ARZBias(gamma=gamma)
+    if bias_type == "euler":
+        return EulerBias(gamma=gamma)
     raise ValueError(f"Unknown PDE bias type: {bias_type!r}")
 
 
@@ -83,6 +86,8 @@ class WaveNO(nn.Module):
         use_cross_seg_attn: Enable per-timestep cross-segment attention.
         num_cross_segment_layers: Number of cross-segment attention layers
             (only used when use_cross_seg_attn=True).
+        output_dim: Number of output channels (1 for LWR, 2 for ARZ, 3 for Euler).
+        output_clamp: Optional (min, max) clamp for output values. None to disable.
     """
 
     def __init__(
@@ -105,6 +110,8 @@ class WaveNO(nn.Module):
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
+        output_dim: int = 1,
+        output_clamp: tuple[float, float] | None = (0.0, 1.0),
     ):
         super().__init__()
 
@@ -113,18 +120,30 @@ class WaveNO(nn.Module):
         self.use_char_bias = use_char_bias  # str | None
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
+        self.output_dim = output_dim
+        self.output_clamp = output_clamp
         flux = flux or DEFAULT_FLUX()
         self.flux = flux
 
         # Stage 1: Segment encoder + self-attention
-        self.segment_encoder = SegmentPhysicsEncoder(
-            hidden_dim=hidden_dim,
-            num_frequencies=num_seg_frequencies,
-            num_layers=num_seg_mlp_layers,
-            flux=flux,
-            include_cumulative_mass=local_features,
-            dropout=dropout,
-        )
+        if use_char_bias == "euler":
+            self.segment_encoder = EulerSegmentEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
+                num_layers=num_seg_mlp_layers,
+                gamma=gamma,
+                include_cumulative_mass=local_features,
+                dropout=dropout,
+            )
+        else:
+            self.segment_encoder = SegmentPhysicsEncoder(
+                hidden_dim=hidden_dim,
+                num_frequencies=num_seg_frequencies,
+                num_layers=num_seg_mlp_layers,
+                flux=flux,
+                include_cumulative_mass=local_features,
+                dropout=dropout,
+            )
         self.self_attn_layers = nn.ModuleList(
             [
                 EncoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
@@ -197,15 +216,18 @@ class WaveNO(nn.Module):
             ]
         )
 
-        # Stage 5: Density head
-        self.density_head = nn.Sequential(
+        # Stage 5: Output head
+        self.output_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
+            nn.Linear(hidden_dim, output_dim),
         )
-        nn.init.zeros_(self.density_head[-1].weight)
-        nn.init.constant_(self.density_head[-1].bias, 0.5)
+        nn.init.zeros_(self.output_head[-1].weight)
+        if output_dim == 1:
+            nn.init.constant_(self.output_head[-1].bias, 0.5)
+        else:
+            nn.init.zeros_(self.output_head[-1].bias)
 
     def forward(
         self,
@@ -229,7 +251,8 @@ class WaveNO(nn.Module):
         xs = batch_input["xs"]
         ks = batch_input["ks"]
         pieces_mask = batch_input["pieces_mask"]
-        ks_v = batch_input.get("ks_v", None)  # ARZ velocity (optional)
+        ks_v = batch_input.get("ks_v", None)  # ARZ/Euler velocity (optional)
+        ks_p = batch_input.get("ks_p", None)  # Euler pressure (optional)
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
@@ -237,7 +260,10 @@ class WaveNO(nn.Module):
         K = ks.shape[1]
 
         # Stage 1: Encode segments + self-attention
-        seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+        if self.use_char_bias == "euler" and ks_v is not None and ks_p is not None:
+            seg_emb = self.segment_encoder(xs, ks, ks_v, ks_p, pieces_mask)
+        else:
+            seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
 
         key_padding_mask = ~pieces_mask.bool()  # True = padded
         all_masked = key_padding_mask.all(dim=1)
@@ -293,6 +319,8 @@ class WaveNO(nn.Module):
             ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
             if ks_v is not None:
                 ic_data["ks_v"] = ks_v
+            if ks_p is not None:
+                ic_data["ks_p"] = ks_p
             char_bias = self.pde_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
@@ -320,10 +348,11 @@ class WaveNO(nn.Module):
         for layer in self.cross_attn_layers:
             q = layer(q, kv, key_padding_mask=kv_padding_mask, attn_mask=attn_mask)
 
-        # Stage 5: Density head
-        density = self.density_head(q).squeeze(-1)  # (B*nt, nx)
-        density = density.clamp(0.0, 1.0)
-        output_grid = density.reshape(B, 1, nt, nx)
+        # Stage 5: Output head
+        out = self.output_head(q)  # (B*nt, nx, output_dim)
+        if self.output_clamp is not None:
+            out = out.clamp(*self.output_clamp)
+        output_grid = out.permute(0, 2, 1).reshape(B, self.output_dim, nt, nx)
 
         result = {"output_grid": output_grid}
         if char_bias is not None:
@@ -336,10 +365,39 @@ class WaveNO(nn.Module):
 # ---------------------------------------------------------------------------
 
 
+def _equation_config(args: dict) -> dict:
+    """Return equation-aware WaveNO config overrides."""
+    eq = args.get("equation", "LWR")
+    if eq == "Euler":
+        return {
+            "use_char_bias": "euler",
+            "output_dim": 3,
+            "output_clamp": None,
+            "gamma": args.get("euler_gamma") or 1.4,
+        }
+    if eq == "ARZ":
+        return {
+            "use_char_bias": "arz",
+            "output_dim": 1,
+            "output_clamp": None,
+            "gamma": args.get("gamma", 1.0),
+        }
+    # LWR (default)
+    return {
+        "use_char_bias": "lwr",
+        "output_dim": 1,
+        "output_clamp": (0.0, 1.0),
+        "gamma": args.get("gamma", 1.0),
+    }
+
+
 def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
     """Shared builder for WaveNO variants."""
     if not isinstance(args, dict):
         args = vars(args)
+
+    # Equation-aware defaults (can be overridden by flag_overrides)
+    eq_cfg = _equation_config(args)
 
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
@@ -351,10 +409,12 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
-        gamma=args.get("gamma", 1.0),
+        gamma=eq_cfg["gamma"],
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
+        output_dim=eq_cfg["output_dim"],
+        output_clamp=eq_cfg["output_clamp"],
     )
     kwargs.update(flag_overrides)
     return WaveNO(**kwargs)
@@ -363,15 +423,23 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
 def build_waveno(args: dict) -> WaveNO:
     """Factory function for WaveNO (bias + FiLM, the default).
 
+    Automatically adapts to the equation type via ``args["equation"]``:
+    - LWR: LWR bias, 1-channel output, clamped [0, 1]
+    - ARZ: ARZ bias, 1-channel output, no clamp
+    - Euler: Euler bias, 3-channel output, no clamp
+
     Args:
         args: Dict or Namespace with model configuration.
 
     Returns:
         Configured WaveNO instance.
     """
+    if not isinstance(args, dict):
+        args = vars(args)
+    eq_cfg = _equation_config(args)
     return _build_waveno(
         args,
-        use_char_bias="lwr",
+        use_char_bias=eq_cfg["use_char_bias"],
         use_damping=False,
         use_film=True,
         use_cross_seg_attn=False,

@@ -389,16 +389,21 @@ def main():
     if args.loss == "mse":  # default — auto-select per model
         args.loss = MODEL_LOSS_PRESET.get(args.model, "mse")
     if args.plot is None:
-        args.plot = MODEL_PLOT_PRESET.get(args.model, "grid_residual")
+        if args.equation == "Euler":
+            args.plot = "euler"
+        elif args.equation == "ARZ":
+            args.plot = MODEL_PLOT_PRESET.get(args.model, "ecarz")
+        else:
+            args.plot = MODEL_PLOT_PRESET.get(args.model, "grid_residual")
 
     print(f"Using device: {device}")
     print(f"Equation: {args.equation}")
     print(f"Model: {args.model}")
     print(f"Epochs: {args.epochs}, Batch size: {args.batch_size}, LR: {args.lr}")
 
-    # Warn about unsupported ARZ + only_shocks combination
-    if args.equation == "ARZ" and args.only_shocks:
-        print("Warning: --only_shocks is not supported for ARZ; ignoring.")
+    # Warn about unsupported ARZ/Euler + only_shocks combination
+    if args.equation in ("ARZ", "Euler") and args.only_shocks:
+        print(f"Warning: --only_shocks is not supported for {args.equation}; ignoring.")
         args.only_shocks = False
 
     # Build equation-specific kwargs
@@ -409,6 +414,10 @@ def main():
             "flux_type": args.flux_type,
             "reconstruction": args.reconstruction,
             "bc_type": args.bc_type,
+        }
+    elif args.equation == "Euler":
+        equation_kwargs = {
+            "gamma": getattr(args, "euler_gamma", None) or 1.4,
         }
 
     # Check if model is available
@@ -492,8 +501,7 @@ def main():
         run_sanity_check(model, train_loader, val_loader, args, device)
 
     # Initialize logger (no-ops when args.no_wandb is True)
-    wandb_project = "arz_learning" if args.equation == "ARZ" else "wavefront-learning"
-    logger = init_logger(args, project=wandb_project)
+    logger = init_logger(args, project="wavefront-learning")
     logger.log_metrics({"model/parameters": num_params})
     logger.watch_model(model)
 

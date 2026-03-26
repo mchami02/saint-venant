@@ -11,6 +11,7 @@ import torch
 
 from data.data_loading import download_grids, upload_grids
 from numerical_solvers.arz import generate_n as arz_generate_n
+from numerical_solvers.euler import generate_n as euler_generate_n
 from numerical_solvers.lwr import generate_n as lwr_generate_n
 
 
@@ -132,6 +133,94 @@ def get_arz_dataset(
     grids = np.stack([rho, v], axis=1)  # (n, 2, nt, nx)
 
     return grids, result["ic_xs"], result["ic_rho_ks"], result["ic_v_ks"]
+
+
+def _filter_euler_samples(grids, max_value=1e4, label=""):
+    """Remove broken Euler samples (NaN/Inf, all-zeros, extreme values).
+
+    Same logic as ``_filter_arz_samples`` but with a higher max_value
+    threshold since Euler variables can span wider ranges.
+
+    Args:
+        grids: Array of shape (n, 3, nt, nx).
+        max_value: Maximum allowed absolute value.
+        label: Label for log messages.
+
+    Returns:
+        Tuple of (filtered_grids, good_mask).
+    """
+    n = len(grids)
+    flat = grids.reshape(n, -1)
+
+    nan_inf = ~np.isfinite(flat).all(axis=1)
+    all_zero = (flat == 0).all(axis=1)
+    extreme = (np.abs(flat) > max_value).any(axis=1)
+
+    bad = nan_inf | all_zero | extreme
+    n_bad = bad.sum()
+
+    if n_bad > 0:
+        print(
+            f"  {label}: removed {n_bad}/{n} Euler samples "
+            f"(NaN/Inf: {nan_inf.sum()}, all-zero: {all_zero.sum()}, "
+            f"extreme (>{max_value}): {(extreme & ~nan_inf).sum()})"
+        )
+
+    good_mask = ~bad
+    return grids[good_mask], good_mask
+
+
+def get_euler_dataset(
+    n_samples: int,
+    nx: int,
+    nt: int,
+    dx: float,
+    dt: float,
+    max_steps: int = 3,
+    **kwargs,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Generate grids using the Euler solver.
+
+    Args:
+        n_samples: Number of samples to generate.
+        nx: Number of spatial grid points.
+        nt: Number of time steps.
+        dx: Spatial step size.
+        dt: Time step size.
+        max_steps: Number of pieces in piecewise constant IC.
+        **kwargs: Additional Euler solver arguments (gamma, etc.).
+
+    Returns:
+        Tuple of (grids, ic_xs, ic_rho_ks, ic_u_ks, ic_p_ks) where:
+            - grids: shape (n_samples, 3, nt, nx) with channels [rho, u, p]
+            - ic_xs: shape (n_samples, max_steps+1) breakpoint positions
+            - ic_rho_ks: shape (n_samples, max_steps) density piece values
+            - ic_u_ks: shape (n_samples, max_steps) velocity piece values
+            - ic_p_ks: shape (n_samples, max_steps) pressure piece values
+    """
+    # Euler solver returns nt+1 timesteps; request nt-1 so output has nt total
+    result = euler_generate_n(
+        n=n_samples,
+        k=max_steps,
+        nx=nx,
+        nt=nt - 1,
+        dx=dx,
+        dt=dt,
+        show_progress=True,
+        **kwargs,
+    )
+    rho = result["rho"].cpu().numpy()  # (n, nt, nx)
+    u = result["u"].cpu().numpy()  # (n, nt, nx)
+    p = result["p"].cpu().numpy()  # (n, nt, nx)
+    grids = np.stack([rho, u, p], axis=1)  # (n, 3, nt, nx)
+
+    return (
+        grids,
+        result["ic_xs"],
+        result["ic_rho_ks"],
+        result["ic_u_ks"],
+        result["ic_p_ks"],
+    )
 
 
 def compute_shock_proximity(
@@ -422,6 +511,7 @@ def preprocess_wavefront_data(
     ic_ks_all: np.ndarray | None = None,
     ic_n_pieces_all: np.ndarray | None = None,
     ic_v_ks_all: np.ndarray | None = None,
+    ic_p_ks_all: np.ndarray | None = None,
     proximity_sigma: float | None = None,
     min_component_size: int = 5,
 ) -> list[tuple[dict, torch.Tensor]]:
@@ -433,27 +523,29 @@ def preprocess_wavefront_data(
     or when IC param arrays are not provided at all.
 
     Args:
-        grids: Grid data of shape (n_samples, nt, nx) for LWR
-            or (n_samples, 2, nt, nx) for ARZ.
+        grids: Grid data of shape (n_samples, nt, nx) for LWR,
+            (n_samples, 2, nt, nx) for ARZ, or (n_samples, 3, nt, nx) for Euler.
         nx, nt: Grid dimensions.
         dx, dt: Grid spacing.
         max_discontinuities: Maximum number of discontinuities to support.
-        equation: Equation system ("LWR" or "ARZ").
+        equation: Equation system ("LWR", "ARZ", or "Euler").
         ic_xs_all: Breakpoint positions, shape (n_samples, max_steps+1), padded.
         ic_ks_all: Piece values, shape (n_samples, max_steps), padded.
         ic_n_pieces_all: Actual piece count per sample, shape (n_samples,).
             0 means IC params not available (fall back to extraction).
-        ic_v_ks_all: Velocity piece values for ARZ, shape (n_samples, max_steps).
+        ic_v_ks_all: Velocity piece values for ARZ/Euler, shape (n_samples, max_steps).
+        ic_p_ks_all: Pressure piece values for Euler, shape (n_samples, max_steps).
 
     Returns:
         List of tuples (input_data, target_grid) where:
             - input_data: dict containing 'discontinuities', 'mask', 't_coords', 'x_coords'
-            - target_grid: tensor of shape (1, nt, nx) for LWR or (2, nt, nx) for ARZ
+            - target_grid: tensor of shape (1, nt, nx) for LWR,
+              (2, nt, nx) for ARZ, or (3, nt, nx) for Euler
     """
     processed = []
 
     for idx in range(len(grids)):
-        if equation == "ARZ":
+        if equation in ("ARZ", "Euler"):
             target_grid = torch.from_numpy(grids[idx]).to(torch.float32)
         else:
             target_grid = torch.from_numpy(grids[idx]).to(torch.float32).unsqueeze(0)
@@ -472,7 +564,7 @@ def preprocess_wavefront_data(
             )
         else:
             # Fall back to grid extraction (old cached data without IC params)
-            if equation == "ARZ":
+            if equation in ("ARZ", "Euler"):
                 ic_grid = grids[idx, 0, 0, :].copy()
             else:
                 ic_grid = grids[idx, 0, :].copy()
@@ -510,8 +602,8 @@ def preprocess_wavefront_data(
                 grids[idx], dx, proximity_sigma, min_component_size
             )
 
-        # For ARZ, also handle velocity IC
-        if equation == "ARZ":
+        # For ARZ/Euler, also handle velocity IC
+        if equation in ("ARZ", "Euler"):
             if has_ic_params and ic_v_ks_all is not None:
                 k = int(ic_n_pieces_all[idx])
                 k_eff = min(k, max_discontinuities)
@@ -529,6 +621,26 @@ def preprocess_wavefront_data(
             input_data["xs_v"] = xs_v
             input_data["ks_v"] = ks_v
             input_data["pieces_mask_v"] = pieces_mask_v
+
+        # For Euler, also handle pressure IC
+        if equation == "Euler":
+            if has_ic_params and ic_p_ks_all is not None:
+                k = int(ic_n_pieces_all[idx])
+                k_eff = min(k, max_discontinuities)
+                xs_p = xs.clone()
+                ks_p = torch.zeros(max_discontinuities, dtype=torch.float32)
+                pieces_mask_p = pieces_mask.clone()
+                ks_p[:k_eff] = torch.from_numpy(
+                    ic_p_ks_all[idx, :k_eff].copy()
+                ).float()
+            else:
+                ic_grid_p = grids[idx, 2, 0, :].copy()
+                xs_p, ks_p, pieces_mask_p = extract_ic_representation_from_grid(
+                    ic_grid_p, dx, max_pieces=max_discontinuities
+                )
+            input_data["xs_p"] = xs_p
+            input_data["ks_p"] = ks_p
+            input_data["pieces_mask_p"] = pieces_mask_p
 
         processed.append((input_data, target_grid))
 
@@ -576,8 +688,8 @@ def get_wavefront_data(
         random_seed: Random seed for reproducibility.
         max_discontinuities: Maximum number of discontinuities to support.
         upload_to_hf: If True, upload generated data to HuggingFace.
-        equation: Equation system ("LWR" or "ARZ").
-        equation_kwargs: Extra keyword arguments for the ARZ solver.
+        equation: Equation system ("LWR", "ARZ", or "Euler").
+        equation_kwargs: Extra keyword arguments for the ARZ/Euler solver.
 
     Returns:
         List of tuples (input_data, target_grid).
@@ -585,8 +697,9 @@ def get_wavefront_data(
     np.random.seed(random_seed)
 
     is_arz = equation == "ARZ"
-    solver = "ARZ" if is_arz else "LaxHopfPointWise"
-    arz_kw = equation_kwargs or {}
+    is_euler = equation == "Euler"
+    solver = "Euler" if is_euler else ("ARZ" if is_arz else "LaxHopfPointWise")
+    eq_kw = equation_kwargs or {}
 
     # Distribute samples uniformly across step counts {min_steps, ..., max_steps}
     step_counts = list(range(min_steps, max_steps + 1))
@@ -596,7 +709,8 @@ def get_wavefront_data(
     all_grids = []
     all_ic_xs = []
     all_ic_ks = []
-    all_ic_v_ks = []  # ARZ only
+    all_ic_v_ks = []  # ARZ / Euler
+    all_ic_p_ks = []  # Euler only
     all_n_pieces = []
 
     for i, n_steps in enumerate(step_counts):
@@ -609,6 +723,7 @@ def get_wavefront_data(
         valid_ic_xs = []  # list of arrays or None
         valid_ic_ks = []
         valid_ic_v_ks = []
+        valid_ic_p_ks = []  # Euler only
         still_needed = n
         need_upload = False
 
@@ -623,10 +738,13 @@ def get_wavefront_data(
             cached_ic_ks = cached_data["ic_ks"]
             cached_ic_v_ks = cached_data["ic_v_ks"]
 
+            cached_ic_p_ks = cached_data.get("ic_p_ks")
+
             if len(cached_grids) > 0:
-                if is_arz:
+                if is_arz or is_euler:
                     original_len = len(cached_grids)
-                    cached_grids, good_mask = _filter_arz_samples(
+                    filter_fn = _filter_euler_samples if is_euler else _filter_arz_samples
+                    cached_grids, good_mask = filter_fn(
                         cached_grids, label=f"steps={n_steps} (cached)"
                     )
                     if len(cached_grids) < original_len:
@@ -637,6 +755,8 @@ def get_wavefront_data(
                         cached_ic_ks = cached_ic_ks[good_mask]
                     if cached_ic_v_ks is not None:
                         cached_ic_v_ks = cached_ic_v_ks[good_mask]
+                    if cached_ic_p_ks is not None:
+                        cached_ic_p_ks = cached_ic_p_ks[good_mask]
 
                 available = cached_grids[:n]
                 if len(available) > 0:
@@ -653,6 +773,11 @@ def get_wavefront_data(
                         if cached_ic_v_ks is not None
                         else None
                     )
+                    valid_ic_p_ks.append(
+                        cached_ic_p_ks[:n_avail]
+                        if cached_ic_p_ks is not None
+                        else None
+                    )
                     still_needed = n - n_avail
                 if still_needed <= 0:
                     print(f"  steps={n_steps}: using {n} cached samples")
@@ -667,9 +792,23 @@ def get_wavefront_data(
                 f"  steps={n_steps}: generating {batch_size} samples"
                 f" (round {regen_round})..."
             )
-            if is_arz:
+            if is_euler:
+                (
+                    raw_grids, raw_ic_xs, raw_ic_ks,
+                    raw_ic_u_ks, raw_ic_p_ks,
+                ) = get_euler_dataset(
+                    batch_size, nx, nt, dx, dt, n_steps, **eq_kw
+                )
+                raw_grids, good_mask = _filter_euler_samples(
+                    raw_grids, label=f"steps={n_steps}"
+                )
+                raw_ic_xs = raw_ic_xs[good_mask]
+                raw_ic_ks = raw_ic_ks[good_mask]
+                raw_ic_v_ks = raw_ic_u_ks[good_mask]
+                raw_ic_p_ks = raw_ic_p_ks[good_mask]
+            elif is_arz:
                 raw_grids, raw_ic_xs, raw_ic_ks, raw_ic_v_ks = get_arz_dataset(
-                    batch_size, nx, nt, dx, dt, n_steps, **arz_kw
+                    batch_size, nx, nt, dx, dt, n_steps, **eq_kw
                 )
                 raw_grids, good_mask = _filter_arz_samples(
                     raw_grids, label=f"steps={n_steps}"
@@ -677,16 +816,19 @@ def get_wavefront_data(
                 raw_ic_xs = raw_ic_xs[good_mask]
                 raw_ic_ks = raw_ic_ks[good_mask]
                 raw_ic_v_ks = raw_ic_v_ks[good_mask]
+                raw_ic_p_ks = None
             else:
                 raw_grids, raw_ic_xs, raw_ic_ks = get_nfv_dataset(
                     batch_size, nx, nt, dx, dt, n_steps, only_shocks
                 )
                 raw_ic_v_ks = None
+                raw_ic_p_ks = None
             if len(raw_grids) > 0:
                 valid_grids.append(raw_grids)
                 valid_ic_xs.append(raw_ic_xs)
                 valid_ic_ks.append(raw_ic_ks)
                 valid_ic_v_ks.append(raw_ic_v_ks)
+                valid_ic_p_ks.append(raw_ic_p_ks)
                 still_needed -= len(raw_grids)
             need_upload = True
 
@@ -706,6 +848,7 @@ def get_wavefront_data(
         padded_xs = np.zeros((len(step_grids), max_steps + 1))
         padded_ks = np.zeros((len(step_grids), max_steps))
         padded_v_ks = np.zeros((len(step_grids), max_steps))
+        padded_p_ks = np.zeros((len(step_grids), max_steps))
         step_n_pieces = np.zeros(len(step_grids), dtype=int)
 
         offset = 0
@@ -723,6 +866,10 @@ def get_wavefront_data(
                     padded_v_ks[
                         offset : offset + blen, : valid_ic_v_ks[j].shape[1]
                     ] = valid_ic_v_ks[j]
+                if valid_ic_p_ks[j] is not None:
+                    padded_p_ks[
+                        offset : offset + blen, : valid_ic_p_ks[j].shape[1]
+                    ] = valid_ic_p_ks[j]
             offset += blen
 
         # Upload with IC params when all samples have them
@@ -732,8 +879,10 @@ def get_wavefront_data(
             if has_all_ic:
                 upload_kwargs["ic_xs"] = padded_xs[:, : n_steps + 1]
                 upload_kwargs["ic_ks"] = padded_ks[:, :n_steps]
-                if is_arz:
+                if is_arz or is_euler:
                     upload_kwargs["ic_v_ks"] = padded_v_ks[:, :n_steps]
+                if is_euler:
+                    upload_kwargs["ic_p_ks"] = padded_p_ks[:, :n_steps]
             try:
                 upload_grids(
                     step_grids,
@@ -754,8 +903,10 @@ def get_wavefront_data(
         all_ic_xs.append(padded_xs)
         all_ic_ks.append(padded_ks)
         all_n_pieces.append(step_n_pieces)
-        if is_arz:
+        if is_arz or is_euler:
             all_ic_v_ks.append(padded_v_ks)
+        if is_euler:
+            all_ic_p_ks.append(padded_p_ks)
 
     if len(all_grids) == 0:
         raise RuntimeError("No valid samples remain after filtering!")
@@ -765,6 +916,7 @@ def get_wavefront_data(
     ic_ks_all = np.concatenate(all_ic_ks, axis=0)
     n_pieces_all = np.concatenate(all_n_pieces, axis=0)
     ic_v_ks_all = np.concatenate(all_ic_v_ks, axis=0) if all_ic_v_ks else None
+    ic_p_ks_all = np.concatenate(all_ic_p_ks, axis=0) if all_ic_p_ks else None
 
     # Shuffle with index-based permutation (not in-place) to keep arrays aligned
     perm = np.random.permutation(len(grids))
@@ -774,6 +926,8 @@ def get_wavefront_data(
     n_pieces_all = n_pieces_all[perm]
     if ic_v_ks_all is not None:
         ic_v_ks_all = ic_v_ks_all[perm]
+    if ic_p_ks_all is not None:
+        ic_p_ks_all = ic_p_ks_all[perm]
 
     # Preprocess
     processed = preprocess_wavefront_data(
@@ -788,6 +942,7 @@ def get_wavefront_data(
         ic_ks_all=ic_ks_all,
         ic_n_pieces_all=n_pieces_all,
         ic_v_ks_all=ic_v_ks_all,
+        ic_p_ks_all=ic_p_ks_all,
         proximity_sigma=proximity_sigma,
         min_component_size=min_component_size,
     )

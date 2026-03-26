@@ -11,6 +11,7 @@ This module contains reusable components used by main models:
 """
 
 from .arz_bias import ARZBias
+from .euler_bias import EulerBias, EulerSegmentEncoder
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
@@ -90,6 +91,8 @@ __all__ = [
     "CrossDecoder",
     # PDE biases & flux
     "ARZBias",
+    "EulerBias",
+    "EulerSegmentEncoder",
     "Flux",
     "GreenshieldsFlux",
     "TriangularFlux",

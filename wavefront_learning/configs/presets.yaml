@@ -195,3 +195,7 @@ plot_presets:
     - pred
     - mse_error
     - shock_proximity
+  euler:
+    - euler_ground_truth
+    - euler_pred
+    - euler_mse_error

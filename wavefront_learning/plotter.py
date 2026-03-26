@@ -19,6 +19,9 @@ from plotting import (
     plot_arz_ground_truth,
     plot_arz_mse_error,
     plot_arz_pred,
+    plot_euler_ground_truth,
+    plot_euler_mse_error,
+    plot_euler_pred,
     plot_charno_decomposition,
     plot_cvae_samples,
     plot_cvae_uncertainty,
@@ -68,6 +71,9 @@ PLOTS: dict[str, callable] = {
     "arz_ground_truth": plot_arz_ground_truth,
     "arz_pred": plot_arz_pred,
     "arz_mse_error": plot_arz_mse_error,
+    "euler_ground_truth": plot_euler_ground_truth,
+    "euler_pred": plot_euler_pred,
+    "euler_mse_error": plot_euler_mse_error,
     "shock_proximity": plot_shock_proximity,
 }
 

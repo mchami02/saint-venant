@@ -28,6 +28,7 @@ Do **not** rely on `--model_path` for quick verification.
 ## Platform Rules
 
 - **Never modify code to work around macOS/MPS limitations.** If a model does not run on MPS, run the sanity check on CPU instead by passing `--force_cpu`. Do not add MPS workarounds to the codebase.
+- **Always pass `--save_path` when running multiple trainings concurrently.** Without it, concurrent runs will overwrite each other's checkpoint files.
 
 ## Code Style Guidelines
 
