@@ -130,19 +130,17 @@ class ARZBias(nn.Module):
         sigma2 = self._shock_speed_2(rho_L, rho_star, w_L)  # (B, K-1)
 
         # -- speed selection per interface ----------------------------------------
-        # Shock: both segments bounded by the outermost wave from their
-        #   perspective (contact for left, 2-shock for right), leaving the
-        #   intermediate state with zero penalty for both.
-        # Rarefaction: use only the 2-wave fan edges (like LWR); the
-        #   1-contact is ignored and learned by the network.
+        # The ARZ wave structure at each interface is (left to right):
+        #   2-wave (slower, genuinely nonlinear) → 1-contact (faster, at v_R)
         #
-        # Left segment (k): penalty from its RIGHT interface
-        #   shock → 1-contact speed v_R (outermost right wave)
-        #   rarefaction → far fan edge λ₂_* (right edge of 2-rarefaction)
-        speed_right = torch.where(is_shock, v_R, lam2_star)  # (B, K-1)
+        # Left segment (k): bounded by the outermost RIGHT wave = 1-contact
+        #   at speed v_R. This holds for both shock and rarefaction since
+        #   v_R > λ₂_* always (the 1-contact is always to the right of the
+        #   2-wave).
+        speed_right = v_R  # (B, K-1)
 
-        # Right segment (k+1): penalty from its LEFT interface
-        #   shock → 2-shock speed σ₂ (outermost left wave)
+        # Right segment (k+1): bounded by the outermost LEFT wave = 2-wave
+        #   shock → 2-shock speed σ₂
         #   rarefaction → far fan edge λ₂_L (left edge of 2-rarefaction)
         speed_left = torch.where(is_shock, sigma2, lam2_L)  # (B, K-1)
 
