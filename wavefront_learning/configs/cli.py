@@ -322,6 +322,12 @@ def parse_args() -> argparse.Namespace:
 
     # Debugging/profiling
     parser.add_argument(
+        "--force_cpu",
+        action="store_true",
+        default=None,
+        help="Force CPU device (useful when MPS has unsupported ops)",
+    )
+    parser.add_argument(
         "--profile",
         action="store_true",
         default=None,

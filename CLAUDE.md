@@ -7,9 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Follow this workflow for every task, without exception:
 
 1. **Clarify first.** Before doing anything, identify any ambiguities in the task and ask for clarification. Only proceed once the task is clear.
-2. **Create a branch from main.** Always create a new branch from `main` (never from the current branch). Name it descriptively based on the task. **Before branching, always run `git fetch origin main && git checkout main && git pull origin main`** to ensure your local `main` is up to date with the remote.
-3. **Implement the change.**
-4. **Run a targeted sanity check.** Design a lightweight command that actually exercises the feature or fix you just implemented. Do NOT blindly run the same default command every time. Think about what flags, arguments, or configuration will verify your change is working. **Explicitly pass every relevant flag** — never rely on auto-selection or defaults for the thing you're testing. Examples:
+2. **Implement the change.**
+3. **Run a targeted sanity check.** Design a lightweight command that actually exercises the feature or fix you just implemented. Do NOT blindly run the same default command every time. Think about what flags, arguments, or configuration will verify your change is working. **Explicitly pass every relevant flag** — never rely on auto-selection or defaults for the thing you're testing. Examples:
    - Added a new loss? → Use `--loss` to select it explicitly.
    - Added a new model? → Use `--model` to select it. If the model has an associated loss, **also pass `--loss`** explicitly to confirm the loss works too.
    - Added a new model + loss together? → Pass **both** `--model` and `--loss` explicitly.
@@ -22,12 +21,7 @@ Follow this workflow for every task, without exception:
    uv run python train.py --n_samples 50 --epochs 1 --model WaveNO --max_steps 4 --max_test_steps 5 --max_high_res 2 --no_wandb
    ```
    Always add or change flags so the sanity check covers the code you touched. If the default command doesn't exercise your change at all, it is not a valid sanity check. **Do not rely on auto-selected presets** (`MODEL_LOSS_PRESET`, `MODEL_PLOT_PRESET`) — always pass the flags explicitly so the sanity check proves the feature works end-to-end.
-5. **Analyze the result:**
-   - **Pass** → push the branch. Before creating the pull request, **first update main** by running `git fetch origin main && git merge origin/main` on the feature branch. If there are conflicts, resolve them locally, commit the merge, and push. Then create a pull request with a clear description of what was done, and stop.
-   - **Fail** → diagnose, fix, and re-run. Repeat at most 3 times.
-   - **Still failing after 3 attempts** → stop. Write a clear summary of what was tried and what the suspected remaining issue is. Leave the branch as-is without pushing.
-6. **Post-PR fixes.** If review comments or CI checks flag issues, fix them on the same branch and push. Repeat until the PR is clean.
-7. **Never merge.** Never accept or merge the pull request — that is always the user's decision.
+
 
 ## Scope
 
@@ -41,6 +35,7 @@ Unless explicitly stated otherwise, all learning-related tasks are implemented i
 - Do not modify files outside the current task's scope.
 - Never merge or push directly to `main` under any circumstances.
 - **Keep code modular.** Each class or function should do one thing. In particular, loss classes must compute a single loss term — use presets in `loss.py` to compose multiple losses with weights. Never bundle unrelated computations into one class.
+- **No compound shell commands.** Do not chain commands with `&&`, `||`, or `;`. Use absolute paths and run each command separately. Only compound when strictly unavoidable (e.g., a pipe `|` for filtering output).
 
 ## File Maintenance
 

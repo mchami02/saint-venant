@@ -36,10 +36,13 @@ class ToGridInputTransform:
     the raw discontinuity information as additional channels.
     """
 
-    def __init__(self, nx: int, nt: int, include_coords: bool = True, **kwargs):
+    def __init__(
+        self, nx: int, nt: int, include_coords: bool = True, mask_ic: bool = True, **kwargs
+    ):
         self.nx = nx
         self.nt = nt
         self.include_coords = include_coords
+        self.mask_ic = mask_ic
         self.dx = kwargs.get("dx", 1.0 / nx)
 
     def __call__(self, input_data: dict, target_grid: torch.Tensor):
@@ -69,12 +72,16 @@ class ToGridInputTransform:
             ic_grid[None, :].expand(self.nt, self.nx).unsqueeze(0)
         )  # (1, nt, nx)
 
-        # Mask everything except initial condition (like GridMaskAllButInitial)
-        ic_masked = ic_expanded.clone()
-        ic_masked[:, 1:, :] = -1
+        if self.mask_ic:
+            # Mask everything except initial condition
+            ic_out = ic_expanded.clone()
+            ic_out[:, 1:, :] = -1
+        else:
+            # Broadcast IC across all time steps (for 2D spectral models)
+            ic_out = ic_expanded.clone()
 
         # If velocity IC is present (ARZ), reconstruct v channel
-        ic_channels = [ic_masked]
+        ic_channels = [ic_out]
         if "xs_v" in input_data:
             xs_v = input_data["xs_v"]
             ks_v = input_data["ks_v"]
@@ -93,9 +100,12 @@ class ToGridInputTransform:
             ic_expanded_v = (
                 ic_grid_v[None, :].expand(self.nt, self.nx).unsqueeze(0)
             )
-            ic_masked_v = ic_expanded_v.clone()
-            ic_masked_v[:, 1:, :] = -1
-            ic_channels.append(ic_masked_v)
+            if self.mask_ic:
+                ic_out_v = ic_expanded_v.clone()
+                ic_out_v[:, 1:, :] = -1
+            else:
+                ic_out_v = ic_expanded_v.clone()
+            ic_channels.append(ic_out_v)
 
         # Stack channels
         if self.include_coords:
@@ -169,6 +179,7 @@ class DiscretizeICTransform:
 
 
 ToGridNoCoords = partial(ToGridInputTransform, include_coords=False)
+ToGridBroadcastIC = partial(ToGridInputTransform, include_coords=False, mask_ic=False)
 
 
 class LDDeepONetTransform:
@@ -243,6 +254,7 @@ TRANSFORMS = {
     "FlattenDiscontinuities": FlattenDiscontinuitiesTransform,
     "ToGridInput": ToGridInputTransform,
     "ToGridNoCoords": ToGridNoCoords,
+    "ToGridBroadcastIC": ToGridBroadcastIC,
     "DiscretizeIC": DiscretizeICTransform,
     "LDDeepONet": LDDeepONetTransform,
     "CellSampling": CellSamplingTransform,

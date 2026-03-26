@@ -10,6 +10,7 @@ This module contains reusable components used by main models:
 - Encoder-Decoder components: Encoder, AxialDecoder, CrossDecoder
 """
 
+from .arz_bias import ARZBias
 from .assemblers import GridAssembler
 from .axial_decoder import AxialDecoder
 from .base_model import BaseWavefrontModel
@@ -87,7 +88,8 @@ __all__ = [
     "Encoder",
     "AxialDecoder",
     "CrossDecoder",
-    # Characteristic features & flux
+    # PDE biases & flux
+    "ARZBias",
     "Flux",
     "GreenshieldsFlux",
     "TriangularFlux",

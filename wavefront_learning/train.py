@@ -373,8 +373,14 @@ def _set_seed(seed: int) -> None:
 
 def main():
     """Main entry point for training."""
+    global device
     args = parse_args()
     _set_seed(args.seed)
+
+    if args.force_cpu:
+        device = torch.device("cpu")
+        import training_loop
+        training_loop.device = device
 
     # Create grid_config dict for plotting functions
     grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}

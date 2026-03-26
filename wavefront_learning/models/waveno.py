@@ -20,12 +20,44 @@ build_waveno_* factory functions for predefined configurations.
 import torch
 import torch.nn as nn
 
+from .base.arz_bias import ARZBias
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
 from .base.feature_encoders import FourierFeatures
 from .base.flux import DEFAULT_FLUX, Flux
 from .base.lwr_bias import LWRBias
 from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
+
+
+def _get_pde_bias(
+    bias_type: str,
+    *,
+    flux: Flux | None = None,
+    use_damping: bool = True,
+    initial_damping_sharpness: float = 5.0,
+    gamma: float = 1.0,
+) -> nn.Module:
+    """Return the appropriate PDE-aware attention bias module.
+
+    Args:
+        bias_type: ``"lwr"`` or ``"arz"``.
+        flux: Flux instance (used by LWR only).
+        use_damping: Enable collision-time damping (LWR only).
+        initial_damping_sharpness: Damping sharpness (LWR only).
+        gamma: Pressure exponent (ARZ only).
+
+    Returns:
+        Instantiated bias module.
+    """
+    if bias_type == "lwr":
+        return LWRBias(
+            initial_damping_sharpness=initial_damping_sharpness,
+            flux=flux,
+            use_damping=use_damping,
+        )
+    if bias_type == "arz":
+        return ARZBias(gamma=gamma)
+    raise ValueError(f"Unknown PDE bias type: {bias_type!r}")
 
 
 class WaveNO(nn.Module):
@@ -41,10 +73,12 @@ class WaveNO(nn.Module):
         initial_damping_sharpness: Initial sharpness for LWRBias
             collision-time damping (learnable).
         flux: Flux function instance.
+        gamma: Pressure exponent for ARZ bias (p(ρ) = ρ^γ).
         local_features: Include cumulative mass in segment encoder.
         dropout: Dropout rate.
-        use_char_bias: Enable LWR attention bias. When False,
-            cross-attention is unbiased (attn_mask=None).
+        use_char_bias: PDE bias type. ``"lwr"`` for LWR bias,
+            ``"arz"`` for ARZ bias, or ``None`` for unbiased
+            cross-attention (attn_mask=None).
         use_film: Enable FiLM time conditioning on segment embeddings.
         use_cross_seg_attn: Enable per-timestep cross-segment attention.
         num_cross_segment_layers: Number of cross-segment attention layers
@@ -64,9 +98,10 @@ class WaveNO(nn.Module):
         initial_damping_sharpness: float = 5.0,
         flux: Flux | None = None,
         use_damping: bool = True,
+        gamma: float = 1.0,
         local_features: bool = True,
         dropout: float = 0.05,
-        use_char_bias: bool = True,
+        use_char_bias: str | None = "lwr",
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
@@ -75,7 +110,7 @@ class WaveNO(nn.Module):
 
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
-        self.use_char_bias = use_char_bias
+        self.use_char_bias = use_char_bias  # str | None
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
         flux = flux or DEFAULT_FLUX()
@@ -142,12 +177,14 @@ class WaveNO(nn.Module):
                 ]
             )
 
-        # Stage 3: LWR attention bias (conditional)
-        if use_char_bias:
-            self.lwr_bias = LWRBias(
-                initial_damping_sharpness=initial_damping_sharpness,
+        # Stage 3: PDE-aware attention bias (conditional)
+        if use_char_bias is not None:
+            self.pde_bias = _get_pde_bias(
+                use_char_bias,
                 flux=flux,
                 use_damping=use_damping,
+                initial_damping_sharpness=initial_damping_sharpness,
+                gamma=gamma,
             )
 
         # Stage 4: Biased cross-attention layers
@@ -192,6 +229,7 @@ class WaveNO(nn.Module):
         xs = batch_input["xs"]
         ks = batch_input["ks"]
         pieces_mask = batch_input["pieces_mask"]
+        ks_v = batch_input.get("ks_v", None)  # ARZ velocity (optional)
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
@@ -250,10 +288,12 @@ class WaveNO(nn.Module):
             kv = kv * pieces_mask.unsqueeze(1).unsqueeze(-1)  # re-zero
             kv = kv.reshape(B * nt, K, self.hidden_dim)
 
-        # Stage 3: LWR attention bias (conditional)
-        if self.use_char_bias:
+        # Stage 3: PDE-aware attention bias (conditional)
+        if self.use_char_bias is not None:
             ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
-            char_bias = self.lwr_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
+            if ks_v is not None:
+                ic_data["ks_v"] = ks_v
+            char_bias = self.pde_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
             attn_mask = (
@@ -311,6 +351,7 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
+        gamma=args.get("gamma", 1.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
@@ -330,7 +371,7 @@ def build_waveno(args: dict) -> WaveNO:
     """
     return _build_waveno(
         args,
-        use_char_bias=True,
+        use_char_bias="lwr",
         use_damping=False,
         use_film=True,
         use_cross_seg_attn=False,
@@ -340,7 +381,7 @@ def build_waveno(args: dict) -> WaveNO:
 def build_waveno_bare(args: dict) -> WaveNO:
     """Bare minimum: unbiased cross-attention, no extras."""
     return _build_waveno(
-        args, use_char_bias=False, use_film=False, use_cross_seg_attn=False
+        args, use_char_bias=None, use_film=False, use_cross_seg_attn=False
     )
 
 
@@ -348,7 +389,7 @@ def build_waveno_bias_only(args: dict) -> WaveNO:
     """+ LWR bias (without damping)."""
     return _build_waveno(
         args,
-        use_char_bias=True,
+        use_char_bias="lwr",
         use_damping=False,
         use_film=False,
         use_cross_seg_attn=False,
@@ -359,7 +400,7 @@ def build_waveno_bias_damp(args: dict) -> WaveNO:
     """+ LWR bias + collision-time damping."""
     return _build_waveno(
         args,
-        use_char_bias=True,
+        use_char_bias="lwr",
         use_damping=True,
         use_film=False,
         use_cross_seg_attn=False,
@@ -369,33 +410,33 @@ def build_waveno_bias_damp(args: dict) -> WaveNO:
 def build_waveno_damp(args: dict) -> WaveNO:
     """+ LWR bias + damping + FiLM time conditioning."""
     return _build_waveno(
-        args, use_char_bias=True, use_film=True, use_cross_seg_attn=False
+        args, use_char_bias="lwr", use_film=True, use_cross_seg_attn=False
     )
 
 
 def build_waveno_damp_cross_attn(args: dict) -> WaveNO:
     """+ LWR bias + damping + cross-segment attention."""
     return _build_waveno(
-        args, use_char_bias=True, use_film=False, use_cross_seg_attn=True
+        args, use_char_bias="lwr", use_film=False, use_cross_seg_attn=True
     )
 
 
 def build_waveno_all(args: dict) -> WaveNO:
     """All components except trajectories."""
     return _build_waveno(
-        args, use_char_bias=True, use_film=True, use_cross_seg_attn=True
+        args, use_char_bias="lwr", use_film=True, use_cross_seg_attn=True
     )
 
 
 def build_waveno_film_only(args: dict) -> WaveNO:
     """FiLM only (no LWR bias)."""
     return _build_waveno(
-        args, use_char_bias=False, use_film=True, use_cross_seg_attn=False
+        args, use_char_bias=None, use_film=True, use_cross_seg_attn=False
     )
 
 
 def build_waveno_cross_attn_only(args: dict) -> WaveNO:
     """Cross-segment attention only (no LWR bias)."""
     return _build_waveno(
-        args, use_char_bias=False, use_film=False, use_cross_seg_attn=True
+        args, use_char_bias=None, use_film=False, use_cross_seg_attn=True
     )

@@ -52,7 +52,7 @@ model_plot_preset:
 # String key into TRANSFORMS registry in data/transforms.py.
 # Models not listed here default to null (no transform).
 model_transform:
-  FNO: ToGridNoCoords
+  FNO: ToGridBroadcastIC
   AutoregressiveFNO: ToGridNoCoords
   AutoregressiveRealFNO: ToGridNoCoords
   AutoregressiveWaveNOFull: ToGridNoCoords
