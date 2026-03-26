@@ -17,3 +17,4 @@ wandb/
 *.npz
 launch.json
 tex/
+index.parquet
