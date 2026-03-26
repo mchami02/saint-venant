@@ -378,7 +378,7 @@ def _equation_config(args: dict) -> dict:
     if eq == "ARZ":
         return {
             "use_char_bias": "arz",
-            "output_dim": 1,
+            "output_dim": 2,
             "output_clamp": None,
             "gamma": args.get("gamma", 1.0),
         }
@@ -425,7 +425,7 @@ def build_waveno(args: dict) -> WaveNO:
 
     Automatically adapts to the equation type via ``args["equation"]``:
     - LWR: LWR bias, 1-channel output, clamped [0, 1]
-    - ARZ: ARZ bias, 1-channel output, no clamp
+    - ARZ: ARZ bias, 2-channel output, no clamp
     - Euler: Euler bias, 3-channel output, no clamp
 
     Args:

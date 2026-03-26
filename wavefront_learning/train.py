@@ -392,7 +392,7 @@ def main():
         if args.equation == "Euler":
             args.plot = "euler"
         elif args.equation == "ARZ":
-            args.plot = MODEL_PLOT_PRESET.get(args.model, "ecarz")
+            args.plot = "ecarz"
         else:
             args.plot = MODEL_PLOT_PRESET.get(args.model, "grid_residual")
 
