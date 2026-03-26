@@ -86,11 +86,11 @@ class LWRBias(nn.Module):
                 - ``ks``: (B, K) segment density values.
                 - ``pieces_mask``: (B, K) validity mask (1=valid).
             query_points: Tuple ``(t_coords, x_coords)`` each of shape
-                ``(B, *spatial)``, where ``*spatial`` can be any number
+                ``(B, nt, nx)``, where ``(nt, nx)`` can be any number
                 of dimensions (e.g. ``(nt, nx)``).
 
         Returns:
-            Bias tensor ``(B, *spatial, K)``.  Zero means full attention;
+            Bias tensor ``(B, nt, nx, K)``.  Zero means full attention;
             large negative values suppress attention.
         """
         xs = ic_data["xs"]  # (B, K+1)
@@ -99,8 +99,6 @@ class LWRBias(nn.Module):
         t_coords, x_coords = query_points  # each (B, *spatial)
 
         K = ks.shape[1]
-        spatial_dims = t_coords.shape[1:]  # e.g. (nt, nx)
-        n_expand = len(spatial_dims)  # number of dims to unsqueeze
 
         # -- characteristic and shock speeds ----------------------------------
         lam = self.flux.derivative(ks)  # (B, K)
@@ -123,11 +121,10 @@ class LWRBias(nn.Module):
         # -- interface positions ----------------------------------------------
         x_d = xs[:, 1:K]  # (B, K-1) interior breakpoints
 
-        # Expand interface quantities to (B, *spatial, K-1)
-        for _ in range(n_expand):
-            x_d = x_d.unsqueeze(1)
-            speed_right = speed_right.unsqueeze(1)
-            speed_left = speed_left.unsqueeze(1)
+        # Expand interface quantities to (B, 1, 1, K-1)
+        x_d = x_d[:, None, None, :]
+        speed_right = speed_right[:, None, None, :]
+        speed_left = speed_left[:, None, None, :]
 
         t_exp = t_coords.unsqueeze(-1)  # (B, *spatial, 1)
         x_exp = x_coords.unsqueeze(-1)  # (B, *spatial, 1)
@@ -147,17 +144,14 @@ class LWRBias(nn.Module):
         # -- per-segment collision-time damping (optional) ---------------------
         if self.use_damping:
             t_coll = self._compute_collision_times(xs, ks, lam, K)  # (B, K)
-            for _ in range(n_expand):
-                t_coll = t_coll.unsqueeze(1)  # (B, 1, ..., 1, K)
+            t_coll = t_coll[:, None, None, :]  # (B, 1, 1, K)
             damping = torch.sigmoid(
                 self.damping_sharpness.abs() * (t_coll - t_exp)
             )  # (B, *spatial, K) — ~1 before collision, ~0 after
             bias = bias * damping
 
         # -- mask padded segments ---------------------------------------------
-        mask = pieces_mask
-        for _ in range(n_expand):
-            mask = mask.unsqueeze(1)  # (B, 1, ..., 1, K)
+        mask = pieces_mask[:, None, None, :]  # (B, 1, 1, K)
         bias = bias * mask + (~mask.bool()).float() * (-1e9)
 
         return bias

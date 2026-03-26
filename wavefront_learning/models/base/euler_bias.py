@@ -152,10 +152,10 @@ class EulerBias(nn.Module):
                 - ``ks_p``: (B, K) segment pressure values.
                 - ``pieces_mask``: (B, K) validity mask (1=valid).
             query_points: Tuple ``(t_coords, x_coords)`` each of shape
-                ``(B, *spatial)``.
+                ``(B, nt, nx)``.
 
         Returns:
-            Bias tensor ``(B, *spatial, K)``.
+            Bias tensor ``(B, nt, nx, K)``.
         """
         xs = ic_data["xs"]  # (B, K+1)
         rho = ic_data["ks"]  # (B, K)
@@ -167,8 +167,6 @@ class EulerBias(nn.Module):
         gamma = self.gamma
         eps = self.eps
         K = rho.shape[1]
-        spatial_dims = t_coords.shape[1:]
-        n_expand = len(spatial_dims)
 
         # -- left/right states at each interface --------------------------------
         rho_L = rho[:, :-1]  # (B, K-1)
@@ -211,11 +209,10 @@ class EulerBias(nn.Module):
         # -- interface positions ------------------------------------------------
         x_d = xs[:, 1:K]  # (B, K-1)
 
-        # Expand interface quantities to (B, *spatial, K-1)
-        for _ in range(n_expand):
-            x_d = x_d.unsqueeze(1)
-            speed_right = speed_right.unsqueeze(1)
-            speed_left = speed_left.unsqueeze(1)
+        # Expand interface quantities to (B, 1, 1, K-1)
+        x_d = x_d[:, None, None, :]
+        speed_right = speed_right[:, None, None, :]
+        speed_left = speed_left[:, None, None, :]
 
         t_exp = t_coords.unsqueeze(-1)  # (B, *spatial, 1)
         x_exp = x_coords.unsqueeze(-1)  # (B, *spatial, 1)
@@ -231,9 +228,7 @@ class EulerBias(nn.Module):
         )  # (B, *spatial, K)
 
         # -- mask padded segments -----------------------------------------------
-        mask = pieces_mask
-        for _ in range(n_expand):
-            mask = mask.unsqueeze(1)
+        mask = pieces_mask[:, None, None, :]  # (B, 1, 1, K)
         bias = bias * mask + (~mask.bool()).float() * (-1e9)
 
         return bias
