@@ -7,6 +7,7 @@ Top-level package for numerical PDE solvers (PyTorch).
 | Directory | Purpose |
 |---|---|
 | `arz/` | ARZ (Aw-Rascle-Zhang) traffic flow solver |
+| `euler/` | 1D compressible Euler equations solver (HLLC/HLL/Rusanov, PyTorch) |
 | `lwr/` | LWR (Lighthill-Whitham-Richards) traffic flow solver (nfv Lax-Hopf) |
 | `lwr2d/` | 2D LWR traffic flow solver (Godunov FV, PyTorch) |
 
