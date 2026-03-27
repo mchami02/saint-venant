@@ -2,8 +2,8 @@
 
 import torch
 
-from numerical_solvers.lwr2d import generate_one
-from numerical_solvers.lwr2d.initial_conditions import gaussian_bump, riemann_x
+from numerical_solvers.src.lwr2d import generate_one
+from numerical_solvers.src.lwr2d.initial_conditions import gaussian_bump, riemann_x
 
 
 def _total_mass(rho: torch.Tensor, dx: float, dy: float) -> torch.Tensor:

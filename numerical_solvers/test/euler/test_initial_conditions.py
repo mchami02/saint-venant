@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from numerical_solvers.euler.initial_conditions import (
+from numerical_solvers.src.euler.initial_conditions import (
     from_steps,
     random_piecewise,
     riemann,

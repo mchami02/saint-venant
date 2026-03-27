@@ -5,9 +5,9 @@ import math
 import pytest
 import torch
 
-from numerical_solvers.euler import generate_n, generate_one
-from numerical_solvers.euler.initial_conditions import from_steps, random_piecewise, riemann, sod
-from numerical_solvers.euler.physics import (
+from numerical_solvers.src.euler import generate_n, generate_one
+from numerical_solvers.src.euler.initial_conditions import from_steps, random_piecewise, riemann, sod
+from numerical_solvers.src.euler.physics import (
     conservative_to_primitive,
     pressure_from_conservative,
     primitive_to_conservative,

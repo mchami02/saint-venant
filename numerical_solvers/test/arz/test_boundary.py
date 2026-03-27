@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from numerical_solvers.arz.boundary import apply_ghost_cells
-from numerical_solvers.arz.physics import pressure
+from numerical_solvers.src.arz.boundary import apply_ghost_cells
+from numerical_solvers.src.arz.physics import pressure
 
 
 @pytest.fixture(params=[1, 4], ids=["ng1", "ng4"])

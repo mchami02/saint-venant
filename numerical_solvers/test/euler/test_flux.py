@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from numerical_solvers.euler.flux import hll, hllc, rusanov
-from numerical_solvers.euler.physics import primitive_to_conservative
+from numerical_solvers.src.euler.flux import hll, hllc, rusanov
+from numerical_solvers.src.euler.physics import primitive_to_conservative
 
 
 @pytest.fixture(params=["hllc", "hll", "rusanov"], ids=["hllc", "hll", "rusanov"])

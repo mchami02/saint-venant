@@ -70,7 +70,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["numerical_methods", "learner", "operator_learning", "numerical_solvers", "numerical_solvers.arz", "numerical_solvers.euler", "numerical_solvers.lwr", "numerical_solvers.lwr2d", "numerical_solvers.lwr2d.tests", "numerical_solvers.test", "numerical_solvers.test.lwr", "numerical_solvers.test.arz", "numerical_solvers.test.euler"]
+packages = ["numerical_methods", "learner", "operator_learning", "numerical_solvers", "numerical_solvers.src", "numerical_solvers.src.arz", "numerical_solvers.src.euler", "numerical_solvers.src.lwr", "numerical_solvers.src.lwr2d", "numerical_solvers.test", "numerical_solvers.test.lwr", "numerical_solvers.test.lwr2d", "numerical_solvers.test.arz", "numerical_solvers.test.euler"]
 
 [tool.uv.sources]
 nfv = { git = "https://github.com/mchami02/nfv.git" }

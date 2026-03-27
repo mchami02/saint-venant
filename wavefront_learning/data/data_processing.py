@@ -10,9 +10,9 @@ import numpy as np
 import torch
 
 from data.data_loading import download_grids, upload_grids
-from numerical_solvers.arz import generate_n as arz_generate_n
-from numerical_solvers.euler import generate_n as euler_generate_n
-from numerical_solvers.lwr import generate_n as lwr_generate_n
+from numerical_solvers.src.arz import generate_n as arz_generate_n
+from numerical_solvers.src.euler import generate_n as euler_generate_n
+from numerical_solvers.src.lwr import generate_n as lwr_generate_n
 
 
 def _filter_arz_samples(grids, max_value=10.0, label=""):

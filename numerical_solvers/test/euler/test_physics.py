@@ -4,7 +4,7 @@ import math
 
 import torch
 
-from numerical_solvers.euler.physics import (
+from numerical_solvers.src.euler.physics import (
     conservative_to_primitive,
     pressure_from_conservative,
     primitive_to_conservative,

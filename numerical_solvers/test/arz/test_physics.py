@@ -2,7 +2,7 @@
 
 import torch
 
-from numerical_solvers.arz.physics import dp_drho, eigenvalues, pressure
+from numerical_solvers.src.arz.physics import dp_drho, eigenvalues, pressure
 
 
 class TestPressure:

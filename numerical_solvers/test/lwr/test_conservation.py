@@ -2,7 +2,7 @@
 
 import torch
 
-from numerical_solvers.lwr import generate_one
+from numerical_solvers.src.lwr import generate_one
 
 
 class TestDensityBounds:

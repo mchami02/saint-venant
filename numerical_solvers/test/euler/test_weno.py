@@ -2,7 +2,7 @@
 
 import torch
 
-from numerical_solvers.euler.weno import weno5_reconstruct
+from numerical_solvers.src.euler.weno import weno5_reconstruct
 
 
 class TestWENO5:

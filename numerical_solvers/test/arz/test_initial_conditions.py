@@ -2,7 +2,7 @@
 
 import torch
 
-from numerical_solvers.arz.initial_conditions import (
+from numerical_solvers.src.arz.initial_conditions import (
     from_steps,
     random_piecewise,
     riemann,

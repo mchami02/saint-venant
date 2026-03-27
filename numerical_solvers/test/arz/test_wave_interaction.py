@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from numerical_solvers.arz import generate_one
-from numerical_solvers.arz.initial_conditions import from_steps, three_region
+from numerical_solvers.src.arz import generate_one
+from numerical_solvers.src.arz.initial_conditions import from_steps, three_region
 
 
 @pytest.fixture(

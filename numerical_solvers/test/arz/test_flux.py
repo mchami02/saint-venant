@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from numerical_solvers.arz.flux import hll, rusanov
-from numerical_solvers.arz.physics import pressure
+from numerical_solvers.src.arz.flux import hll, rusanov
+from numerical_solvers.src.arz.physics import pressure
 
 
 @pytest.fixture(params=["rusanov", "hll"], ids=["rusanov", "hll"])

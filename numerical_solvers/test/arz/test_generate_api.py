@@ -2,9 +2,9 @@
 
 import torch
 
-from numerical_solvers.arz import generate_n, generate_one
-from numerical_solvers.arz.initial_conditions import riemann
-from numerical_solvers.arz.physics import pressure
+from numerical_solvers.src.arz import generate_n, generate_one
+from numerical_solvers.src.arz.initial_conditions import riemann
+from numerical_solvers.src.arz.physics import pressure
 
 
 class TestGenerateOne:

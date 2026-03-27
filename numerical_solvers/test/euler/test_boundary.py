@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from numerical_solvers.euler.boundary import apply_ghost_cells
+from numerical_solvers.src.euler.boundary import apply_ghost_cells
 
 
 @pytest.fixture(params=[1, 4], ids=["ng1", "ng4"])

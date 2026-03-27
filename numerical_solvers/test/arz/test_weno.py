@@ -2,7 +2,7 @@
 
 import torch
 
-from numerical_solvers.arz.weno import weno5_reconstruct
+from numerical_solvers.src.arz.weno import weno5_reconstruct
 
 
 class TestWENO5:

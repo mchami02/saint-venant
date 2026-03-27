@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from numerical_solvers.arz import generate_one
+from numerical_solvers.src.arz import generate_one
 
 
 class TestUniformSteady:

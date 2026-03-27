@@ -2,8 +2,8 @@
 
 import torch
 
-from numerical_solvers.lwr2d import generate_one
-from numerical_solvers.lwr2d.initial_conditions import riemann_x, riemann_y
+from numerical_solvers.src.lwr2d import generate_one
+from numerical_solvers.src.lwr2d.initial_conditions import riemann_x, riemann_y
 
 
 class TestXRiemannConsistency:

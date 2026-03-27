@@ -16,7 +16,7 @@ where $w = v + p(\rho)$ is the Lagrangian marker (conserved along characteristic
 ## Quick Start
 
 ```python
-from numerical_solvers.arz import generate_one, generate_n, riemann
+from numerical_solvers.src.arz import generate_one, generate_n, riemann
 import torch
 
 # Solve a single Riemann problem
@@ -105,7 +105,7 @@ generate_n(
 All IC functions return `(rho0, v0)` tensors — physical velocity, not the conserved variable `w`.
 
 ```python
-from numerical_solvers.arz import riemann, three_region, from_steps, random_piecewise
+from numerical_solvers.src.arz import riemann, three_region, from_steps, random_piecewise
 
 # Two-region Riemann problem
 rho0, v0 = riemann(x, rho_left=0.8, rho_right=0.2, v0=0.1, x_split=0.5)

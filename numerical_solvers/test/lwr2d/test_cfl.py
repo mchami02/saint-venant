@@ -2,9 +2,9 @@
 
 import torch
 
-from numerical_solvers.lwr2d import generate_one
-from numerical_solvers.lwr2d.initial_conditions import four_quadrant
-from numerical_solvers.lwr2d.physics import cfl_dt
+from numerical_solvers.src.lwr2d import generate_one
+from numerical_solvers.src.lwr2d.initial_conditions import four_quadrant
+from numerical_solvers.src.lwr2d.physics import cfl_dt
 
 
 class TestCflDt:

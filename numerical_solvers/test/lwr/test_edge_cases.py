@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import torch
 
-from numerical_solvers.lwr import generate_n, generate_one
-from numerical_solvers.lwr.initial_conditions import (
+from numerical_solvers.src.lwr import generate_n, generate_one
+from numerical_solvers.src.lwr.initial_conditions import (
     PiecewiseRandom,
     from_steps,
     random_piecewise,

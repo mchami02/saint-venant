@@ -8,10 +8,10 @@ rho*w conservation, and long-time behavior.
 import pytest
 import torch
 
-from numerical_solvers.arz import generate_one
-from numerical_solvers.arz.flux import hll, rusanov
-from numerical_solvers.arz.initial_conditions import from_steps, random_piecewise, riemann, three_region
-from numerical_solvers.arz.physics import dp_drho, eigenvalues, pressure
+from numerical_solvers.src.arz import generate_one
+from numerical_solvers.src.arz.flux import hll, rusanov
+from numerical_solvers.src.arz.initial_conditions import from_steps, random_piecewise, riemann, three_region
+from numerical_solvers.src.arz.physics import dp_drho, eigenvalues, pressure
 
 
 # ====================================================================

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from numerical_solvers.lwr.initial_conditions import (
+from numerical_solvers.src.lwr.initial_conditions import (
     PiecewiseRandom,
     from_steps,
     random_piecewise,

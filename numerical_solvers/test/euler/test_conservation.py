@@ -3,9 +3,9 @@
 import pytest
 import torch
 
-from numerical_solvers.euler import generate_one
-from numerical_solvers.euler.initial_conditions import riemann
-from numerical_solvers.euler.physics import primitive_to_conservative
+from numerical_solvers.src.euler import generate_one
+from numerical_solvers.src.euler.initial_conditions import riemann
+from numerical_solvers.src.euler.physics import primitive_to_conservative
 
 
 @pytest.fixture(
