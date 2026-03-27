@@ -34,15 +34,15 @@ def weno5_reconstruct(
     v_minus[j] = value from left of interface j
     v_plus[j]  = value from right of interface j
     """
-    N = v.shape[0]
+    N = v.shape[-1]
     ni = N - 7  # number of interfaces
 
     # --- v^- (left-biased) ---
-    a = v[1 : 1 + ni]
-    b = v[2 : 2 + ni]
-    c = v[3 : 3 + ni]
-    d = v[4 : 4 + ni]
-    e = v[5 : 5 + ni]
+    a = v[..., 1 : 1 + ni]
+    b = v[..., 2 : 2 + ni]
+    c = v[..., 3 : 3 + ni]
+    d = v[..., 4 : 4 + ni]
+    e = v[..., 5 : 5 + ni]
 
     q0 = (1 / 3) * a - (7 / 6) * b + (11 / 6) * c
     q1 = -(1 / 6) * b + (5 / 6) * c + (1 / 3) * d
@@ -56,11 +56,11 @@ def weno5_reconstruct(
     v_minus = w0 * q0 + w1 * q1 + w2 * q2
 
     # --- v^+ (right-biased) ---
-    p = v[2 : 2 + ni]
-    q = v[3 : 3 + ni]
-    r = v[4 : 4 + ni]
-    s = v[5 : 5 + ni]
-    t = v[6 : 6 + ni]
+    p = v[..., 2 : 2 + ni]
+    q = v[..., 3 : 3 + ni]
+    r = v[..., 4 : 4 + ni]
+    s = v[..., 5 : 5 + ni]
+    t = v[..., 6 : 6 + ni]
 
     q0r = (1 / 3) * t - (7 / 6) * s + (11 / 6) * r
     q1r = -(1 / 6) * s + (5 / 6) * r + (1 / 3) * q

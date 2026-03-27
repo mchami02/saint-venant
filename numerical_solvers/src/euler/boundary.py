@@ -22,20 +22,27 @@ def apply_ghost_cells(
     ng = n_ghost
 
     if bc_type == "periodic":
-        rho_g = torch.cat([rho[-ng:], rho, rho[:ng]])
-        rho_u_g = torch.cat([rho_u[-ng:], rho_u, rho_u[:ng]])
-        E_g = torch.cat([E[-ng:], E, E[:ng]])
+        rho_g = torch.cat([rho[..., -ng:], rho, rho[..., :ng]], dim=-1)
+        rho_u_g = torch.cat([rho_u[..., -ng:], rho_u, rho_u[..., :ng]], dim=-1)
+        E_g = torch.cat([E[..., -ng:], E, E[..., :ng]], dim=-1)
 
     elif bc_type == "wall":
         # Reflecting: density and energy are mirrored, momentum flips sign
-        rho_g = torch.cat([rho[:ng].flip(0), rho, rho[-ng:].flip(0)])
-        rho_u_g = torch.cat([-rho_u[:ng].flip(0), rho_u, -rho_u[-ng:].flip(0)])
-        E_g = torch.cat([E[:ng].flip(0), E, E[-ng:].flip(0)])
+        rho_g = torch.cat([rho[..., :ng].flip(-1), rho, rho[..., -ng:].flip(-1)], dim=-1)
+        rho_u_g = torch.cat([-rho_u[..., :ng].flip(-1), rho_u, -rho_u[..., -ng:].flip(-1)], dim=-1)
+        E_g = torch.cat([E[..., :ng].flip(-1), E, E[..., -ng:].flip(-1)], dim=-1)
 
     else:
         # extrap (zero-gradient, default)
-        rho_g = torch.cat([rho[:1].expand(ng), rho, rho[-1:].expand(ng)])
-        rho_u_g = torch.cat([rho_u[:1].expand(ng), rho_u, rho_u[-1:].expand(ng)])
-        E_g = torch.cat([E[:1].expand(ng), E, E[-1:].expand(ng)])
+        rho_g = torch.cat(
+            [rho[..., :1].expand(*rho.shape[:-1], ng), rho, rho[..., -1:].expand(*rho.shape[:-1], ng)], dim=-1
+        )
+        rho_u_g = torch.cat(
+            [rho_u[..., :1].expand(*rho_u.shape[:-1], ng), rho_u, rho_u[..., -1:].expand(*rho_u.shape[:-1], ng)],
+            dim=-1,
+        )
+        E_g = torch.cat(
+            [E[..., :1].expand(*E.shape[:-1], ng), E, E[..., -1:].expand(*E.shape[:-1], ng)], dim=-1
+        )
 
     return rho_g, rho_u_g, E_g
