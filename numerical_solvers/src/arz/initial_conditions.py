@@ -135,3 +135,30 @@ def random_piecewise(
 
     rho0, v0 = from_steps(x, rho_steps=rho_steps, v_steps=v_steps)
     return rho0, v0, ic_params
+
+
+def random_piecewise_batch(
+    x: torch.Tensor,
+    k: int,
+    n: int,
+    rng: torch.Generator,
+    rho_range: tuple[float, float] = (0.1, 1.0),
+    v_range: tuple[float, float] = (0.0, 1.0),
+) -> tuple[torch.Tensor, torch.Tensor, list[dict]]:
+    """Generate *n* random k-piecewise-constant (rho0, v0) ICs as a batch.
+
+    Returns
+    -------
+    rho0_batch : tensor of shape (n, nx).
+    v0_batch : tensor of shape (n, nx).
+    ic_params_list : list of *n* dicts, each with keys "xs", "rho_ks", "v_ks".
+    """
+    rhos = []
+    vs = []
+    params = []
+    for _ in range(n):
+        rho0, v0, ic = random_piecewise(x, k, rng, rho_range=rho_range, v_range=v_range)
+        rhos.append(rho0)
+        vs.append(v0)
+        params.append(ic)
+    return torch.stack(rhos), torch.stack(vs), params

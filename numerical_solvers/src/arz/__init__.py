@@ -11,11 +11,17 @@ from collections.abc import Callable
 
 import numpy as np
 import torch
-from tqdm import trange
+from tqdm import tqdm, trange
 
-from .initial_conditions import from_steps, random_piecewise, riemann, three_region
+from .initial_conditions import (
+    from_steps,
+    random_piecewise,
+    random_piecewise_batch,
+    riemann,
+    three_region,
+)
 from .physics import dp_drho, eigenvalues, pressure
-from .timestepper import solve
+from .timestepper import solve, solve_batch
 
 
 # ------------------------------------------------------------------ public
@@ -115,8 +121,14 @@ def generate_n(
     seed: int | None = None,
     show_progress: bool = True,
     device: torch.device | str = "cpu",
+    batch_size: int = 32,
 ) -> dict[str, torch.Tensor | float | int]:
     """Generate *n* samples with random k-piecewise-constant ICs.
+
+    Parameters
+    ----------
+    batch_size : number of samples solved simultaneously per batch.
+        Set to 1 to fall back to sequential generation.
 
     Returns
     -------
@@ -131,6 +143,129 @@ def generate_n(
     if seed is not None:
         rng.manual_seed(seed)
 
+    # Sequential fallback
+    if batch_size <= 1:
+        return _generate_n_sequential(
+            n, k, x=x, nx=nx, dx=dx, dt=dt, nt=nt, gamma=gamma,
+            bc_type=bc_type, flux_type=flux_type,
+            reconstruction=reconstruction, rho_range=rho_range,
+            v_range=v_range, max_value=max_value, rng=rng,
+            show_progress=show_progress, device=device,
+        )
+
+    # Batched generation
+    max_batch_retries = 10
+    rejected = 0
+    collected = 0
+
+    rho_all = torch.zeros(n, nt + 1, nx, device=device)
+    v_all = torch.zeros_like(rho_all)
+    w_all = torch.zeros_like(rho_all)
+    ic_xs_list: list[list[float]] = []
+    ic_rho_ks_list: list[list[float]] = []
+    ic_v_ks_list: list[list[float]] = []
+
+    pbar = tqdm(total=n, desc="ARZ samples", disable=not show_progress)
+    attempts = 0
+
+    while collected < n and attempts < max_batch_retries:
+        remaining = n - collected
+        bs = min(batch_size, remaining * 2)
+
+        rho0_batch, v0_batch, ic_params_list = random_piecewise_batch(
+            x, k, bs, rng, rho_range=rho_range, v_range=v_range,
+        )
+
+        w0_batch = v0_batch + pressure(rho0_batch, gamma)
+        rho_w0_batch = rho0_batch * w0_batch
+
+        rho_hist, w_hist, v_hist, valid = solve_batch(
+            rho0_batch,
+            rho_w0_batch,
+            nx=nx,
+            dx=dx,
+            dt=dt,
+            nt=nt,
+            gamma=gamma,
+            bc_type=bc_type,
+            flux_type=flux_type,
+            reconstruction=reconstruction,
+            max_value=max_value,
+        )
+
+        good_idx = valid.nonzero(as_tuple=True)[0]
+        n_good = len(good_idx)
+        n_take = min(n_good, remaining)
+        rejected += bs - n_good
+
+        if n_take > 0:
+            take_idx = good_idx[:n_take]
+            rho_all[collected : collected + n_take] = rho_hist[take_idx]
+            v_all[collected : collected + n_take] = v_hist[take_idx]
+            w_all[collected : collected + n_take] = w_hist[take_idx]
+            for i in take_idx.tolist():
+                ic_xs_list.append(ic_params_list[i]["xs"])
+                ic_rho_ks_list.append(ic_params_list[i]["rho_ks"])
+                ic_v_ks_list.append(ic_params_list[i]["v_ks"])
+            collected += n_take
+            pbar.update(n_take)
+
+        attempts += 1
+
+    pbar.close()
+
+    if collected < n:
+        warnings.warn(
+            f"Only {collected}/{n} valid samples after {max_batch_retries} "
+            "batch retries. Remaining slots are zero-filled.",
+            stacklevel=2,
+        )
+        for _ in range(n - collected):
+            ic_xs_list.append([0.0] * (k + 1))
+            ic_rho_ks_list.append([0.0] * k)
+            ic_v_ks_list.append([0.0] * k)
+
+    if rejected > 0:
+        print(f"Rejected {rejected} NaN/Inf samples during generation.")
+
+    t_arr = torch.arange(nt + 1, device=device, dtype=torch.float32) * dt
+
+    return {
+        "rho": rho_all,
+        "v": v_all,
+        "w": w_all,
+        "x": x,
+        "t": t_arr,
+        "dx": dx,
+        "dt": dt,
+        "nt": nt,
+        "ic_xs": np.array(ic_xs_list),
+        "ic_rho_ks": np.array(ic_rho_ks_list),
+        "ic_v_ks": np.array(ic_v_ks_list),
+    }
+
+
+def _generate_n_sequential(
+    n: int,
+    k: int,
+    *,
+    x: torch.Tensor,
+    nx: int,
+    dx: float,
+    dt: float,
+    nt: int,
+    gamma: float,
+    bc_type: str,
+    flux_type: str,
+    reconstruction: str,
+    rho_range: tuple[float, float],
+    v_range: tuple[float, float],
+    max_value: float,
+    rng: torch.Generator,
+    show_progress: bool,
+    device: torch.device,
+) -> dict[str, torch.Tensor | float | int]:
+    """Original sequential generation (used when batch_size <= 1)."""
     rho_all = torch.zeros(n, nt + 1, nx, device=device)
     v_all = torch.zeros_like(rho_all)
     w_all = torch.zeros_like(rho_all)
@@ -172,8 +307,11 @@ def generate_n(
                 "using zero-filled sample.",
                 stacklevel=2,
             )
-            result = {"rho": torch.zeros(nt + 1, nx), "v": torch.zeros(nt + 1, nx), "w": torch.zeros(nt + 1, nx)}
-            # Dummy IC params for zero-filled sample
+            result = {
+                "rho": torch.zeros(nt + 1, nx),
+                "v": torch.zeros(nt + 1, nx),
+                "w": torch.zeros(nt + 1, nx),
+            }
             ic_xs_list.append([0.0] * (k + 1))
             ic_rho_ks_list.append([0.0] * k)
             ic_v_ks_list.append([0.0] * k)
@@ -205,6 +343,8 @@ def generate_n(
 __all__ = [
     "generate_one",
     "generate_n",
+    "solve_batch",
+    "random_piecewise_batch",
     "pressure",
     "dp_drho",
     "eigenvalues",
