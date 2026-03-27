@@ -162,6 +162,9 @@ def solve(
             s_max = _max_wave_speed(rho, rho_u, E, gamma)
             dt_sub = min(cfl_eff * dx / max(s_max, 1e-12), t_rem)
             rho, rho_u, E = _step(rho, rho_u, E, dt_sub)
+            # Enforce minimum internal energy (prevents negative pressure)
+            ke = 0.5 * rho_u**2 / rho.clamp(min=1e-12)
+            E = torch.max(E, ke + 1e-10)
             t_rem -= dt_sub
             n_subs += 1
 
@@ -359,6 +362,9 @@ def solve_batch(
 
             dt_sub = min(cfl_eff * dx / max(s_max, 1e-12), t_rem)
             rho, rho_u, E = _step_batch(rho, rho_u, E, dt_sub, alive_exp)
+            # Enforce minimum internal energy (prevents negative pressure)
+            ke = 0.5 * rho_u**2 / rho.clamp(min=1e-12)
+            E = torch.max(E, ke + 1e-10)
             t_rem -= dt_sub
             n_subs += 1
 

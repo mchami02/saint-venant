@@ -41,8 +41,8 @@ def _roe_averages(
     sqrtL = torch.sqrt(rhoL.clamp(min=eps))
     sqrtR = torch.sqrt(rhoR.clamp(min=eps))
 
-    pL = gamma1 * (EL - 0.5 * rho_uL**2 / rhoL.clamp(min=eps))
-    pR = gamma1 * (ER - 0.5 * rho_uR**2 / rhoR.clamp(min=eps))
+    pL = (gamma1 * (EL - 0.5 * rho_uL**2 / rhoL.clamp(min=eps))).clamp(min=0.0)
+    pR = (gamma1 * (ER - 0.5 * rho_uR**2 / rhoR.clamp(min=eps))).clamp(min=0.0)
 
     denom = sqrtL + sqrtR
     u_roe = (rho_uL / sqrtL + rho_uR / sqrtR) / denom
@@ -241,10 +241,10 @@ def rusanov(
     uL = torch.where(rhoL > eps, rho_uL / rhoL, torch.zeros_like(rhoL))
     uR = torch.where(rhoR > eps, rho_uR / rhoR, torch.zeros_like(rhoR))
 
-    pL = gamma1 * (EL - 0.5 * rhoL * uL**2)
-    pR = gamma1 * (ER - 0.5 * rhoR * uR**2)
+    pL = (gamma1 * (EL - 0.5 * rhoL * uL**2)).clamp(min=0.0)
+    pR = (gamma1 * (ER - 0.5 * rhoR * uR**2)).clamp(min=0.0)
 
-    aL = torch.sqrt((gamma * pL.clamp(min=0.0) / rhoL.clamp(min=eps)))
+    aL = torch.sqrt((gamma * pL / rhoL.clamp(min=eps)))
     aR = torch.sqrt((gamma * pR.clamp(min=0.0) / rhoR.clamp(min=eps)))
 
     smax = torch.maximum(uL.abs() + aL, uR.abs() + aR)

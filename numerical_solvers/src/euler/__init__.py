@@ -152,6 +152,11 @@ def generate_n(
     device = torch.device(device)
     x = torch.arange(nx, device=device, dtype=torch.float64) * dx
 
+    # WENO-5 needs ~8 cells per piece (5-cell stencil + margin for random
+    # breakpoint placement); fall back to 1st-order when under-resolved.
+    if reconstruction == "weno5" and k > nx // 8:
+        reconstruction = "constant"
+
     rng = torch.Generator()
     if seed is not None:
         rng.manual_seed(seed)
