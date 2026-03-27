@@ -100,10 +100,19 @@ def main():
     # Load model from checkpoint (uses config stored in checkpoint)
     model = load_model(args.model_path, device, {"model": "ClassifierTrajDeepONet"})
 
-    # Extract model registry name from checkpoint config
+    # Extract model registry name and equation from checkpoint config
     checkpoint = torch.load(args.model_path, map_location=device, weights_only=False)
-    model_name = checkpoint.get("config", {}).get("model", type(model).__name__)
+    ckpt_config = checkpoint.get("config", {})
+    model_name = ckpt_config.get("model", type(model).__name__)
     args.model = model_name
+
+    # Add equation info to grid_config for PDE residual plots
+    equation = ckpt_config.get("equation", "LWR")
+    grid_config["equation"] = equation
+    if equation == "ARZ":
+        grid_config["gamma"] = ckpt_config.get("gamma", 1.0)
+    elif equation == "Euler":
+        grid_config["gamma"] = ckpt_config.get("euler_gamma", 1.4)
 
     print(f"Model loaded: {model_name}")
     print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")

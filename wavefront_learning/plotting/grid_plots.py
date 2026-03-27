@@ -354,20 +354,71 @@ def plot_grid_comparison(
     return fig
 
 
+def _ddt(field: np.ndarray, dt: float) -> np.ndarray:
+    """Central difference in time at interior points. field shape: (nt, nx)."""
+    return (field[2:, 1:-1] - field[:-2, 1:-1]) / (2.0 * dt)
+
+
+def _ddx(field: np.ndarray, dx: float) -> np.ndarray:
+    """Central difference in space at interior points. field shape: (nt, nx)."""
+    return (field[1:-1, 2:] - field[1:-1, :-2]) / (2.0 * dx)
+
+
+def _lwr_residuals(
+    grid_b: np.ndarray, dx: float, dt: float
+) -> list[tuple[str, str, np.ndarray]]:
+    """LWR residual: dρ/dt + d(ρ(1-ρ))/dx = 0."""
+    rho = grid_b  # (nt, nx)
+    res = np.abs(_ddt(rho, dt) + _ddx(rho * (1.0 - rho), dx))
+    return [("rho", "dρ/dt + df/dx", res)]
+
+
+def _arz_residuals(
+    grid_b: np.ndarray, dx: float, dt: float, gamma: float
+) -> list[tuple[str, str, np.ndarray]]:
+    """ARZ residuals: mass dρ/dt + d(ρv)/dx, momentum d(ρw)/dt + d(ρwv)/dx."""
+    rho = grid_b[0]  # (nt, nx)
+    v = grid_b[1]
+    r_mass = np.abs(_ddt(rho, dt) + _ddx(rho * v, dx))
+    w = v + rho**gamma
+    rho_w = rho * w
+    r_mom = np.abs(_ddt(rho_w, dt) + _ddx(rho_w * v, dx))
+    return [("mass", "dρ/dt + d(ρv)/dx", r_mass), ("momentum", "d(ρw)/dt + d(ρwv)/dx", r_mom)]
+
+
+def _euler_residuals(
+    grid_b: np.ndarray, dx: float, dt: float, gamma: float
+) -> list[tuple[str, str, np.ndarray]]:
+    """Euler residuals: mass, momentum, energy conservation."""
+    rho = grid_b[0]  # (nt, nx)
+    u = grid_b[1]
+    p = grid_b[2]
+    rho_u = rho * u
+    E = p / (gamma - 1.0) + 0.5 * rho * u**2
+    r_mass = np.abs(_ddt(rho, dt) + _ddx(rho_u, dx))
+    r_mom = np.abs(_ddt(rho_u, dt) + _ddx(rho * u**2 + p, dx))
+    r_energy = np.abs(_ddt(E, dt) + _ddx(u * (E + p), dx))
+    return [
+        ("mass", "dρ/dt + d(ρu)/dx", r_mass),
+        ("momentum", "d(ρu)/dt + d(ρu²+p)/dx", r_mom),
+        ("energy", "dE/dt + d(u(E+p))/dx", r_energy),
+    ]
+
+
 def plot_pde_residual(
     traj_data: dict,
     grid_config: dict,
 ) -> list[tuple[str, Figure]]:
-    """Plot PDE residual heatmap of the predicted grid.
+    """Plot PDE residual heatmaps of the predicted grid.
 
-    Computes R = drho/dt + df(rho)/dx using central finite differences
-    (Greenshields flux f(rho) = rho(1 - rho)) and plots |R| as a heatmap.
-    The residual should be zero in smooth regions; large values indicate
-    conservation law violations.
+    Supports LWR (Greenshields flux), ARZ (mass + momentum),
+    and Euler (mass + momentum + energy) equations.
+    Equation is read from grid_config["equation"] (default "LWR").
 
     Args:
-        traj_data: Dict containing 'output_grid' of shape (B, nt, nx).
-        grid_config: Dict with {nx, nt, dx, dt}.
+        traj_data: Dict containing 'output_grid' of shape
+            (B, nt, nx) for LWR or (B, C, nt, nx) for ARZ/Euler.
+        grid_config: Dict with {nx, nt, dx, dt, equation?, gamma?}.
 
     Returns:
         List of (log_key, figure) pairs.
@@ -376,49 +427,44 @@ def plot_pde_residual(
         return []
 
     output_grid = traj_data["output_grid"]
-    nx, nt, dx, dt = (
-        grid_config["nx"],
-        grid_config["nt"],
-        grid_config["dx"],
-        grid_config["dt"],
-    )
+    nx, nt = grid_config["nx"], grid_config["nt"]
+    dx, dt = grid_config["dx"], grid_config["dt"]
+    equation = grid_config.get("equation", "LWR")
+    gamma = grid_config.get("gamma", 1.4 if equation == "Euler" else 1.0)
 
-    # Interior extent (central differences exclude 1 boundary point each side)
     interior_extent = [dx, (nx - 1) * dx, dt, (nt - 1) * dt]
 
     B = output_grid.shape[0]
     figures = []
     for b in range(min(B, 3)):
-        density = output_grid[b]  # (nt, nx)
+        if equation == "ARZ":
+            residuals = _arz_residuals(output_grid[b], dx, dt, gamma)
+        elif equation == "Euler":
+            residuals = _euler_residuals(output_grid[b], dx, dt, gamma)
+        else:
+            residuals = _lwr_residuals(output_grid[b], dx, dt)
 
-        # Greenshields flux: f(rho) = rho * (1 - rho)
-        flux = density * (1.0 - density)
+        n_res = len(residuals)
+        fig, axes = plt.subplots(1, n_res, figsize=(10 * n_res, 8))
+        if n_res == 1:
+            axes = [axes]
 
-        # drho/dt using central difference in time
-        drho_dt = (density[2:, 1:-1] - density[:-2, 1:-1]) / (2.0 * dt)
+        for i, (name, label, residual) in enumerate(residuals):
+            im = axes[i].imshow(
+                residual,
+                extent=interior_extent,
+                aspect="auto",
+                origin="lower",
+                cmap="hot",
+                vmin=0,
+            )
+            axes[i].set_xlabel("Space x")
+            axes[i].set_ylabel("Time t")
+            axes[i].set_title(
+                f"|{label}| ({name}, sample {b + 1}, mean={residual.mean():.4f})"
+            )
+            plt.colorbar(im, ax=axes[i], label="Absolute Residual")
 
-        # df/dx using central difference in space
-        df_dx = (flux[1:-1, 2:] - flux[1:-1, :-2]) / (2.0 * dx)
-
-        # PDE residual
-        residual = np.abs(drho_dt + df_dx)  # (nt-2, nx-2)
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-        im = ax.imshow(
-            residual,
-            extent=interior_extent,
-            aspect="auto",
-            origin="lower",
-            cmap="hot",
-            vmin=0,
-        )
-        ax.set_xlabel("Space x")
-        ax.set_ylabel("Time t")
-        ax.set_title(
-            f"PDE Residual |drho/dt + df/dx| "
-            f"(Sample {b + 1}, mean={residual.mean():.4f})"
-        )
-        plt.colorbar(im, ax=ax, label="Absolute Residual")
         plt.tight_layout()
         figures.append((f"pde_residual_sample_{b + 1}", fig))
 
@@ -432,13 +478,18 @@ def plot_ground_truth(
     """Plot ground truth grid heatmaps.
 
     Args:
-        traj_data: Dict containing 'grids' of shape (B, nt, nx).
+        traj_data: Dict containing 'grids' of shape (B, nt, nx) or (B, C, nt, nx).
         grid_config: Dict with {nx, nt, dx, dt}.
 
     Returns:
         List of (log_key, figure) pairs.
     """
     grids = traj_data["grids"]
+    if grids.ndim == 4:
+        if grids.shape[1] == 2:
+            return plot_arz_ground_truth(traj_data, grid_config)
+        if grids.shape[1] == 3:
+            return plot_euler_ground_truth(traj_data, grid_config)
     nx, nt, dx, dt = (
         grid_config["nx"],
         grid_config["nt"],
@@ -477,7 +528,7 @@ def plot_pred(
     """Plot predicted grid heatmaps.
 
     Args:
-        traj_data: Dict containing 'output_grid' of shape (B, nt, nx).
+        traj_data: Dict containing 'output_grid' of shape (B, nt, nx) or (B, C, nt, nx).
         grid_config: Dict with {nx, nt, dx, dt}.
 
     Returns:
@@ -487,6 +538,11 @@ def plot_pred(
         return []
 
     output_grid = traj_data["output_grid"]
+    if output_grid.ndim == 4:
+        if output_grid.shape[1] == 2:
+            return plot_arz_pred(traj_data, grid_config)
+        if output_grid.shape[1] == 3:
+            return plot_euler_pred(traj_data, grid_config)
     nx, nt, dx, dt = (
         grid_config["nx"],
         grid_config["nt"],

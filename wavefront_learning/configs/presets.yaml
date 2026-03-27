@@ -190,6 +190,7 @@ plot_presets:
     - arz_ground_truth
     - arz_pred
     - arz_mse_error
+    - pde_residual
   shock_proximity:
     - ground_truth
     - pred
@@ -199,3 +200,4 @@ plot_presets:
     - euler_ground_truth
     - euler_pred
     - euler_mse_error
+    - pde_residual

@@ -17,6 +17,7 @@ import wandb
 from matplotlib.figure import Figure
 
 from .base import _get_colors, _get_extent, _log_figure
+from .grid_plots import plot_arz_mse_error, plot_euler_mse_error
 
 
 def _create_single_heatmap(
@@ -576,6 +577,13 @@ def plot_mse_error(
 
     output_grid = traj_data["output_grid"]
     grids = traj_data["grids"]
+
+    # Multi-channel: delegate to equation-specific functions
+    if grids.ndim == 4:
+        if grids.shape[1] == 2:
+            return plot_arz_mse_error(traj_data, grid_config)
+        if grids.shape[1] == 3:
+            return plot_euler_mse_error(traj_data, grid_config)
 
     nx, nt, dx, dt = (
         grid_config["nx"],

@@ -383,18 +383,23 @@ def main():
         training_loop.device = device
 
     # Create grid_config dict for plotting functions
-    grid_config = {"nx": args.nx, "nt": args.nt, "dx": args.dx, "dt": args.dt}
+    grid_config = {
+        "nx": args.nx,
+        "nt": args.nt,
+        "dx": args.dx,
+        "dt": args.dt,
+        "equation": args.equation,
+    }
+    if args.equation == "ARZ":
+        grid_config["gamma"] = args.gamma if args.gamma is not None else 1.0
+    elif args.equation == "Euler":
+        grid_config["gamma"] = getattr(args, "euler_gamma", None) or 1.4
 
     # Auto-select loss and plot presets based on model
     if args.loss == "mse":  # default — auto-select per model
         args.loss = MODEL_LOSS_PRESET.get(args.model, "mse")
     if args.plot is None:
-        if args.equation == "Euler":
-            args.plot = "euler"
-        elif args.equation == "ARZ":
-            args.plot = "ecarz"
-        else:
-            args.plot = MODEL_PLOT_PRESET.get(args.model, "grid_residual")
+        args.plot = MODEL_PLOT_PRESET.get(args.model, "grid_residual")
 
     print(f"Using device: {device}")
     print(f"Equation: {args.equation}")
