@@ -20,7 +20,6 @@ with Greenshields or triangular flux, applied independently in x and y (potentia
 | `boundary.py` | 2D ghost cell BCs (zero_gradient, periodic, dirichlet) |
 | `initial_conditions.py` | IC generators: riemann_x/y, four_quadrant, gaussian_bump, random_piecewise |
 | `timestepper.py` | Main 2D solve loop (Forward Euler, unsplit Godunov) |
-| `test_api_lwr2d.ipynb` | Interactive notebook testing the 2D LWR solver API |
 | `structure.md` | This file |
 
 ## Tests

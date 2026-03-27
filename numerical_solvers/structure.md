@@ -8,6 +8,7 @@ Top-level package for numerical PDE solvers (PyTorch).
 |---|---|
 | `src/` | Source code for all equation solvers |
 | `test/` | Comprehensive pytest test suite |
+| `notebooks/` | Interactive API test notebooks for each solver |
 
 ## src/ — Solver Subpackages
 
@@ -28,11 +29,11 @@ Top-level package for numerical PDE solvers (PyTorch).
 | `test/lwr2d/` | 2D LWR solver tests |
 | `test/conftest.py` | Shared pytest fixtures |
 
-## Notable Files
+## notebooks/ — API Test Notebooks
 
 | File | Purpose |
 |---|---|
-| `src/arz/test_api_arz.ipynb` | Interactive notebook testing the ARZ solver API |
-| `src/lwr/test_api_lwr.ipynb` | Interactive notebook testing the LWR solver API |
-| `src/lwr2d/test_api_lwr2d.ipynb` | Interactive notebook testing the 2D LWR solver API |
-| `src/euler/test_api_euler.ipynb` | Interactive notebook testing the Euler solver API |
+| `notebooks/test_api_arz.ipynb` | Interactive notebook testing the ARZ solver API |
+| `notebooks/test_api_lwr.ipynb` | Interactive notebook testing the LWR solver API |
+| `notebooks/test_api_lwr2d.ipynb` | Interactive notebook testing the 2D LWR solver API |
+| `notebooks/test_api_euler.ipynb` | Interactive notebook testing the Euler solver API |

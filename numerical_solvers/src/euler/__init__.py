@@ -51,6 +51,7 @@ def generate_one(
     flux_type: str = "hllc",
     reconstruction: str = "weno5",
     max_value: float | None = None,
+    cfl: float | None = None,
 ) -> dict[str, torch.Tensor | float | int | bool]:
     """Solve one 1D Euler problem.
 
@@ -67,6 +68,7 @@ def generate_one(
     flux_type : "hllc", "hll", or "rusanov".
     reconstruction : "constant" or "weno5".
     max_value : if set, terminate early when any value exceeds this threshold.
+    cfl : CFL number for adaptive sub-stepping (default: 0.9 for weno5, 0.5 for constant).
 
     Returns
     -------
@@ -93,6 +95,7 @@ def generate_one(
         flux_type=flux_type,
         reconstruction=reconstruction,
         max_value=max_value,
+        cfl=cfl,
     )
 
     t_arr = torch.arange(nt + 1, device=rho0.device, dtype=rho0.dtype) * dt
@@ -130,6 +133,7 @@ def generate_n(
     show_progress: bool = True,
     device: torch.device | str = "cpu",
     batch_size: int = 32,
+    cfl: float | None = None,
 ) -> dict[str, torch.Tensor | float | int]:
     """Generate *n* samples with random k-piecewise-constant ICs.
 
@@ -160,6 +164,7 @@ def generate_n(
             reconstruction=reconstruction, rho_range=rho_range,
             u_range=u_range, p_range=p_range, max_value=max_value,
             rng=rng, show_progress=show_progress, device=device,
+            cfl=cfl,
         )
 
     # Batched generation
