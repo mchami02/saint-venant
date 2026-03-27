@@ -606,7 +606,6 @@ def plot_mse_error(
             origin="lower",
             cmap="hot",
             vmin=0,
-            vmax=0.5,
         )
         ax.set_xlabel("Space x")
         ax.set_ylabel("Time t")
