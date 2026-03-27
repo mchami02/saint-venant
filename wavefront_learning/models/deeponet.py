@@ -80,36 +80,42 @@ class DeepONet(nn.Module):
             Dict with "output_grid" of shape (B, output_dim, nt, nx).
         """
         grid = x["grid_input"]
-        B = grid.shape[0]
+        B, _, cur_nt, cur_nx = grid.shape
         n_ic = self.branch_input_channels
 
-        # Extract IC channels at t=0 and concatenate
-        ic = grid[:, :n_ic, 0, :].reshape(B, -1)  # (B, n_ic * nx)
+        # Extract IC channels at t=0
+        ic = grid[:, :n_ic, 0, :]  # (B, n_ic, cur_nx)
+
+        # Interpolate IC to training resolution if grid size differs
+        if cur_nx != self.nx:
+            ic = torch.nn.functional.interpolate(
+                ic, size=self.nx, mode="linear", align_corners=False
+            )
+        ic = ic.reshape(B, -1)  # (B, n_ic * nx)
 
         # Coordinate channels are always the last 2
-        t_coords = grid[:, n_ic, :, :]  # (B, nt, nx)
-        x_coords = grid[:, n_ic + 1, :, :]  # (B, nt, nx)
+        t_coords = grid[:, n_ic, :, :]  # (B, cur_nt, cur_nx)
+        x_coords = grid[:, n_ic + 1, :, :]  # (B, cur_nt, cur_nx)
 
         # Branch: encode IC -> (B, latent_dim * output_dim)
         branch_out = self.branch(ic)
 
         # Trunk: encode all (t, x) query points
         coords = torch.stack([t_coords, x_coords], dim=-1)
-        coords_flat = coords.reshape(B, -1, 2)  # (B, nt*nx, 2)
-        trunk_out = self.trunk(coords_flat)  # (B, nt*nx, latent_dim)
+        coords_flat = coords.reshape(B, -1, 2)  # (B, cur_nt*cur_nx, 2)
+        trunk_out = self.trunk(coords_flat)  # (B, cur_nt*cur_nx, latent_dim)
 
         # Dot product per output channel
-        # branch_out: (B, output_dim, latent_dim) reshaped
         branch_reshaped = branch_out.reshape(
             B, self.output_dim, self.latent_dim
         )  # (B, C, latent_dim)
         out = torch.einsum(
             "bcp,bnp->bcn", branch_reshaped, trunk_out
-        )  # (B, C, nt*nx)
+        )  # (B, C, cur_nt*cur_nx)
         out = out + self.bias.reshape(1, self.output_dim, 1)
 
-        # Reshape to grid
-        out = out.reshape(B, self.output_dim, self.nt, self.nx)
+        # Reshape to actual grid dimensions
+        out = out.reshape(B, self.output_dim, cur_nt, cur_nx)
 
         return {"output_grid": out}
 
