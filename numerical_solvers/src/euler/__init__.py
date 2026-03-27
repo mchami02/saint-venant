@@ -168,7 +168,8 @@ def generate_n(
         )
 
     # Batched generation
-    max_batch_retries = 10
+    # Enough retries to fill n samples even with some rejections
+    max_batch_retries = max(10, 3 * ((n + batch_size - 1) // batch_size))
     rejected = 0
     collected = 0
 
@@ -209,6 +210,7 @@ def generate_n(
             flux_type=flux_type,
             reconstruction=reconstruction,
             max_value=max_value,
+            cfl=cfl,
         )
 
         good_idx = valid.nonzero(as_tuple=True)[0]
@@ -286,6 +288,7 @@ def _generate_n_sequential(
     rng: torch.Generator,
     show_progress: bool,
     device: torch.device,
+    cfl: float | None = None,
 ) -> dict[str, torch.Tensor | float | int]:
     """Original sequential generation (used when batch_size <= 1)."""
     rho_all = torch.zeros(n, nt + 1, nx, device=device, dtype=torch.float64)
@@ -312,6 +315,7 @@ def _generate_n_sequential(
                 dx=dx, dt=dt, nt=nt, gamma=gamma,
                 bc_type=bc_type, flux_type=flux_type,
                 reconstruction=reconstruction, max_value=max_value,
+                cfl=cfl,
             )
             if result["valid"]:
                 ic_xs_list.append(ic_params["xs"])
