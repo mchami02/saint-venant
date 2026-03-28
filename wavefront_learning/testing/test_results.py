@@ -358,6 +358,7 @@ def eval_steps(
             model_name=args.model,
             max_steps=n_steps,
             min_steps=n_steps,
+            max_discontinuities=n_steps,
             train_ratio=0.0,
             val_ratio=0.0,
             only_shocks=only_shocks,
