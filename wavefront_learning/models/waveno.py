@@ -37,8 +37,11 @@ class WaveNO(nn.Module):
         num_self_attn_layers: Self-attention layers for segment interaction.
         num_cross_layers: Biased cross-attention layers (queries → segments).
         num_heads: Attention heads for self and cross attention.
-        pde: PDE instance providing physics features, boundary speeds,
-            output_dim, and output_clamp.  ``None`` for unbiased mode.
+        pde: PDE instance providing boundary speeds for attention bias.
+            ``None`` disables physics-informed bias.
+        encoder_pde: PDE instance for the segment encoder's physics
+            features.  When ``pde=None`` (unbiased mode), this ensures
+            the encoder still uses equation-appropriate features.
         initial_damping_sharpness: Initial sharpness for collision-time
             damping (learnable).
         use_damping: Enable collision-time damping in PDEBias.
@@ -61,6 +64,7 @@ class WaveNO(nn.Module):
         num_cross_layers: int = 2,
         num_heads: int = 4,
         pde: PDE | None = None,
+        encoder_pde: PDE | None = None,
         initial_damping_sharpness: float = 5.0,
         use_damping: bool = True,
         local_features: bool = True,
@@ -68,6 +72,8 @@ class WaveNO(nn.Module):
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
+        output_dim: int | None = None,
+        output_clamp: tuple[float, float] | None | str = "auto",
     ):
         super().__init__()
 
@@ -77,22 +83,30 @@ class WaveNO(nn.Module):
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
 
-        # Derive output config from PDE (or defaults for bare mode)
-        if pde is not None:
-            output_dim = pde.output_dim
-            output_clamp = pde.output_clamp
+        # Derive output config: explicit > PDE > LWR defaults
+        if output_dim is not None:
+            self.output_dim = output_dim
+        elif pde is not None:
+            self.output_dim = pde.output_dim
         else:
-            output_dim = 1
-            output_clamp = (0.0, 1.0)
-        self.output_dim = output_dim
-        self.output_clamp = output_clamp
+            self.output_dim = 1
+
+        if output_clamp != "auto":
+            self.output_clamp = output_clamp
+        elif pde is not None:
+            self.output_clamp = pde.output_clamp
+        else:
+            self.output_clamp = (0.0, 1.0)
 
         # Stage 1: Segment encoder + self-attention
+        # encoder_pde provides physics features for the segment encoder,
+        # independent of whether pde is used for attention bias.
+        seg_pde = encoder_pde if encoder_pde is not None else (pde if pde is not None else LWRPDE())
         self.segment_encoder = SegmentPhysicsEncoder(
             hidden_dim=hidden_dim,
             num_frequencies=num_seg_frequencies,
             num_layers=num_seg_mlp_layers,
-            pde=pde if pde is not None else LWRPDE(),
+            pde=seg_pde,
             include_cumulative_mass=local_features,
             dropout=dropout,
         )
@@ -345,6 +359,10 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
     else:
         pde = _build_pde(args)
 
+    # Always build an encoder PDE from the equation so that pde=None
+    # variants still get the correct physics features and output config.
+    encoder_pde = _build_pde(args)
+
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
         num_freq_t=args.get("num_freq_t", None),
@@ -355,10 +373,13 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
         pde=pde,
+        encoder_pde=encoder_pde,
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
+        output_dim=encoder_pde.output_dim,
+        output_clamp=encoder_pde.output_clamp,
     )
     kwargs.update(flag_overrides)
     return WaveNO(**kwargs)
