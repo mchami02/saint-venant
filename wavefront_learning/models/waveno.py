@@ -1,66 +1,30 @@
 """WaveNO: Wavefront Neural Operator (default architecture).
 
-The default WaveNO uses LWR bias (without damping) + FiLM time conditioning.
+The default WaveNO uses PDE bias (without damping) + FiLM time conditioning.
 This was identified as the most effective variant in the ablation study.
 
 Architecture:
-    1. SegmentPhysicsEncoder — encode IC segments with physics features
+    1. SegmentPhysicsEncoder — encode IC segments with PDE-specific physics features
     1b. Self-attention over segments — contextualize embeddings
     2. Raw (t, x) query encoding — MLP on raw coordinates
     2b. FiLM time conditioning on segment embeddings (default)
-    3. LWRBias — shock/rarefaction-aware attention bias (no damping by default)
+    3. PDEBias — shock/rarefaction-aware attention bias
     4. BiasedCrossDecoderLayer — cross-attention with physics bias
-    5. Density head — Linear → ReLU → Dropout → Linear, clamped to [0, 1]
+    5. Output head — Linear → ReLU → Dropout → Linear
 
-Ablation flags (use_char_bias, use_film, use_cross_seg_attn)
-allow toggling individual components for controlled experiments. See the
-build_waveno_* factory functions for predefined configurations.
+The model auto-adapts to the equation type via the ``PDE`` instance,
+which provides physics features, boundary speeds, and output metadata.
 """
 
 import torch
 import torch.nn as nn
 
-from .base.arz_bias import ARZBias
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
-from .base.euler_bias import EulerBias, EulerSegmentEncoder
 from .base.feature_encoders import FourierFeatures
-from .base.flux import DEFAULT_FLUX, Flux
-from .base.lwr_bias import LWRBias
+from .base.pde import PDE, ARZPDE, EulerPDE, LWRPDE
+from .base.pde_bias import PDEBias
 from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
-
-
-def _get_pde_bias(
-    bias_type: str,
-    *,
-    flux: Flux | None = None,
-    use_damping: bool = True,
-    initial_damping_sharpness: float = 5.0,
-    gamma: float = 1.0,
-) -> nn.Module:
-    """Return the appropriate PDE-aware attention bias module.
-
-    Args:
-        bias_type: ``"lwr"``, ``"arz"``, or ``"euler"``.
-        flux: Flux instance (used by LWR only).
-        use_damping: Enable collision-time damping (LWR only).
-        initial_damping_sharpness: Damping sharpness (LWR only).
-        gamma: Pressure exponent (ARZ) or heat capacity ratio (Euler).
-
-    Returns:
-        Instantiated bias module.
-    """
-    if bias_type == "lwr":
-        return LWRBias(
-            initial_damping_sharpness=initial_damping_sharpness,
-            flux=flux,
-            use_damping=use_damping,
-        )
-    if bias_type == "arz":
-        return ARZBias(gamma=gamma)
-    if bias_type == "euler":
-        return EulerBias(gamma=gamma)
-    raise ValueError(f"Unknown PDE bias type: {bias_type!r}")
 
 
 class WaveNO(nn.Module):
@@ -73,21 +37,17 @@ class WaveNO(nn.Module):
         num_self_attn_layers: Self-attention layers for segment interaction.
         num_cross_layers: Biased cross-attention layers (queries → segments).
         num_heads: Attention heads for self and cross attention.
-        initial_damping_sharpness: Initial sharpness for LWRBias
-            collision-time damping (learnable).
-        flux: Flux function instance.
-        gamma: Pressure exponent for ARZ bias (p(ρ) = ρ^γ).
+        pde: PDE instance providing physics features, boundary speeds,
+            output_dim, and output_clamp.  ``None`` for unbiased mode.
+        initial_damping_sharpness: Initial sharpness for collision-time
+            damping (learnable).
+        use_damping: Enable collision-time damping in PDEBias.
         local_features: Include cumulative mass in segment encoder.
         dropout: Dropout rate.
-        use_char_bias: PDE bias type. ``"lwr"`` for LWR bias,
-            ``"arz"`` for ARZ bias, or ``None`` for unbiased
-            cross-attention (attn_mask=None).
         use_film: Enable FiLM time conditioning on segment embeddings.
         use_cross_seg_attn: Enable per-timestep cross-segment attention.
         num_cross_segment_layers: Number of cross-segment attention layers
             (only used when use_cross_seg_attn=True).
-        output_dim: Number of output channels (1 for LWR, 2 for ARZ, 3 for Euler).
-        output_clamp: Optional (min, max) clamp for output values. None to disable.
     """
 
     def __init__(
@@ -100,50 +60,42 @@ class WaveNO(nn.Module):
         num_self_attn_layers: int = 2,
         num_cross_layers: int = 2,
         num_heads: int = 4,
+        pde: PDE | None = None,
         initial_damping_sharpness: float = 5.0,
-        flux: Flux | None = None,
         use_damping: bool = True,
-        gamma: float = 1.0,
         local_features: bool = True,
         dropout: float = 0.05,
-        use_char_bias: str | None = "lwr",
         use_film: bool = False,
         use_cross_seg_attn: bool = False,
         num_cross_segment_layers: int = 1,
-        output_dim: int = 1,
-        output_clamp: tuple[float, float] | None = (0.0, 1.0),
     ):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
-        self.use_char_bias = use_char_bias  # str | None
+        self.pde = pde
         self.use_film = use_film
         self.use_cross_seg_attn = use_cross_seg_attn
+
+        # Derive output config from PDE (or defaults for bare mode)
+        if pde is not None:
+            output_dim = pde.output_dim
+            output_clamp = pde.output_clamp
+        else:
+            output_dim = 1
+            output_clamp = (0.0, 1.0)
         self.output_dim = output_dim
         self.output_clamp = output_clamp
-        flux = flux or DEFAULT_FLUX()
-        self.flux = flux
 
         # Stage 1: Segment encoder + self-attention
-        if use_char_bias == "euler":
-            self.segment_encoder = EulerSegmentEncoder(
-                hidden_dim=hidden_dim,
-                num_frequencies=num_seg_frequencies,
-                num_layers=num_seg_mlp_layers,
-                gamma=gamma,
-                include_cumulative_mass=local_features,
-                dropout=dropout,
-            )
-        else:
-            self.segment_encoder = SegmentPhysicsEncoder(
-                hidden_dim=hidden_dim,
-                num_frequencies=num_seg_frequencies,
-                num_layers=num_seg_mlp_layers,
-                flux=flux,
-                include_cumulative_mass=local_features,
-                dropout=dropout,
-            )
+        self.segment_encoder = SegmentPhysicsEncoder(
+            hidden_dim=hidden_dim,
+            num_frequencies=num_seg_frequencies,
+            num_layers=num_seg_mlp_layers,
+            pde=pde if pde is not None else LWRPDE(),
+            include_cumulative_mass=local_features,
+            dropout=dropout,
+        )
         self.self_attn_layers = nn.ModuleList(
             [
                 EncoderLayer(hidden_dim, num_heads=num_heads, dropout=dropout)
@@ -197,13 +149,11 @@ class WaveNO(nn.Module):
             )
 
         # Stage 3: PDE-aware attention bias (conditional)
-        if use_char_bias is not None:
-            self.pde_bias = _get_pde_bias(
-                use_char_bias,
-                flux=flux,
+        if pde is not None:
+            self.pde_bias = PDEBias(
+                pde=pde,
                 use_damping=use_damping,
                 initial_damping_sharpness=initial_damping_sharpness,
-                gamma=gamma,
             )
 
         # Stage 4: Biased cross-attention layers
@@ -242,28 +192,33 @@ class WaveNO(nn.Module):
                 - 'pieces_mask': (B, K) validity mask
                 - 't_coords': (B, 1, nt, nx) time coordinates
                 - 'x_coords': (B, 1, nt, nx) space coordinates
+                May also contain 'ks_v', 'ks_p' for multi-variable PDEs.
 
         Returns:
             Dict containing:
-                - 'output_grid': (B, 1, nt, nx) predicted density
-                - 'characteristic_bias': (B, nt, nx, K) physics bias (if use_char_bias)
+                - 'output_grid': (B, output_dim, nt, nx) prediction
+                - 'characteristic_bias': (B, nt, nx, K) physics bias (if pde)
         """
-        xs = batch_input["xs"]
-        ks = batch_input["ks"]
         pieces_mask = batch_input["pieces_mask"]
-        ks_v = batch_input.get("ks_v", None)  # ARZ/Euler velocity (optional)
-        ks_p = batch_input.get("ks_p", None)  # Euler pressure (optional)
         t_coords = batch_input["t_coords"].squeeze(1)  # (B, nt, nx)
         x_coords = batch_input["x_coords"].squeeze(1)  # (B, nt, nx)
 
         B, nt, nx = t_coords.shape
-        K = ks.shape[1]
+        K = pieces_mask.shape[1]
+
+        # Build ic_data for encoder and bias
+        ic_data = {
+            "xs": batch_input["xs"],
+            "ks": batch_input["ks"],
+            "pieces_mask": pieces_mask,
+        }
+        if "ks_v" in batch_input:
+            ic_data["ks_v"] = batch_input["ks_v"]
+        if "ks_p" in batch_input:
+            ic_data["ks_p"] = batch_input["ks_p"]
 
         # Stage 1: Encode segments + self-attention
-        if self.use_char_bias == "euler" and ks_v is not None and ks_p is not None:
-            seg_emb = self.segment_encoder(xs, ks, ks_v, ks_p, pieces_mask)
-        else:
-            seg_emb = self.segment_encoder(xs, ks, pieces_mask)  # (B, K, H)
+        seg_emb = self.segment_encoder(ic_data)  # (B, K, H)
 
         key_padding_mask = ~pieces_mask.bool()  # True = padded
         all_masked = key_padding_mask.all(dim=1)
@@ -315,13 +270,10 @@ class WaveNO(nn.Module):
             kv = kv.reshape(B * nt, K, self.hidden_dim)
 
         # Stage 3: PDE-aware attention bias (conditional)
-        if self.use_char_bias is not None:
-            ic_data = {"xs": xs, "ks": ks, "pieces_mask": pieces_mask}
-            if ks_v is not None:
-                ic_data["ks_v"] = ks_v
-            if ks_p is not None:
-                ic_data["ks_p"] = ks_p
-            char_bias = self.pde_bias(ic_data, (t_coords, x_coords))  # (B, nt, nx, K)
+        if self.pde is not None:
+            char_bias = self.pde_bias(
+                ic_data, (t_coords, x_coords)
+            )  # (B, nt, nx, K)
 
             bias_flat = char_bias.reshape(B * nt, nx, K)  # (B*nt, nx, K)
             attn_mask = (
@@ -365,30 +317,21 @@ class WaveNO(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-def _equation_config(args: dict) -> dict:
-    """Return equation-aware WaveNO config overrides."""
+def _build_pde(args: dict) -> PDE | None:
+    """Build a PDE instance from args.
+
+    Args:
+        args: Dict with at least ``equation`` key.
+
+    Returns:
+        PDE instance, or None if bias is disabled.
+    """
     eq = args.get("equation", "LWR")
     if eq == "Euler":
-        return {
-            "use_char_bias": "euler",
-            "output_dim": 3,
-            "output_clamp": None,
-            "gamma": args.get("euler_gamma") or 1.4,
-        }
+        return EulerPDE(gamma=args.get("euler_gamma") or 1.4)
     if eq == "ARZ":
-        return {
-            "use_char_bias": "arz",
-            "output_dim": 2,
-            "output_clamp": None,
-            "gamma": args.get("gamma", 1.0),
-        }
-    # LWR (default)
-    return {
-        "use_char_bias": "lwr",
-        "output_dim": 1,
-        "output_clamp": (0.0, 1.0),
-        "gamma": args.get("gamma", 1.0),
-    }
+        return ARZPDE(gamma=args.get("gamma", 1.0))
+    return LWRPDE()
 
 
 def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
@@ -396,8 +339,11 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
     if not isinstance(args, dict):
         args = vars(args)
 
-    # Equation-aware defaults (can be overridden by flag_overrides)
-    eq_cfg = _equation_config(args)
+    # Build PDE unless overridden to None
+    if "pde" in flag_overrides:
+        pde = flag_overrides.pop("pde")
+    else:
+        pde = _build_pde(args)
 
     kwargs = dict(
         hidden_dim=args.get("hidden_dim", 64),
@@ -408,13 +354,11 @@ def _build_waveno(args: dict, **flag_overrides) -> WaveNO:
         num_self_attn_layers=args.get("num_self_attn_layers", 2),
         num_cross_layers=args.get("num_cross_layers", 2),
         num_heads=args.get("num_heads", 4),
+        pde=pde,
         initial_damping_sharpness=args.get("initial_damping_sharpness", 5.0),
-        gamma=eq_cfg["gamma"],
         local_features=args.get("local_features", True),
         dropout=args.get("dropout", 0.05),
         num_cross_segment_layers=args.get("num_cross_segment_layers", 1),
-        output_dim=eq_cfg["output_dim"],
-        output_clamp=eq_cfg["output_clamp"],
     )
     kwargs.update(flag_overrides)
     return WaveNO(**kwargs)
@@ -434,12 +378,8 @@ def build_waveno(args: dict) -> WaveNO:
     Returns:
         Configured WaveNO instance.
     """
-    if not isinstance(args, dict):
-        args = vars(args)
-    eq_cfg = _equation_config(args)
     return _build_waveno(
         args,
-        use_char_bias=eq_cfg["use_char_bias"],
         use_damping=False,
         use_film=True,
         use_cross_seg_attn=False,
@@ -449,15 +389,14 @@ def build_waveno(args: dict) -> WaveNO:
 def build_waveno_bare(args: dict) -> WaveNO:
     """Bare minimum: unbiased cross-attention, no extras."""
     return _build_waveno(
-        args, use_char_bias=None, use_film=False, use_cross_seg_attn=False
+        args, pde=None, use_film=False, use_cross_seg_attn=False
     )
 
 
 def build_waveno_bias_only(args: dict) -> WaveNO:
-    """+ LWR bias (without damping)."""
+    """+ PDE bias (without damping)."""
     return _build_waveno(
         args,
-        use_char_bias="lwr",
         use_damping=False,
         use_film=False,
         use_cross_seg_attn=False,
@@ -465,10 +404,9 @@ def build_waveno_bias_only(args: dict) -> WaveNO:
 
 
 def build_waveno_bias_damp(args: dict) -> WaveNO:
-    """+ LWR bias + collision-time damping."""
+    """+ PDE bias + collision-time damping."""
     return _build_waveno(
         args,
-        use_char_bias="lwr",
         use_damping=True,
         use_film=False,
         use_cross_seg_attn=False,
@@ -476,35 +414,35 @@ def build_waveno_bias_damp(args: dict) -> WaveNO:
 
 
 def build_waveno_damp(args: dict) -> WaveNO:
-    """+ LWR bias + damping + FiLM time conditioning."""
+    """+ PDE bias + damping + FiLM time conditioning."""
     return _build_waveno(
-        args, use_char_bias="lwr", use_film=True, use_cross_seg_attn=False
+        args, use_damping=True, use_film=True, use_cross_seg_attn=False
     )
 
 
 def build_waveno_damp_cross_attn(args: dict) -> WaveNO:
-    """+ LWR bias + damping + cross-segment attention."""
+    """+ PDE bias + damping + cross-segment attention."""
     return _build_waveno(
-        args, use_char_bias="lwr", use_film=False, use_cross_seg_attn=True
+        args, use_damping=True, use_film=False, use_cross_seg_attn=True
     )
 
 
 def build_waveno_all(args: dict) -> WaveNO:
     """All components except trajectories."""
     return _build_waveno(
-        args, use_char_bias="lwr", use_film=True, use_cross_seg_attn=True
+        args, use_damping=True, use_film=True, use_cross_seg_attn=True
     )
 
 
 def build_waveno_film_only(args: dict) -> WaveNO:
-    """FiLM only (no LWR bias)."""
+    """FiLM only (no PDE bias)."""
     return _build_waveno(
-        args, use_char_bias=None, use_film=True, use_cross_seg_attn=False
+        args, pde=None, use_film=True, use_cross_seg_attn=False
     )
 
 
 def build_waveno_cross_attn_only(args: dict) -> WaveNO:
-    """Cross-segment attention only (no LWR bias)."""
+    """Cross-segment attention only (no PDE bias)."""
     return _build_waveno(
-        args, use_char_bias=None, use_film=False, use_cross_seg_attn=True
+        args, pde=None, use_film=False, use_cross_seg_attn=True
     )

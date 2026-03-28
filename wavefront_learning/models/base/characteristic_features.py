@@ -12,26 +12,30 @@ import torch.nn.functional as F
 
 from .feature_encoders import FourierFeatures
 from .flux import DEFAULT_FLUX, Flux
+from .pde import PDE, LWRPDE
 
 
 class SegmentPhysicsEncoder(nn.Module):
     """Encodes IC segments with physics-augmented features.
 
-    For each constant piece k with value rho_k on [xs[k], xs[k+1]]:
-      - x_center = (xs[k] + xs[k+1]) / 2
-      - width = xs[k+1] - xs[k]
-      - rho_k = ks[k]
-      - lambda_k = flux.derivative(rho_k)    (characteristic speed)
-      - f_k = flux(rho_k)                    (flux value)
+    For each segment k on [xs[k], xs[k+1]], computes:
+      - x_center, width (Fourier-encoded spatial features)
+      - PDE-specific physics scalars via ``pde.physics_features()``
+      - Optional cumulative mass N_k (normalized prefix sum of rho * width)
 
-    Spatial features (x_center, width) are Fourier-encoded.
-    All features are concatenated and projected via MLP.
+    The number and meaning of physics scalars depends on the PDE:
+      - LWR: ``[rho, f'(rho), f(rho)]`` (3 scalars)
+      - ARZ: ``[rho, v, p(rho), lambda_2]`` (4 scalars)
+      - Euler: ``[rho, u, p, c, lam1, lam3, Mach]`` (7 scalars)
 
     Args:
         hidden_dim: Output embedding dimension.
         num_frequencies: Fourier frequency bands for spatial features.
         num_layers: MLP depth.
-        flux: Flux function instance.
+        pde: PDE instance providing physics features.
+        flux: Legacy parameter — if provided without ``pde``, wraps in LWRPDE.
+        include_cumulative_mass: Append normalized cumulative mass feature.
+        dropout: Dropout probability.
     """
 
     def __init__(
@@ -39,12 +43,18 @@ class SegmentPhysicsEncoder(nn.Module):
         hidden_dim: int = 64,
         num_frequencies: int | None = 8,
         num_layers: int = 2,
+        pde: PDE | None = None,
         flux: Flux | None = None,
         include_cumulative_mass: bool = True,
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.flux = flux or DEFAULT_FLUX()
+        if pde is not None:
+            self.pde = pde
+        elif flux is not None:
+            self.pde = LWRPDE(flux=flux)
+        else:
+            self.pde = LWRPDE(flux=DEFAULT_FLUX())
         self.include_cumulative_mass = include_cumulative_mass
 
         if num_frequencies is not None:
@@ -56,10 +66,10 @@ class SegmentPhysicsEncoder(nn.Module):
             self.fourier_x = None
             spatial_dim = 1  # raw scalar
 
-        # Input: 2 * spatial_dim (x_center + width) + scalar features
-        # With cumulative mass: [rho, lambda, flux_val, N_k_normalized] = 4
-        # Without: [rho, lambda, flux_val] = 3
-        num_scalars = 4 if include_cumulative_mass else 3
+        # Input: 2 * spatial_dim (x_center + width) + physics scalars [+ N_k]
+        num_scalars = self.pde.num_physics_features
+        if include_cumulative_mass:
+            num_scalars += 1
         input_dim = 2 * spatial_dim + num_scalars
 
         layers = []
@@ -78,55 +88,71 @@ class SegmentPhysicsEncoder(nn.Module):
 
     def forward(
         self,
-        xs: torch.Tensor,
-        ks: torch.Tensor,
-        pieces_mask: torch.Tensor,
+        ic_data_or_xs: dict[str, torch.Tensor] | torch.Tensor,
+        ks: torch.Tensor | None = None,
+        pieces_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Encode IC segments.
 
+        Accepts either a dict or positional args (legacy).
+
         Args:
-            xs: Breakpoint positions (B, K+1).
-            ks: Piece values (B, K).
-            pieces_mask: Validity mask (B, K), 1 = valid.
+            ic_data_or_xs: Either an ``ic_data`` dict with keys ``xs``,
+                ``ks``, ``pieces_mask`` (and optionally ``ks_v``,
+                ``ks_p``), or a ``(B, K+1)`` breakpoint tensor (legacy).
+            ks: Piece values ``(B, K)`` — only used when the first
+                argument is a tensor (legacy call).
+            pieces_mask: Validity mask ``(B, K)`` — only used when the
+                first argument is a tensor (legacy call).
 
         Returns:
             Segment embeddings (B, K, hidden_dim).
         """
+        if isinstance(ic_data_or_xs, dict):
+            ic_data = ic_data_or_xs
+        else:
+            ic_data = {
+                "xs": ic_data_or_xs,
+                "ks": ks,
+                "pieces_mask": pieces_mask,
+            }
+        xs = ic_data["xs"]
+        ks = ic_data["ks"]
+        pieces_mask = ic_data["pieces_mask"]
         B, K = ks.shape
 
-        # Compute physics features
+        # Spatial features
         x_center = (xs[:, :-1] + xs[:, 1:]) / 2  # (B, K)
         width = xs[:, 1:] - xs[:, :-1]  # (B, K)
-        lambda_k = self.flux.derivative(ks)  # (B, K)
-        flux_k = self.flux(ks)  # (B, K)
 
         # Encode spatial features
         if self.fourier_x is not None:
             x_center_enc = self.fourier_x(x_center.reshape(-1)).reshape(
                 B, K, -1
             )  # (B, K, F)
-            width_enc = self.fourier_x(width.reshape(-1)).reshape(B, K, -1)  # (B, K, F)
+            width_enc = self.fourier_x(width.reshape(-1)).reshape(B, K, -1)
         else:
             x_center_enc = x_center.unsqueeze(-1)  # (B, K, 1)
-            width_enc = width.unsqueeze(-1)  # (B, K, 1)
+            width_enc = width.unsqueeze(-1)
 
-        # Concatenate all features
+        # PDE-specific physics scalars
+        physics = self.pde.physics_features(ic_data)  # (B, K, num_physics_features)
+
+        # Optional cumulative mass
         if self.include_cumulative_mass:
-            # Cumulative IC integral: N_k = Σ_{j<k} ρ_j·w_j (exclusive prefix sum)
             rho_width = ks * width  # (B, K)
             N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
             total_mass = (
                 (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
             )
             N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
-            scalar_features = torch.stack(
-                [ks, lambda_k, flux_k, N_k_normalized], dim=-1
-            )  # (B, K, 4)
-        else:
-            scalar_features = torch.stack([ks, lambda_k, flux_k], dim=-1)  # (B, K, 3)
+            physics = torch.cat(
+                [physics, N_k_normalized.unsqueeze(-1)], dim=-1
+            )
+
         features = torch.cat(
-            [x_center_enc, width_enc, scalar_features], dim=-1
-        )  # (B, K, 2F+3/4)
+            [x_center_enc, width_enc, physics], dim=-1
+        )
 
         # MLP projection
         output = self.mlp(features)  # (B, K, H)

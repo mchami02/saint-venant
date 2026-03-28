@@ -46,6 +46,8 @@ from .flow_matching import ConditionEncoder, FlowMatchingDenoiser, HeunODESolver
 from .collision_processor import process_collisions
 from .flux import DEFAULT_FLUX, Flux, GreenshieldsFlux, TriangularFlux
 from .lwr_bias import LWRBias
+from .pde import PDE, ARZPDE, EulerPDE, LWRPDE
+from .pde_bias import PDEBias
 from .regions import RegionTrunk, RegionTrunkSet
 from .transformer_encoder import Encoder
 from .vae_encoder import VAEEncoder
@@ -98,6 +100,11 @@ __all__ = [
     "TriangularFlux",
     "DEFAULT_FLUX",
     "LWRBias",
+    "PDE",
+    "LWRPDE",
+    "ARZPDE",
+    "EulerPDE",
+    "PDEBias",
     "SegmentPhysicsEncoder",
     "DiscontinuityPhysicsEncoder",
     "CharacteristicFeatureComputer",
