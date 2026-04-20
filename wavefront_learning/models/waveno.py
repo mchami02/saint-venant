@@ -187,9 +187,21 @@ class WaveNO(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, output_dim),
         )
+        # Initialize the final layer so the model starts by predicting a
+        # neutral constant for the target distribution.  Weights = 0, bias
+        # placed at the centre of the valid output range:
+        #   - LWR (output_clamp=(0,1)) → bias=0.5 (mid-range density).
+        #   - Burgers / ARZ / Euler (output_clamp=None) → bias=0.0 so the
+        #     model starts at the distribution mean (≈0 when values are
+        #     signed), instead of the LWR-specific 0.5.
         nn.init.zeros_(self.output_head[-1].weight)
-        if output_dim == 1:
-            nn.init.constant_(self.output_head[-1].bias, 0.5)
+        if self.output_dim == 1:
+            if self.output_clamp is not None:
+                lo, hi = self.output_clamp
+                init_bias = 0.5 * (lo + hi)
+            else:
+                init_bias = 0.0
+            nn.init.constant_(self.output_head[-1].bias, init_bias)
         else:
             nn.init.zeros_(self.output_head[-1].bias)
 
