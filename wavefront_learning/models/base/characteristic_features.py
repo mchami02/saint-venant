@@ -138,12 +138,19 @@ class SegmentPhysicsEncoder(nn.Module):
         # PDE-specific physics scalars
         physics = self.pde.physics_features(ic_data)  # (B, K, num_physics_features)
 
-        # Optional cumulative mass
+        # Optional cumulative-mass feature (a positional signal: "what
+        # fraction of the total |conserved mass| sits left of segment k?").
+        # Use ``|ks|`` so the feature stays well-defined for signed
+        # conserved variables (Burgers u ∈ [-1, 1], ARZ momentum, Euler
+        # momentum). Taking the absolute value guarantees ``rho_width ≥ 0``
+        # and ``total_mass > 0``, preventing sign cancellations from
+        # producing near-zero denominators and exploding outliers. For LWR
+        # (ks ≥ 0) ``ks.abs()`` is a no-op, so LWR behaviour is unchanged.
         if self.include_cumulative_mass:
-            rho_width = ks * width  # (B, K)
-            N_k = torch.cumsum(rho_width, dim=1) - rho_width  # (B, K)
+            abs_rho_width = ks.abs() * width  # (B, K), ≥ 0
+            N_k = torch.cumsum(abs_rho_width, dim=1) - abs_rho_width  # (B, K)
             total_mass = (
-                (rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
+                (abs_rho_width * pieces_mask).sum(dim=1, keepdim=True).clamp(min=1e-8)
             )
             N_k_normalized = N_k / total_mass  # (B, K) in [0, 1]
             physics = torch.cat(
