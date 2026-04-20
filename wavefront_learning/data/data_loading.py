@@ -94,7 +94,7 @@ def upload_grids(
     path_prefix = {
         "Euler": "euler",
         "ARZ": "arz",
-        "Burgers": "burgers",
+        "Burgers": "burgers_v2",
         "Euler2D": "euler2d",
     }.get(equation, "lwr")
     data_path = f"{path_prefix}/{config_id}.npz"

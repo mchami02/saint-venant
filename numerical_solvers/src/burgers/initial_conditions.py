@@ -42,7 +42,7 @@ def random_piecewise(
     x: torch.Tensor,
     k: int,
     rng: torch.Generator,
-    u_range: tuple[float, float] = (-2.0, 2.0),
+    u_range: tuple[float, float] = (-1.0, 1.0),
 ) -> tuple[torch.Tensor, dict]:
     """Generate a random k-piecewise-constant u0 profile.
 
@@ -87,7 +87,7 @@ def random_piecewise_batch(
     k: int,
     n: int,
     rng: torch.Generator,
-    u_range: tuple[float, float] = (-2.0, 2.0),
+    u_range: tuple[float, float] = (-1.0, 1.0),
 ) -> tuple[torch.Tensor, list[dict]]:
     """Generate *n* random k-piecewise-constant u0 profiles as a batch."""
     us: list[torch.Tensor] = []

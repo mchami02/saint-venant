@@ -172,17 +172,29 @@ class LWRPDE(PDE):
 class BurgersPDE(LWRPDE):
     """Inviscid Burgers: u_t + (u^2 / 2)_x = 0.
 
-    Structurally identical to LWR (scalar, piecewise-constant IC), so we
-    reuse the LWRPDE methods via inheritance and only swap the flux.  The
-    conserved variable is unbounded, so ``output_clamp`` is disabled.
+    Structurally identical to LWR (scalar, piecewise-constant IC) but with
+    a different flux.  For Burgers, the characteristic speed equals the
+    state itself (``f'(u) = u``), so LWR's 3-feature tuple
+    ``[rho, f'(rho), f(rho)]`` would become ``[u, u, u^2/2]`` with the
+    first two channels identical.  We drop the redundant derivative
+    channel and return only ``[u, f(u)] = [u, u^2/2]``.  The conserved
+    variable is unbounded, so ``output_clamp`` stays disabled.
     """
 
+    num_physics_features = 2
     output_clamp = None
 
     def __init__(self, flux: Flux | None = None):
         # Skip LWRPDE.__init__ default to inject BurgersFlux
         nn.Module.__init__(self)
         self.flux = flux or BurgersFlux()
+
+    def physics_features(
+        self, ic_data: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        ks = ic_data["ks"]  # (B, K) — u values per segment
+        flux_k = self.flux(ks)  # (B, K) — u^2/2
+        return torch.stack([ks, flux_k], dim=-1)  # (B, K, 2)
 
 
 # ---------------------------------------------------------------------------
