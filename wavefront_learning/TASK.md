@@ -30,6 +30,14 @@ starting the local one, then poll.
 - **3 retries** per crash (diagnose → fix → commit → retry). Then log to
   `FAILURES.md` and move on.
 - **No local prompts.** Unforeseen blockers → `PushNotification` + wait.
+- **Always prefer parallelism.** Run multiple trainings concurrently on
+  the same vast GPU whenever VRAM permits (monitor with
+  `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader`).
+  Each concurrent training must have a **unique `--save_path`** and a
+  unique `--run_name`; failure to do so will clobber checkpoints and W&B
+  runs. Default concurrency: start at 3; raise if VRAM utilisation stays
+  below ~60 %; drop to 1 if an OOM is observed. The same rule applies to
+  local analysis jobs that don't fight for the same resource (CPU, disk).
 
 ## Instance Lifecycle
 Kickoff (once):
