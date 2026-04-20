@@ -30,12 +30,30 @@ def compute_metrics(
     # Max absolute error
     max_error = torch.max(torch.abs(prediction - target)).item()
 
-    return {
+    result = {
         "mse": mse,
         "mae": mae,
         "rel_l2": rel_l2,
         "max_error": max_error,
     }
+
+    # Per-channel metrics for multi-channel outputs (ARZ: 2, Euler: 3)
+    n_channels = prediction.shape[1] if prediction.ndim >= 4 else 1
+    if n_channels > 1:
+        for ch in range(n_channels):
+            ch_pred = prediction[:, ch]
+            ch_tgt = target[:, ch]
+            result[f"mse_ch{ch}"] = torch.mean((ch_pred - ch_tgt) ** 2).item()
+            result[f"mae_ch{ch}"] = torch.mean(torch.abs(ch_pred - ch_tgt)).item()
+            ch_rel_l2 = torch.norm(ch_pred - ch_tgt) / torch.norm(ch_tgt)
+            result[f"rel_l2_ch{ch}"] = (
+                ch_rel_l2.item() if not torch.isnan(ch_rel_l2) else float("inf")
+            )
+            result[f"max_error_ch{ch}"] = torch.max(
+                torch.abs(ch_pred - ch_tgt)
+            ).item()
+
+    return result
 
 
 def cell_average_prediction(

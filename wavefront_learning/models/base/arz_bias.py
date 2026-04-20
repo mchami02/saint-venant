@@ -13,10 +13,14 @@ The ARZ system has two wave families at each interface:
   across it, propagating at speed ``v_R``.
 
 Penalties are computed in the self-similar coordinate ``ξ = (x - x_d) / (t + ε)``
-(same as LWR bias). Each interface generates two one-sided penalties:
+(same as LWR bias). Each interface generates two one-sided penalties whose
+bounding speeds depend on the wave type:
 
-- Left segment bounded by the 2-wave (shock speed or rarefaction fan edge)
-- Right segment bounded by the 1-contact (speed ``v_R``)
+- **Shock** (ρ* > ρ_L): left boundary = 2-shock σ₂, right boundary = 1-contact v_R
+- **Rarefaction** (ρ* < ρ_L): left boundary = λ₂(ρ_L), right boundary = λ₂(ρ*)
+  (both from the 2-wave fan edges)
+- **Contact** (ρ* ≈ ρ_L): left boundary = v_R, right boundary = v_R
+  (both from the 1-contact)
 """
 
 import torch
@@ -121,6 +125,8 @@ class ARZBias(nn.Module):
 
         # -- 2-wave classification ------------------------------------------------
         is_shock = rho_star > rho_L  # (B, K-1); equivalently v_L > v_R
+        is_contact = (rho_star - rho_L).abs() < 1e-6  # trivial 2-wave (v_L ≈ v_R)
+        is_rarefaction = (~is_shock) & (~is_contact)  # (B, K-1)
 
         # -- 2-wave speeds --------------------------------------------------------
         lam2_L = self._lam2(rho_L, v_L)  # (B, K-1)
@@ -128,19 +134,16 @@ class ARZBias(nn.Module):
         sigma2 = self._shock_speed_2(rho_L, rho_star, w_L)  # (B, K-1)
 
         # -- speed selection per interface ----------------------------------------
-        # The ARZ wave structure at each interface is (left to right):
-        #   2-wave (slower, genuinely nonlinear) → 1-contact (faster, at v_R)
-        #
-        # Left segment (k): bounded by the outermost RIGHT wave = 1-contact
-        #   at speed v_R. This holds for both shock and rarefaction since
-        #   v_R > λ₂_* always (the 1-contact is always to the right of the
-        #   2-wave).
-        speed_right = v_R  # (B, K-1)
+        # Shock: bounded by 2-shock (left) and 1-contact (right)
+        # Rarefaction: bounded by 2-fan edges only (lam2_L left, lam2_star right)
+        # Contact: bounded by 1-contact on both sides (speed v_R)
+        speed_right = torch.where(
+            is_rarefaction, lam2_star, v_R,
+        )  # (B, K-1)
 
-        # Right segment (k+1): bounded by the outermost LEFT wave = 2-wave
-        #   shock → 2-shock speed σ₂
-        #   rarefaction → far fan edge λ₂_L (left edge of 2-rarefaction)
-        speed_left = torch.where(is_shock, sigma2, lam2_L)  # (B, K-1)
+        speed_left = torch.where(
+            is_shock, sigma2, torch.where(is_rarefaction, lam2_L, v_R),
+        )  # (B, K-1)
 
         # -- interface positions --------------------------------------------------
         x_d = xs[:, 1:K]  # (B, K-1)
