@@ -966,7 +966,11 @@ def get_wavefront_data(
     elif is_arz:
         solver = "ARZ"
     elif is_burgers:
-        solver = "Burgers"
+        # _v2 bumps the HF config_id so the old u_range=(-2,2) cache
+        # cannot be reused. The u_range=(-1,1) dataset lives under
+        # burgers_v2/Burgers_v2_*.npz and has a distinct config_id from
+        # the retired burgers/Burgers_*.npz entries still in index.parquet.
+        solver = "Burgers_v2"
     else:
         solver = "LaxHopfPointWise"
     eq_kw = equation_kwargs or {}
