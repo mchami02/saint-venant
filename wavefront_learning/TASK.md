@@ -30,6 +30,11 @@ starting the local one, then poll.
 - **3 retries** per crash (diagnose → fix → commit → retry). Then log to
   `FAILURES.md` and move on.
 - **No local prompts.** Unforeseen blockers → `PushNotification` + wait.
+- **Grid-plot axes convention.** Whenever plotting a 2D field over the
+  space–time grid (GT, prediction, error, residual), the plot MUST use
+  **space on the x-axis and time on the y-axis**, `origin="lower"` so
+  time increases upward. Use the label `x (space)` on the horizontal axis
+  and `t (time)` on the vertical axis. Do not transpose to swap these.
 - **Always prefer parallelism.** Run multiple trainings concurrently on
   the same vast GPU whenever VRAM permits (monitor with
   `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader`).
