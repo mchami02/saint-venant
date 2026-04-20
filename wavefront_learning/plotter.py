@@ -22,6 +22,13 @@ from plotting import (
     plot_euler_ground_truth,
     plot_euler_mse_error,
     plot_euler_pred,
+)
+from plotting.euler2d_plots import (
+    plot_euler2d_ground_truth,
+    plot_euler2d_mse_error,
+    plot_euler2d_pred,
+)
+from plotting import (
     plot_charno_decomposition,
     plot_cvae_samples,
     plot_cvae_uncertainty,
@@ -74,6 +81,9 @@ PLOTS: dict[str, callable] = {
     "euler_ground_truth": plot_euler_ground_truth,
     "euler_pred": plot_euler_pred,
     "euler_mse_error": plot_euler_mse_error,
+    "euler2d_ground_truth": plot_euler2d_ground_truth,
+    "euler2d_pred": plot_euler2d_pred,
+    "euler2d_mse_error": plot_euler2d_mse_error,
     "shock_proximity": plot_shock_proximity,
 }
 

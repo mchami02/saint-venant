@@ -18,6 +18,8 @@ from models.encoder_decoder import (
     build_encoder_decoder,
     build_encoder_decoder_cross,
 )
+from models.deeponet_2d import build_deeponet_2d
+from models.fno_2d import build_fno_2d
 from models.fno_wrapper import build_fno
 from models.godunov import build_godunov
 from models.hybrid_deeponet import build_hybrid_deeponet
@@ -53,6 +55,11 @@ from models.waveno import (
     build_waveno_damp,
     build_waveno_damp_cross_attn,
     build_waveno_film_only,
+)
+from models.waveno_2d import (
+    build_waveno_2d,
+    build_waveno_bare_2d,
+    build_waveno_bias_only_2d,
 )
 from models.waveno_full import (
     build_shock_aware_waveno_full,
@@ -113,7 +120,28 @@ MODELS = {
     "NeuralFVSolver": build_neural_fv_solver,
     "LNO": build_lno,
     "Godunov": build_godunov,
+    # 2D variants (for 2D equations like Euler2D).
+    "FNO2D": build_fno_2d,
+    "DeepONet2D": build_deeponet_2d,
+    "WaveNO2D": build_waveno_2d,
+    "WaveNOBare2D": build_waveno_bare_2d,
+    "WaveNOBiasOnly2D": build_waveno_bias_only_2d,
 }
+
+
+# Mapping from 1D model name → 2D variant name.  Used by train.py to
+# auto-swap when the user picks a 1D model alongside a 2D equation.
+DIM2_MODEL_MAP: dict[str, str] = {
+    "FNO": "FNO2D",
+    "DeepONet": "DeepONet2D",
+    "WaveNO": "WaveNO2D",
+    "WaveNOBare": "WaveNOBare2D",
+    "WaveNOBiasOnly": "WaveNOBiasOnly2D",
+}
+
+
+def is_2d_equation(equation: str) -> bool:
+    return equation in ("Euler2D",)
 
 
 def get_model(model_name: str, args: dict) -> nn.Module:

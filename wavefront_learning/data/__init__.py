@@ -146,6 +146,8 @@ def get_wavefront_datasets(
     nt = grid_config["nt"]
     dx = grid_config["dx"]
     dt = grid_config["dt"]
+    ny = grid_config.get("ny")
+    dy = grid_config.get("dy")
 
     np.random.seed(random_seed)
 
@@ -165,6 +167,8 @@ def get_wavefront_datasets(
         equation_kwargs=equation_kwargs,
         proximity_sigma=proximity_sigma,
         min_component_size=min_component_size,
+        ny=ny,
+        dy=dy,
     )
 
     # Resolve transform: CLI override takes priority over per-model default

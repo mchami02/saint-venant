@@ -18,3 +18,4 @@ wandb/
 launch.json
 tex/
 index.parquet
+.vast_instance.json

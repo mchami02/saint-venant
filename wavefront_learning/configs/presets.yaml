@@ -32,6 +32,11 @@ model_plot_preset:
   WaveNO: grid_minimal
   WaveNOBare: grid_minimal
   WaveNOBiasOnly: grid_minimal
+  FNO2D: euler2d
+  DeepONet2D: euler2d
+  WaveNO2D: euler2d
+  WaveNOBare2D: euler2d
+  WaveNOBiasOnly2D: euler2d
   WaveNOBiasDamp: grid_minimal
   WaveNODamp: grid_minimal
   WaveNODampCrossAttn: grid_minimal
@@ -94,6 +99,11 @@ model_transform:
   NeuralFVSolver: ToGridNoCoords
   LNO: ToGridNoCoords
   Godunov: null
+  FNO2D: null
+  DeepONet2D: null
+  WaveNO2D: null
+  WaveNOBare2D: null
+  WaveNOBiasOnly2D: null
 
 # Loss presets.
 # Each preset is a list of entries with name, weight, and optional kwargs.
@@ -201,3 +211,12 @@ plot_presets:
     - euler_pred
     - euler_mse_error
     - pde_residual
+  burgers:
+    - ground_truth
+    - pred
+    - mse_error
+    - pde_residual
+  euler2d:
+    - euler2d_ground_truth
+    - euler2d_pred
+    - euler2d_mse_error

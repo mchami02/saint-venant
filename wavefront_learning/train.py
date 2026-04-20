@@ -19,7 +19,7 @@ from logger import WandbLogger, init_logger
 from loss import create_loss_from_args
 from losses.flow_matching import FlowMatchingLoss
 from losses.vae_reconstruction import VAEReconstructionLoss
-from model import MODELS, get_model, load_model
+from model import DIM2_MODEL_MAP, MODELS, get_model, is_2d_equation, load_model
 from testing import (
     run_profiler,
     run_sanity_check,
@@ -394,6 +394,19 @@ def main():
         grid_config["gamma"] = args.gamma if args.gamma is not None else 1.0
     elif args.equation == "Euler":
         grid_config["gamma"] = getattr(args, "euler_gamma", None) or 1.4
+    elif args.equation == "Euler2D":
+        grid_config["gamma"] = getattr(args, "euler_gamma", None) or 1.4
+        grid_config["ny"] = getattr(args, "ny", None) or args.nx
+        grid_config["dy"] = getattr(args, "dy", None) or args.dx
+
+    # Auto-swap 1D models to their 2D variant when a 2D equation is selected.
+    if is_2d_equation(args.equation) and args.model in DIM2_MODEL_MAP:
+        swapped = DIM2_MODEL_MAP[args.model]
+        print(
+            f"[auto-select] equation={args.equation} is 2D spatial — "
+            f"using {swapped} instead of {args.model}."
+        )
+        args.model = swapped
 
     # Auto-select loss and plot presets based on model
     if args.loss == "mse":  # default — auto-select per model
@@ -406,8 +419,8 @@ def main():
     print(f"Model: {args.model}")
     print(f"Epochs: {args.epochs}, Batch size: {args.batch_size}, LR: {args.lr}")
 
-    # Warn about unsupported ARZ/Euler + only_shocks combination
-    if args.equation in ("ARZ", "Euler") and args.only_shocks:
+    # Warn about unsupported ARZ/Euler/Burgers + only_shocks combination
+    if args.equation in ("ARZ", "Euler", "Burgers", "Euler2D") and args.only_shocks:
         print(f"Warning: --only_shocks is not supported for {args.equation}; ignoring.")
         args.only_shocks = False
 
@@ -421,6 +434,10 @@ def main():
             "bc_type": args.bc_type,
         }
     elif args.equation == "Euler":
+        equation_kwargs = {
+            "gamma": getattr(args, "euler_gamma", None) or 1.4,
+        }
+    elif args.equation == "Euler2D":
         equation_kwargs = {
             "gamma": getattr(args, "euler_gamma", None) or 1.4,
         }

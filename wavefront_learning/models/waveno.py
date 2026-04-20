@@ -22,7 +22,7 @@ import torch.nn as nn
 from .base.biased_cross_attention import BiasedCrossDecoderLayer
 from .base.characteristic_features import SegmentPhysicsEncoder, TimeConditioner
 from .base.feature_encoders import FourierFeatures
-from .base.pde import PDE, ARZPDE, EulerPDE, LWRPDE
+from .base.pde import PDE, ARZPDE, BurgersPDE, EulerPDE, LWRPDE
 from .base.pde_bias import PDEBias
 from .base.transformer_encoder import CrossSegmentAttention, EncoderLayer
 
@@ -343,8 +343,13 @@ def _build_pde(args: dict) -> PDE | None:
     eq = args.get("equation", "LWR")
     if eq == "Euler":
         return EulerPDE(gamma=args.get("euler_gamma") or 1.4)
+    if eq == "Euler2D":
+        from .base.pde import Euler2DPDE
+        return Euler2DPDE(gamma=args.get("euler_gamma") or 1.4)
     if eq == "ARZ":
         return ARZPDE(gamma=args.get("gamma", 1.0))
+    if eq == "Burgers":
+        return BurgersPDE()
     return LWRPDE()
 
 

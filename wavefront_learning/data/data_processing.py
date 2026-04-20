@@ -11,7 +11,9 @@ import torch
 
 from data.data_loading import download_grids, upload_grids
 from numerical_solvers.src.arz import generate_n as arz_generate_n
+from numerical_solvers.src.burgers import generate_n as burgers_generate_n
 from numerical_solvers.src.euler import generate_n as euler_generate_n
+from numerical_solvers.src.euler2d import generate_n as euler2d_generate_n
 from numerical_solvers.src.lwr import generate_n as lwr_generate_n
 
 
@@ -87,6 +89,123 @@ def get_nfv_dataset(
         batch_size=4,
     )
     return result["rho"].cpu().numpy(), result["ic_xs"], result["ic_ks"]
+
+
+def get_burgers_dataset(
+    n_samples: int,
+    nx: int,
+    nt: int,
+    dx: float,
+    dt: float,
+    max_steps: int = 3,
+    **kwargs,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate grids using the Burgers solver.
+
+    Mirrors ``get_nfv_dataset`` (LWR) — scalar 1D conservation law.  Burgers
+    has no rarefaction-suppression flag so ``only_shocks`` is ignored.
+
+    Returns:
+        Tuple of (grids, ic_xs, ic_ks) where:
+            - grids: shape (n_samples, nt, nx)
+            - ic_xs: shape (n_samples, max_steps+1) breakpoint positions
+            - ic_ks: shape (n_samples, max_steps) piece values
+    """
+    # Burgers solver returns nt+1 timesteps; request nt-1 so output has nt total
+    result = burgers_generate_n(
+        n=n_samples,
+        k=max_steps,
+        nx=nx,
+        nt=nt - 1,
+        dx=dx,
+        dt=dt,
+        show_progress=True,
+        **kwargs,
+    )
+    grids = result["u"].cpu().numpy()  # (n, nt, nx)
+    return grids, result["ic_xs"], result["ic_u_ks"]
+
+
+def _filter_euler2d_samples(grids, max_value=1e4, label=""):
+    """Remove broken Euler2D samples (NaN/Inf, all-zeros, extreme values).
+
+    Args:
+        grids: Array of shape ``(n, 4, nt, ny, nx)``.
+    """
+    n = len(grids)
+    flat = grids.reshape(n, -1)
+
+    nan_inf = ~np.isfinite(flat).all(axis=1)
+    all_zero = (flat == 0).all(axis=1)
+    extreme = (np.abs(flat) > max_value).any(axis=1)
+
+    bad = nan_inf | all_zero | extreme
+    n_bad = bad.sum()
+
+    if n_bad > 0:
+        print(
+            f"  {label}: removed {n_bad}/{n} Euler2D samples "
+            f"(NaN/Inf: {nan_inf.sum()}, all-zero: {all_zero.sum()}, "
+            f"extreme (>{max_value}): {(extreme & ~nan_inf).sum()})"
+        )
+
+    good_mask = ~bad
+    return grids[good_mask], good_mask
+
+
+def get_euler2d_dataset(
+    n_samples: int,
+    nx: int,
+    ny: int,
+    nt: int,
+    dx: float,
+    dy: float,
+    dt: float,
+    max_steps: int = 3,
+    **kwargs,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Generate grids using the 2D Euler solver.
+
+    Uses a Cartesian ``(kx, ky)`` tile layout with ``kx = ky = max_steps``.
+
+    Returns:
+        Tuple ``(grids, ic_xs, ic_ys, ic_rho_ks, ic_u_ks, ic_v_ks, ic_p_ks)``:
+            - grids: ``(n_samples, 4, nt, ny, nx)`` with channels
+              ``[rho, u, v, p]``.
+            - ic_xs: ``(n_samples, max_steps + 1)``
+            - ic_ys: ``(n_samples, max_steps + 1)``
+            - ic_rho_ks / ic_u_ks / ic_v_ks / ic_p_ks:
+              ``(n_samples, max_steps, max_steps)``
+    """
+    # Euler2D returns nt+1 timesteps; request nt-1 so output has nt total.
+    result = euler2d_generate_n(
+        n=n_samples,
+        kx=max_steps,
+        ky=max_steps,
+        nx=nx,
+        ny=ny,
+        dx=dx,
+        dy=dy,
+        dt=dt,
+        nt=nt - 1,
+        show_progress=True,
+        **kwargs,
+    )
+    rho = result["rho"].cpu().numpy()  # (n, nt, ny, nx)
+    u = result["u"].cpu().numpy()
+    v = result["v"].cpu().numpy()
+    p = result["p"].cpu().numpy()
+    grids = np.stack([rho, u, v, p], axis=1)  # (n, 4, nt, ny, nx)
+
+    return (
+        grids,
+        result["ic_xs"],
+        result["ic_ys"],
+        result["ic_rho_ks"],
+        result["ic_u_ks"],
+        result["ic_v_ks"],
+        result["ic_p_ks"],
+    )
 
 
 def get_arz_dataset(
@@ -221,6 +340,130 @@ def get_euler_dataset(
         result["ic_u_ks"],
         result["ic_p_ks"],
     )
+
+
+def _build_ic_tensors_from_params_2d(
+    raw_xs: np.ndarray,
+    raw_ys: np.ndarray,
+    raw_rho_ks: np.ndarray,
+    raw_u_ks: np.ndarray,
+    raw_v_ks: np.ndarray,
+    raw_p_ks: np.ndarray,
+    kx: int,
+    ky: int,
+    max_steps: int,
+) -> tuple[
+    torch.Tensor, torch.Tensor,
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
+    torch.Tensor,
+]:
+    """Build padded tile-grid tensors for Euler2D ICs.
+
+    ``raw_rho_ks`` / ``raw_*_ks`` come from the solver shaped ``(ky, kx)``
+    (row-major along y).  We transpose to the ``(Kx, Ky)`` convention
+    used by ``Euler2DPDE`` / ``Euler2DBias``.
+    """
+    kx_eff = min(kx, max_steps)
+    ky_eff = min(ky, max_steps)
+
+    xs = torch.zeros(max_steps + 1, dtype=torch.float32)
+    ys = torch.zeros(max_steps + 1, dtype=torch.float32)
+    xs[: kx_eff + 1] = torch.from_numpy(raw_xs[: kx_eff + 1].copy()).float()
+    ys[: ky_eff + 1] = torch.from_numpy(raw_ys[: ky_eff + 1].copy()).float()
+
+    def _pad_tile(arr):
+        out = torch.zeros(max_steps, max_steps, dtype=torch.float32)
+        src = torch.from_numpy(arr[:ky_eff, :kx_eff].copy()).float().T
+        out[: kx_eff, : ky_eff] = src
+        return out
+
+    ks = _pad_tile(raw_rho_ks)
+    ks_u = _pad_tile(raw_u_ks)
+    ks_v = _pad_tile(raw_v_ks)
+    ks_p = _pad_tile(raw_p_ks)
+
+    pieces_mask = torch.zeros(max_steps, max_steps, dtype=torch.float32)
+    pieces_mask[: kx_eff, : ky_eff] = 1.0
+
+    return xs, ys, ks, ks_u, ks_v, ks_p, pieces_mask
+
+
+def preprocess_wavefront_data_2d(
+    grids: np.ndarray,
+    nx: int,
+    ny: int,
+    nt: int,
+    dx: float,
+    dy: float,
+    dt: float,
+    max_steps: int,
+    ic_xs_all: np.ndarray,
+    ic_ys_all: np.ndarray,
+    ic_rho_ks_all: np.ndarray,
+    ic_u_ks_all: np.ndarray,
+    ic_v_ks_all: np.ndarray,
+    ic_p_ks_all: np.ndarray,
+    ic_kx_all: np.ndarray,
+    ic_ky_all: np.ndarray,
+) -> list[tuple[dict, torch.Tensor]]:
+    """2D analogue of :func:`preprocess_wavefront_data` for Euler2D.
+
+    Returns a list of ``(input_dict, target_grid)`` pairs where
+    ``target_grid`` is ``(4, nt, ny, nx)`` and ``input_dict`` contains
+    the 2D tile IC + ``t_coords`` / ``x_coords`` / ``y_coords`` of shape
+    ``(nt, ny, nx)`` each.
+    """
+    processed = []
+
+    # Shared coordinate grids (same for every sample).
+    t_coords = (
+        (torch.arange(nt).float() * dt)[:, None, None]
+        .expand(nt, ny, nx)
+    )
+    x_coords = (
+        ((torch.arange(nx).float() + 0.5) * dx)[None, None, :]
+        .expand(nt, ny, nx)
+    )
+    y_coords = (
+        ((torch.arange(ny).float() + 0.5) * dy)[None, :, None]
+        .expand(nt, ny, nx)
+    )
+
+    for idx in range(len(grids)):
+        target_grid = torch.from_numpy(grids[idx]).to(torch.float32)
+
+        xs, ys, ks, ks_u, ks_v, ks_p, pieces_mask = (
+            _build_ic_tensors_from_params_2d(
+                ic_xs_all[idx],
+                ic_ys_all[idx],
+                ic_rho_ks_all[idx],
+                ic_u_ks_all[idx],
+                ic_v_ks_all[idx],
+                ic_p_ks_all[idx],
+                int(ic_kx_all[idx]),
+                int(ic_ky_all[idx]),
+                max_steps,
+            )
+        )
+
+        input_data = {
+            "xs": xs,
+            "ys": ys,
+            "ks": ks,
+            "ks_u": ks_u,
+            "ks_v": ks_v,
+            "ks_p": ks_p,
+            "pieces_mask": pieces_mask,
+            "t_coords": t_coords,
+            "x_coords": x_coords,
+            "y_coords": y_coords,
+            "dx": torch.tensor(dx, dtype=torch.float32),
+            "dy": torch.tensor(dy, dtype=torch.float32),
+            "dt": torch.tensor(dt, dtype=torch.float32),
+        }
+        processed.append((input_data, target_grid))
+
+    return processed
 
 
 def compute_shock_proximity(
@@ -663,6 +906,8 @@ def get_wavefront_data(
     equation_kwargs: dict | None = None,
     proximity_sigma: float | None = None,
     min_component_size: int = 5,
+    ny: int | None = None,
+    dy: float | None = None,
 ) -> list[tuple[dict, torch.Tensor]]:
     """Get wavefront data, downloading from HuggingFace or generating locally.
 
@@ -696,9 +941,34 @@ def get_wavefront_data(
     """
     np.random.seed(random_seed)
 
+    # Euler2D has a completely different spatial structure (grids are 4D)
+    # so it has its own pipeline — dispatch before the 1D cache path.
+    if equation == "Euler2D":
+        return _get_wavefront_data_2d(
+            n_samples=n_samples,
+            nx=nx,
+            ny=ny if ny is not None else nx,
+            nt=nt,
+            dx=dx,
+            dy=dy if dy is not None else dx,
+            dt=dt,
+            max_steps=max_steps,
+            min_steps=min_steps,
+            random_seed=random_seed,
+            equation_kwargs=equation_kwargs,
+        )
+
     is_arz = equation == "ARZ"
     is_euler = equation == "Euler"
-    solver = "Euler" if is_euler else ("ARZ" if is_arz else "LaxHopfPointWise")
+    is_burgers = equation == "Burgers"
+    if is_euler:
+        solver = "Euler"
+    elif is_arz:
+        solver = "ARZ"
+    elif is_burgers:
+        solver = "Burgers"
+    else:
+        solver = "LaxHopfPointWise"
     eq_kw = equation_kwargs or {}
 
     # Distribute samples uniformly across step counts {min_steps, ..., max_steps}
@@ -816,6 +1086,12 @@ def get_wavefront_data(
                 raw_ic_xs = raw_ic_xs[good_mask]
                 raw_ic_ks = raw_ic_ks[good_mask]
                 raw_ic_v_ks = raw_ic_v_ks[good_mask]
+                raw_ic_p_ks = None
+            elif is_burgers:
+                raw_grids, raw_ic_xs, raw_ic_ks = get_burgers_dataset(
+                    batch_size, nx, nt, dx, dt, n_steps, **eq_kw
+                )
+                raw_ic_v_ks = None
                 raw_ic_p_ks = None
             else:
                 raw_grids, raw_ic_xs, raw_ic_ks = get_nfv_dataset(
@@ -948,6 +1224,140 @@ def get_wavefront_data(
     )
 
     return processed
+
+
+def _get_wavefront_data_2d(
+    n_samples: int,
+    nx: int,
+    ny: int,
+    nt: int,
+    dx: float,
+    dy: float,
+    dt: float,
+    max_steps: int = 3,
+    min_steps: int = 2,
+    random_seed: int = 42,
+    equation_kwargs: dict | None = None,
+) -> list[tuple[dict, torch.Tensor]]:
+    """2D (Euler2D) analogue of :func:`get_wavefront_data`.
+
+    No HuggingFace cache for now — the 2D index schema differs from 1D and
+    a warm local generation is fast enough for sanity runs.  Samples are
+    distributed uniformly across tile counts ``{min_steps, ..., max_steps}``
+    by using ``kx = ky = n_steps``.
+    """
+    eq_kw = equation_kwargs or {}
+    np.random.seed(random_seed)
+
+    step_counts = list(range(min_steps, max_steps + 1))
+    n_per_step = n_samples // len(step_counts)
+    remainder = n_samples % len(step_counts)
+
+    all_grids: list[np.ndarray] = []
+    all_ic_xs: list[np.ndarray] = []
+    all_ic_ys: list[np.ndarray] = []
+    all_ic_rho: list[np.ndarray] = []
+    all_ic_u: list[np.ndarray] = []
+    all_ic_v: list[np.ndarray] = []
+    all_ic_p: list[np.ndarray] = []
+    all_kx: list[np.ndarray] = []
+    all_ky: list[np.ndarray] = []
+
+    for i, n_steps in enumerate(step_counts):
+        n = n_per_step + (1 if i < remainder else 0)
+        if n == 0:
+            continue
+        print(
+            f"  Euler2D steps={n_steps}: generating {n} samples (no cache)"
+        )
+        raw_grids, raw_xs, raw_ys, raw_rho, raw_u, raw_v, raw_p = (
+            get_euler2d_dataset(
+                n, nx, ny, nt, dx, dy, dt, n_steps, **eq_kw
+            )
+        )
+        raw_grids, good_mask = _filter_euler2d_samples(
+            raw_grids, label=f"steps={n_steps}"
+        )
+        raw_xs = raw_xs[good_mask]
+        raw_ys = raw_ys[good_mask]
+        raw_rho = raw_rho[good_mask]
+        raw_u = raw_u[good_mask]
+        raw_v = raw_v[good_mask]
+        raw_p = raw_p[good_mask]
+
+        n_good = len(raw_grids)
+        if n_good == 0:
+            print(f"  WARNING: steps={n_steps}: no valid Euler2D samples")
+            continue
+
+        # Pad ragged axes so every sample has the same max_steps footprint.
+        padded_xs = np.zeros((n_good, max_steps + 1))
+        padded_ys = np.zeros((n_good, max_steps + 1))
+        padded_rho = np.zeros((n_good, max_steps, max_steps))
+        padded_u = np.zeros_like(padded_rho)
+        padded_v = np.zeros_like(padded_rho)
+        padded_p = np.zeros_like(padded_rho)
+        padded_xs[:, : n_steps + 1] = raw_xs
+        padded_ys[:, : n_steps + 1] = raw_ys
+        # raw_* have shape (n, ky, kx) from the solver; internal layout
+        # stays (ky, kx) until _build_ic_tensors_from_params_2d transposes.
+        padded_rho[:, : n_steps, : n_steps] = raw_rho
+        padded_u[:, : n_steps, : n_steps] = raw_u
+        padded_v[:, : n_steps, : n_steps] = raw_v
+        padded_p[:, : n_steps, : n_steps] = raw_p
+
+        all_grids.append(raw_grids)
+        all_ic_xs.append(padded_xs)
+        all_ic_ys.append(padded_ys)
+        all_ic_rho.append(padded_rho)
+        all_ic_u.append(padded_u)
+        all_ic_v.append(padded_v)
+        all_ic_p.append(padded_p)
+        all_kx.append(np.full(n_good, n_steps, dtype=int))
+        all_ky.append(np.full(n_good, n_steps, dtype=int))
+
+    if len(all_grids) == 0:
+        raise RuntimeError("No valid Euler2D samples generated.")
+
+    grids = np.concatenate(all_grids, axis=0)
+    ic_xs = np.concatenate(all_ic_xs, axis=0)
+    ic_ys = np.concatenate(all_ic_ys, axis=0)
+    ic_rho = np.concatenate(all_ic_rho, axis=0)
+    ic_u = np.concatenate(all_ic_u, axis=0)
+    ic_v = np.concatenate(all_ic_v, axis=0)
+    ic_p = np.concatenate(all_ic_p, axis=0)
+    ic_kx = np.concatenate(all_kx, axis=0)
+    ic_ky = np.concatenate(all_ky, axis=0)
+
+    perm = np.random.permutation(len(grids))
+    grids = grids[perm]
+    ic_xs = ic_xs[perm]
+    ic_ys = ic_ys[perm]
+    ic_rho = ic_rho[perm]
+    ic_u = ic_u[perm]
+    ic_v = ic_v[perm]
+    ic_p = ic_p[perm]
+    ic_kx = ic_kx[perm]
+    ic_ky = ic_ky[perm]
+
+    return preprocess_wavefront_data_2d(
+        grids=grids,
+        nx=nx,
+        ny=ny,
+        nt=nt,
+        dx=dx,
+        dy=dy,
+        dt=dt,
+        max_steps=max_steps,
+        ic_xs_all=ic_xs,
+        ic_ys_all=ic_ys,
+        ic_rho_ks_all=ic_rho,
+        ic_u_ks_all=ic_u,
+        ic_v_ks_all=ic_v,
+        ic_p_ks_all=ic_p,
+        ic_kx_all=ic_kx,
+        ic_ky_all=ic_ky,
+    )
 
 
 if __name__ == "__main__":

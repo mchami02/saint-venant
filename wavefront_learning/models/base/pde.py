@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .flux import DEFAULT_FLUX, Flux
+from .flux import DEFAULT_FLUX, BurgersFlux, Flux
 
 
 class PDE(nn.Module):
@@ -38,6 +38,9 @@ class PDE(nn.Module):
     num_physics_features: int
     output_dim: int
     output_clamp: tuple[float, float] | None
+    # ``spatial_dims`` defaults to 1; 2D PDEs override to 2.  Used by the
+    # model/data dispatcher to route to 2D-aware components.
+    spatial_dims: int = 1
 
     def physics_features(
         self, ic_data: dict[str, torch.Tensor]
@@ -159,6 +162,27 @@ class LWRPDE(PDE):
         )  # (B, K)
 
         return t_coll
+
+
+# ---------------------------------------------------------------------------
+# Burgers (convex scalar: u_t + (u^2/2)_x = 0)
+# ---------------------------------------------------------------------------
+
+
+class BurgersPDE(LWRPDE):
+    """Inviscid Burgers: u_t + (u^2 / 2)_x = 0.
+
+    Structurally identical to LWR (scalar, piecewise-constant IC), so we
+    reuse the LWRPDE methods via inheritance and only swap the flux.  The
+    conserved variable is unbounded, so ``output_clamp`` is disabled.
+    """
+
+    output_clamp = None
+
+    def __init__(self, flux: Flux | None = None):
+        # Skip LWRPDE.__init__ default to inject BurgersFlux
+        nn.Module.__init__(self)
+        self.flux = flux or BurgersFlux()
 
 
 # ---------------------------------------------------------------------------
@@ -430,3 +454,141 @@ class EulerPDE(PDE):
         speed_right = torch.where(is_3_shock, sigma_3, lam3_R)
 
         return speed_right, speed_left
+
+
+# ---------------------------------------------------------------------------
+# Euler2D (2D compressible Euler equations)
+# ---------------------------------------------------------------------------
+
+
+class Euler2DPDE(EulerPDE):
+    """2D compressible Euler equations.
+
+    Piecewise-constant ICs live on a Cartesian ``(Kx, Ky)`` tile grid with
+    shared ``xs`` (x-breakpoints) and ``ys`` (y-breakpoints) per batch.
+    Per tile: ``(rho, u, v, p)``.
+
+    Each interior x-interface is a 1D Riemann problem in (rho, u, p)
+    (v is a passive scalar across x-waves); each interior y-interface is a
+    1D Riemann problem in (rho, v, p).  We reuse the 1D Euler Riemann
+    solver from :class:`EulerPDE` on each direction independently.
+
+    ``boundary_speeds_x`` / ``boundary_speeds_y`` return per-interface
+    (speed_right, speed_left) speeds along each axis.
+    """
+
+    num_vars = 4
+    num_physics_features = 9
+    output_dim = 4
+    output_clamp = None
+    spatial_dims = 2
+
+    def __init__(
+        self,
+        gamma: float = 1.4,
+        eps: float = 1e-6,
+        n_newton: int = 20,
+    ):
+        super().__init__(gamma=gamma, eps=eps, n_newton=n_newton)
+
+    def physics_features(
+        self, ic_data: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Return ``(B, Kx, Ky, 9)`` per-tile feature tensor."""
+        rho = ic_data["ks"]  # (B, Kx, Ky)
+        u = ic_data["ks_u"]
+        v = ic_data["ks_v"]
+        p = ic_data["ks_p"]
+        c = self._sound_speed(rho, p)
+        lam1_x = u - c
+        lam3_x = u + c
+        lam1_y = v - c
+        lam3_y = v + c
+        return torch.stack(
+            [rho, u, v, p, c, lam1_x, lam3_x, lam1_y, lam3_y], dim=-1
+        )
+
+    def boundary_speeds(self, ic_data):  # pragma: no cover — 2D API
+        raise NotImplementedError(
+            "Euler2DPDE exposes boundary_speeds_x / boundary_speeds_y "
+            "instead of the 1D boundary_speeds API."
+        )
+
+    def _riemann_speeds_along_axis(
+        self,
+        rho_L: torch.Tensor,
+        vel_L: torch.Tensor,
+        p_L: torch.Tensor,
+        rho_R: torch.Tensor,
+        vel_R: torch.Tensor,
+        p_R: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Shared 1D Riemann → (speed_right, speed_left) per interface.
+
+        ``vel_*`` is the velocity component along the interface normal
+        (``u`` for x-interfaces, ``v`` for y-interfaces).
+        """
+        gamma = self.gamma
+        eps = self.eps
+
+        p_star, _u_star = self._solve_riemann(
+            rho_L, vel_L, p_L, rho_R, vel_R, p_R
+        )
+
+        c_L = self._sound_speed(rho_L, p_L)
+        c_R = self._sound_speed(rho_R, p_R)
+
+        is_1_shock = p_star > p_L
+        is_3_shock = p_star > p_R
+
+        gp1_o_2g = (gamma + 1.0) / (2.0 * gamma)
+        sigma_1 = vel_L - c_L * (
+            1.0 + gp1_o_2g * (p_star / p_L.clamp(min=eps) - 1.0)
+        ).clamp(min=eps).sqrt()
+        lam1_L = vel_L - c_L
+        speed_left = torch.where(is_1_shock, sigma_1, lam1_L)
+
+        sigma_3 = vel_R + c_R * (
+            1.0 + gp1_o_2g * (p_star / p_R.clamp(min=eps) - 1.0)
+        ).clamp(min=eps).sqrt()
+        lam3_R = vel_R + c_R
+        speed_right = torch.where(is_3_shock, sigma_3, lam3_R)
+
+        return speed_right, speed_left
+
+    def boundary_speeds_x(
+        self, ic_data: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """x-interface Riemann speeds.
+
+        Returns ``(speed_right_x, speed_left_x)`` each of shape
+        ``(B, Kx - 1, Ky)``.
+        """
+        rho = ic_data["ks"]    # (B, Kx, Ky)
+        u = ic_data["ks_u"]
+        p = ic_data["ks_p"]
+        return self._riemann_speeds_along_axis(
+            rho[:, :-1, :], u[:, :-1, :], p[:, :-1, :],
+            rho[:, 1:, :], u[:, 1:, :], p[:, 1:, :],
+        )
+
+    def boundary_speeds_y(
+        self, ic_data: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """y-interface Riemann speeds.
+
+        Returns ``(speed_right_y, speed_left_y)`` each of shape
+        ``(B, Kx, Ky - 1)``.
+        """
+        rho = ic_data["ks"]
+        v = ic_data["ks_v"]
+        p = ic_data["ks_p"]
+        return self._riemann_speeds_along_axis(
+            rho[:, :, :-1], v[:, :, :-1], p[:, :, :-1],
+            rho[:, :, 1:], v[:, :, 1:], p[:, :, 1:],
+        )
+
+    def collision_times(self, ic_data):
+        # Skip for 2D; the Euler2DBias module ignores damping anyway
+        # (matches 1D EulerBias which has no collision_times either).
+        return None

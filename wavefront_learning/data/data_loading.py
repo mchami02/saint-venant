@@ -91,7 +91,12 @@ def upload_grids(
     n_samples = grids.shape[0]
 
     config_id = _make_config_id(solver, flux, nx, nt, dx, dt, max_steps, only_shocks)
-    path_prefix = {"Euler": "euler", "ARZ": "arz"}.get(equation, "lwr")
+    path_prefix = {
+        "Euler": "euler",
+        "ARZ": "arz",
+        "Burgers": "burgers",
+        "Euler2D": "euler2d",
+    }.get(equation, "lwr")
     data_path = f"{path_prefix}/{config_id}.npz"
 
     # 1) Save grids and optional IC params locally

@@ -78,13 +78,19 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Equation selection
-    _equation_map = {"lwr": "LWR", "arz": "ARZ", "euler": "Euler"}
+    _equation_map = {
+        "lwr": "LWR",
+        "arz": "ARZ",
+        "euler": "Euler",
+        "burgers": "Burgers",
+        "euler2d": "Euler2D",
+    }
     parser.add_argument(
         "--equation",
         type=lambda s: _equation_map[s.lower()],
         choices=list(_equation_map.values()),
-        metavar="{lwr,arz,euler}",
-        help="Equation system (lwr = scalar traffic, arz = 2-component density+velocity, euler = compressible gas dynamics)",
+        metavar="{lwr,arz,euler,burgers,euler2d}",
+        help="Equation system (lwr = scalar traffic, arz = 2-component density+velocity, euler = 1D compressible gas dynamics, burgers = inviscid Burgers, euler2d = 2D compressible gas dynamics)",
     )
     parser.add_argument(
         "--gamma", type=float, help="ARZ pressure exponent (default: 1.0)"
@@ -132,6 +138,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nt", type=int, help="Time steps")
     parser.add_argument("--dx", type=float, help="Spatial step size")
     parser.add_argument("--dt", type=float, help="Time step size")
+    parser.add_argument(
+        "--ny",
+        type=int,
+        help="Spatial grid points in y (2D equations; defaults to --nx)",
+    )
+    parser.add_argument(
+        "--dy",
+        type=float,
+        help="Spatial step size in y (2D equations; defaults to --dx)",
+    )
     parser.add_argument(
         "--only_shocks",
         action="store_true",

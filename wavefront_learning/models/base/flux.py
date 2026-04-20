@@ -86,6 +86,29 @@ class GreenshieldsFlux(Flux):
         return 1.0 - rho_L - rho_R
 
 
+class BurgersFlux(Flux):
+    """Inviscid Burgers flux: f(u) = u^2 / 2.
+
+    Convex scalar flux.  Characteristic speed: f'(u) = u.
+    Shock speed (analytical Rankine-Hugoniot): s = (u_L + u_R) / 2.
+    Inverse derivative: (f')^{-1}(xi) = xi.
+    """
+
+    def forward(self, u: torch.Tensor) -> torch.Tensor:
+        return 0.5 * u * u
+
+    def derivative(self, u: torch.Tensor) -> torch.Tensor:
+        return u
+
+    def inverse_derivative(self, xi: torch.Tensor) -> torch.Tensor:
+        return xi
+
+    def shock_speed(
+        self, u_L: torch.Tensor, u_R: torch.Tensor
+    ) -> torch.Tensor:
+        return 0.5 * (u_L + u_R)
+
+
 class TriangularFlux(Flux):
     """Triangular flux: f(rho) = min(v_f * rho, w * (1 - rho)).
 
