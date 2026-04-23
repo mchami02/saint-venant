@@ -144,25 +144,22 @@ class ARWaveNO(nn.Module):
             ]
         )
 
-        # Residual output head: produces a delta added to the current row.
+        # Absolute-prediction head (no residual). The residual
+        # parametrisation made training settle at delta=0: because
+        # E[target - last_row] ≈ 0 on a conservative system like LWR
+        # and |target - last_row| is tiny (~0.01 at k=10), the loss
+        # at delta=0 is already tiny, the gradient signal is too weak
+        # for the transformer to escape the init plateau, and
+        # ReduceLROnPlateau cuts the learning rate before useful
+        # features emerge. Absolute prediction sidesteps this: initial
+        # output ~0.5 (Kaiming-default init) → initial loss is large →
+        # strong gradients → fast escape.
         self.output_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, self.output_dim),
         )
-        # Small-scale init on the final weight (not zero) so that delta
-        # starts as a tiny random perturbation rather than identically 0.
-        # Zero-weight-init creates a degenerate point: no gradient flows
-        # back to the transformer on step 1 (dL/d(pre-head) = W^T @ g = 0),
-        # which combined with the small residual-loss signal lets
-        # ReduceLROnPlateau kill the learning rate before the transformer
-        # starts getting useful gradient. Bias stays at 0 so delta has no
-        # systematic offset at init.
-        nn.init.xavier_uniform_(
-            self.output_head[-1].weight, gain=1e-2
-        )
-        nn.init.zeros_(self.output_head[-1].bias)
 
     # -- feature helpers -----------------------------------------------------
 
@@ -322,20 +319,17 @@ class ARWaveNO(nn.Module):
         for layer in self.layers:
             x = layer(x, key_padding_mask=None, attn_mask=attn_mask)
 
-        # Stage 6: residual output — delta added to the last history row.
+        # Stage 6: absolute output head.
         out_tokens = x[:, self.k_in * nx :, :]  # (B, k*nx, H)
-        delta = self.output_head(out_tokens)  # (B, k*nx, output_dim)
-        delta = delta.reshape(B, self.k, nx, self.output_dim).permute(
+        raw = self.output_head(out_tokens)  # (B, k*nx, output_dim)
+        output_grid = raw.reshape(B, self.k, nx, self.output_dim).permute(
             0, 3, 1, 2
         )  # (B, output_dim, k, nx)
-
-        last_row = state_hist[:, :, -1:, :]  # (B, C, 1, nx)
-        output_grid = last_row.expand(-1, -1, self.k, -1) + delta
 
         if self.output_clamp is not None:
             output_grid = output_grid.clamp(*self.output_clamp)
 
-        result = {"output_grid": output_grid, "delta": delta}
+        result = {"output_grid": output_grid}
         if char_bias is not None:
             result["characteristic_bias"] = char_bias
         return result
