@@ -4,7 +4,11 @@ from argparse import Namespace
 
 import torch
 import torch.nn as nn
-from models.ar_waveno import build_ar_waveno_bare, build_ar_waveno_bias
+from models.ar_waveno import (
+    build_ar_waveno_bare,
+    build_ar_waveno_bias,
+    build_ar_waveno_linear,
+)
 from models.autoregressive_fno import (
     build_autoregressive_fno,
     build_autoregressive_real_fno,
@@ -104,6 +108,7 @@ MODELS = {
     "WaveNOCrossAttnOnly": build_waveno_cross_attn_only,
     "ARWaveNOBias": build_ar_waveno_bias,
     "ARWaveNOBare": build_ar_waveno_bare,
+    "ARWaveNOLinear": build_ar_waveno_linear,
     "WaveNOFull": build_waveno_full,
     "WaveNOFullBase": build_waveno_full_base,
     "WaveNOFullCls": build_waveno_full_cls,

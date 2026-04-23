@@ -27,6 +27,7 @@ import torch.nn as nn
 
 from .base.characteristic_features import SegmentPhysicsEncoder
 from .base.feature_encoders import FourierFeatures
+from .base.linear_bias import LinearBias
 from .base.pde import ARZPDE, LWRPDE, PDE, BurgersPDE, EulerPDE
 from .base.pde_bias import PDEBias
 from .base.self_attention_biased import BiasedSelfAttentionLayer
@@ -66,6 +67,8 @@ class ARWaveNO(nn.Module):
         num_heads: int = 4,
         pde: PDE | None = None,
         encoder_pde: PDE | None = None,
+        bias_kind: str = "pde",
+        linear_bias_initial_scale: float = 1.0,
         dropout: float = 0.05,
         output_dim: int | None = None,
         output_clamp: tuple[float, float] | None | str = "auto",
@@ -76,6 +79,7 @@ class ARWaveNO(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.pde = pde
+        self.bias_kind = bias_kind
 
         # Derive output config from PDE metadata (matches WaveNO's pattern).
         seg_pde = encoder_pde if encoder_pde is not None else (pde or LWRPDE())
@@ -125,12 +129,20 @@ class ARWaveNO(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        # Riemann-problem bias (optional).
-        if pde is not None:
-            self.pde_bias = PDEBias(
-                pde=pde,
-                use_damping=False,
+        # Attention bias module. Semantically a drop-in: bias(ic_data,
+        # (t_coords, x_coords)) -> (B, k, nx, K). Variants:
+        #   - "pde": Riemann-problem bias (requires pde != None).
+        #   - "linear": spatial-distance bias (ALiBi-style).
+        #   - anything else / pde=None + kind!="linear": no bias (bare).
+        self.bias_module: nn.Module | None
+        if bias_kind == "pde" and pde is not None:
+            self.bias_module = PDEBias(pde=pde, use_damping=False)
+        elif bias_kind == "linear":
+            self.bias_module = LinearBias(
+                initial_scale=linear_bias_initial_scale
             )
+        else:
+            self.bias_module = None
 
         # Self-attention stack.
         self.layers = nn.ModuleList(
@@ -257,8 +269,8 @@ class ARWaveNO(nn.Module):
         # Stage 4: build the self-attention bias sub-block.
         char_bias = None
         attn_mask = None
-        if self.pde is not None:
-            char_bias = self.pde_bias(
+        if self.bias_module is not None:
+            char_bias = self.bias_module(
                 ic_data, (t_coords, x_coords)
             )  # (B, k, nx, nx) — (*, cell) per-query bias
             sub = char_bias.reshape(B, Q, nx)  # (B, k*nx, nx)
@@ -337,6 +349,8 @@ def _build_ar_waveno(args: dict, **flag_overrides) -> ARWaveNO:
         num_heads=args.get("num_heads", 4),
         pde=pde,
         encoder_pde=encoder_pde,
+        bias_kind=args.get("bias_kind", "pde"),
+        linear_bias_initial_scale=args.get("linear_bias_initial_scale", 1.0),
         dropout=args.get("dropout", 0.05),
         output_dim=encoder_pde.output_dim,
         output_clamp=encoder_pde.output_clamp,
@@ -347,9 +361,18 @@ def _build_ar_waveno(args: dict, **flag_overrides) -> ARWaveNO:
 
 def build_ar_waveno_bias(args: dict) -> ARWaveNO:
     """Factory: ARWaveNO with Riemann-problem bias (from input state row)."""
-    return _build_ar_waveno(args)
+    return _build_ar_waveno(args, bias_kind="pde")
 
 
 def build_ar_waveno_bare(args: dict) -> ARWaveNO:
     """Factory: ARWaveNO without bias (ablation baseline)."""
-    return _build_ar_waveno(args, pde=None)
+    return _build_ar_waveno(args, pde=None, bias_kind="none")
+
+
+def build_ar_waveno_linear(args: dict) -> ARWaveNO:
+    """Factory: ARWaveNO with a linear spatial-distance bias (ablation).
+
+    Tests whether *any* distance-decaying attention bias helps, or if
+    the physics-specific Riemann structure is what's doing the work.
+    """
+    return _build_ar_waveno(args, pde=None, bias_kind="linear")
