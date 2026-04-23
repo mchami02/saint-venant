@@ -99,18 +99,19 @@ def eval_ar_rollout(
             B, C, _, nx = full_target.shape
 
             pred = torch.zeros_like(full_target)
-            pred[:, :, 0, :] = full_target[:, :, 0, :]
-
-            # Seed history buffer: IC replicated k_in times along time.
-            ic_row = pred[:, :, 0, :]  # (B, C, nx)
-            history = ic_row.unsqueeze(2).expand(B, C, k_in, nx).clone()
+            # Seed with the first k_in rows of the true trajectory — these
+            # are considered "given" (t=0 is the IC, and rows 1..k_in-1
+            # are the history we assume we've observed). Rollout predicts
+            # from t = k_in onwards.
+            pred[:, :, :k_in, :] = full_target[:, :, :k_in, :]
+            history = pred[:, :, :k_in, :].clone()
 
             block_input = dict(batch_input)
 
             _sync_device(device)
             start_time = time.perf_counter()
 
-            t0 = 0
+            t0 = k_in - 1  # last seeded row index
             while t0 < nt - 1:
                 t_end = min(t0 + k, nt - 1)
                 k_actual = t_end - t0
@@ -118,19 +119,11 @@ def eval_ar_rollout(
                 out = model(block_input)["output_grid"]  # (B, C, k, nx)
                 pred[:, :, t0 + 1 : t_end + 1, :] = out[:, :, :k_actual, :]
 
-                # Update history: last k_in rows of predictions stitched
-                # up to and including t_end.
-                if t_end + 1 >= k_in:
-                    history = pred[
-                        :, :, t_end + 1 - k_in : t_end + 1, :
-                    ].clone()
-                else:
-                    # Not enough predicted rows yet -- pad remaining with IC.
-                    have = t_end + 1
-                    pad = k_in - have
-                    ic_pad = ic_row.unsqueeze(2).expand(B, C, pad, nx).clone()
-                    tail = pred[:, :, :t_end + 1, :].clone()
-                    history = torch.cat([ic_pad, tail], dim=2)
+                # Next block's history = last k_in rows of the stitched
+                # prediction up to t_end.
+                history = pred[
+                    :, :, t_end + 1 - k_in : t_end + 1, :
+                ].clone()
 
                 t0 = t_end
 

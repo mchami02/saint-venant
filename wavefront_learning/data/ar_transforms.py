@@ -52,35 +52,28 @@ class ARBlockTransform:
             f"ARBlockTransform needs k_in >= 1, got {self.k_in}"
         )
 
-        # Valid t_start range: [0, nt - k_out - 1]. When t_start < k_in-1
-        # we need to pad the earliest history rows with the IC (matches
-        # how `eval_ar_rollout` seeds the first block at rollout start).
-        # This exposes the model to the rollout distribution during
-        # training and prevents the "collapse to IC" failure at rollout.
+        # Valid t_start range: [k_in - 1, nt - k_out - 1] so both the
+        # history block and the target block stay inside the grid.
+        # (Rollout seeds its own history buffer from the first k_in
+        # rows of the real trajectory — see ``eval_ar_rollout`` — so no
+        # IC-padding is needed at training time.)
+        lo = self.k_in - 1
         hi = nt_actual - self.k_out - 1
+        assert hi >= lo, (
+            f"ARBlockTransform: k_in+k_out too large for nt "
+            f"(k_in={self.k_in}, k_out={self.k_out}, nt={self.nt})"
+        )
 
         if self.mode == "random":
-            t_start = int(torch.randint(0, hi + 1, (1,)).item())
+            t_start = int(torch.randint(lo, hi + 1, (1,)).item())
         elif self.mode == "fixed0":
-            t_start = 0
-        else:  # rollout: start at IC and pad history
-            t_start = 0
+            t_start = lo
+        else:  # rollout: starts after the first k_in rows of the grid
+            t_start = lo
 
-        # Build state_hist (C, k_in, nx) with IC-padding at the start
-        # when t_start < k_in - 1.
-        n_real = min(self.k_in, t_start + 1)  # number of real rows
-        n_pad = self.k_in - n_real  # number of IC-padded rows (>= 0)
-        ic_row = target_grid[:, 0, :]  # (C, nx)
-        if n_pad > 0:
-            pad_block = ic_row.unsqueeze(1).expand(C, n_pad, nx).clone()
-            real_block = target_grid[
-                :, t_start - n_real + 1 : t_start + 1, :
-            ].clone()
-            state_hist = torch.cat([pad_block, real_block], dim=1)
-        else:
-            state_hist = target_grid[
-                :, t_start - self.k_in + 1 : t_start + 1, :
-            ].clone()
+        state_hist = target_grid[
+            :, t_start - self.k_in + 1 : t_start + 1, :
+        ].clone()  # (C, k_in, nx)
 
         block_target = target_grid[
             :, t_start + 1 : t_start + 1 + self.k_out, :
