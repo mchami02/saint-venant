@@ -151,9 +151,17 @@ class ARWaveNO(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, self.output_dim),
         )
-        # Zero-init the final layer so the initial prediction is an
-        # identity carry-over of the last history row (delta = 0).
-        nn.init.zeros_(self.output_head[-1].weight)
+        # Small-scale init on the final weight (not zero) so that delta
+        # starts as a tiny random perturbation rather than identically 0.
+        # Zero-weight-init creates a degenerate point: no gradient flows
+        # back to the transformer on step 1 (dL/d(pre-head) = W^T @ g = 0),
+        # which combined with the small residual-loss signal lets
+        # ReduceLROnPlateau kill the learning rate before the transformer
+        # starts getting useful gradient. Bias stays at 0 so delta has no
+        # systematic offset at init.
+        nn.init.xavier_uniform_(
+            self.output_head[-1].weight, gain=1e-2
+        )
         nn.init.zeros_(self.output_head[-1].bias)
 
     # -- feature helpers -----------------------------------------------------
