@@ -8,6 +8,8 @@ from functools import partial
 
 import torch
 
+from data.ar_transforms import ARBlockTransform
+
 
 class FlattenDiscontinuitiesTransform:
     """Transform that flattens discontinuity data into a single tensor.
@@ -284,4 +286,5 @@ TRANSFORMS = {
     "DiscretizeIC": DiscretizeICTransform,
     "LDDeepONet": LDDeepONetTransform,
     "CellSampling": CellSamplingTransform,
+    "ARBlock": ARBlockTransform,
 }

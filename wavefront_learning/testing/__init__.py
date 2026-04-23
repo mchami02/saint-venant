@@ -5,6 +5,8 @@ Submodules:
 - test_results: Evaluation metrics, sample collection, and performance measurement
 """
 
+from testing.ar_rollout import eval_ar_rollout
+from testing.cvae_testing import collect_cvae_samples, multi_sample_predict
 from testing.test_results import (
     collect_samples,
     eval_high_res,
@@ -14,12 +16,12 @@ from testing.test_results import (
     eval_steps,
     test_model,
 )
-from testing.cvae_testing import collect_cvae_samples, multi_sample_predict
 from testing.test_running import run_inference, run_profiler, run_sanity_check
 
 __all__ = [
     "collect_cvae_samples",
     "collect_samples",
+    "eval_ar_rollout",
     "eval_high_res",
     "eval_inference_time",
     "eval_model",

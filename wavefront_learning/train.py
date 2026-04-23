@@ -399,6 +399,11 @@ def main():
         grid_config["ny"] = getattr(args, "ny", None) or args.nx
         grid_config["dy"] = getattr(args, "dy", None) or args.dx
 
+    # ARWaveNO block config — consumed by ARBlockTransform via grid_config.
+    if args.model in ("ARWaveNOBias", "ARWaveNOBare"):
+        grid_config["ar_block_k"] = args.ar_block_k
+        grid_config["ar_t_start_mode"] = args.ar_t_start_mode
+
     # Auto-swap 1D models to their 2D variant when a 2D equation is selected.
     if is_2d_equation(args.equation) and args.model in DIM2_MODEL_MAP:
         swapped = DIM2_MODEL_MAP[args.model]

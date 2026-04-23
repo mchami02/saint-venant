@@ -524,6 +524,24 @@ def test_model(
     if logger is not None:
         logger.log_summary({f"test/inference_time/{k}": v for k, v in timing.items()})
 
+    # --- AR rollout evaluation (ARWaveNO-family only) ---
+    if getattr(model, "is_autoregressive_block", False):
+        from testing.ar_rollout import eval_ar_rollout
+
+        print("\nRunning full-grid autoregressive rollout...")
+        roll = eval_ar_rollout(
+            model=model, args=args, device=device, grid_config=grid_config
+        )
+        print("\nRollout Results:")
+        print("-" * 40)
+        for key, value in roll.items():
+            print(f"  {key}: {value:.6f}")
+        print("-" * 40)
+        if logger is not None:
+            logger.log_summary({f"test/{k}": v for k, v in roll.items()})
+        # Skip high-res + step-count for AR models — fixed k makes them ill-defined.
+        return metrics
+
     # --- High-resolution evaluation ---
     max_high_res = getattr(args, "max_high_res", 5)
     print(f"\nRunning high-resolution evaluation (2x..{max_high_res}x)...")

@@ -4,6 +4,7 @@ from argparse import Namespace
 
 import torch
 import torch.nn as nn
+from models.ar_waveno import build_ar_waveno_bare, build_ar_waveno_bias
 from models.autoregressive_fno import (
     build_autoregressive_fno,
     build_autoregressive_real_fno,
@@ -13,12 +14,12 @@ from models.charno import build_charno
 from models.ctt_seg import build_ctt_seg
 from models.cvae_deeponet import build_cvae_deeponet
 from models.deeponet import build_deeponet
+from models.deeponet_2d import build_deeponet_2d
 from models.encoder_decoder import (
     build_ecarz,
     build_encoder_decoder,
     build_encoder_decoder_cross,
 )
-from models.deeponet_2d import build_deeponet_2d
 from models.fno_2d import build_fno_2d
 from models.fno_wrapper import build_fno
 from models.godunov import build_godunov
@@ -101,6 +102,8 @@ MODELS = {
     "WaveNOAll": build_waveno_all,
     "WaveNOFiLMOnly": build_waveno_film_only,
     "WaveNOCrossAttnOnly": build_waveno_cross_attn_only,
+    "ARWaveNOBias": build_ar_waveno_bias,
+    "ARWaveNOBare": build_ar_waveno_bare,
     "WaveNOFull": build_waveno_full,
     "WaveNOFullBase": build_waveno_full_base,
     "WaveNOFullCls": build_waveno_full_cls,

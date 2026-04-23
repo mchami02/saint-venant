@@ -313,6 +313,21 @@ def parse_args() -> argparse.Namespace:
         help="Number of random query points per FV cell (0 = disabled)",
     )
 
+    # ARWaveNO block prediction
+    parser.add_argument(
+        "--ar_block_k",
+        type=int,
+        default=1,
+        help="Number of rows ARWaveNO predicts per forward pass",
+    )
+    parser.add_argument(
+        "--ar_t_start_mode",
+        type=str,
+        default="random",
+        choices=["random", "fixed0"],
+        help="Training-time t_start sampling mode for ARBlockTransform",
+    )
+
     # Transform override
     parser.add_argument(
         "--transform",

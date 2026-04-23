@@ -43,6 +43,8 @@ model_plot_preset:
   WaveNOAll: grid_minimal
   WaveNOFiLMOnly: grid_minimal
   WaveNOCrossAttnOnly: grid_minimal
+  ARWaveNOBias: grid_minimal
+  ARWaveNOBare: grid_minimal
   TransformerSeg: grid_minimal
   WaveFrontModel: wavefront
   CVAEDeepONet: cvae
@@ -80,6 +82,8 @@ model_transform:
   WaveNOAll: null
   WaveNOFiLMOnly: null
   WaveNOCrossAttnOnly: null
+  ARWaveNOBias: ARBlock
+  ARWaveNOBare: ARBlock
   WaveNOFull: null
   WaveNOFullBase: null
   WaveNOFullCls: null
