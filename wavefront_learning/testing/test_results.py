@@ -507,10 +507,14 @@ def test_model(
         print(f"  {key}: {value:.6f}")
     print("-" * 40)
 
-    # Log to W&B and plot
+    # Log to W&B. Plot only for non-AR models here — AR models render the
+    # full stitched rollout further down (plotting k-row blocks with a
+    # full-nt extent produces misleading "IC-everywhere" heatmaps).
+    is_ar = getattr(model, "is_autoregressive_block", False)
     if logger is not None:
         logger.log_summary({f"test/metrics/{k}": v for k, v in metrics.items()})
-        plot(samples, grid_config, logger, epoch=None, mode="test", preset=plot_preset)
+        if not is_ar:
+            plot(samples, grid_config, logger, epoch=None, mode="test", preset=plot_preset)
 
     # --- Inference time ---
     timing = eval_inference_time(model, test_loader, device)
@@ -525,13 +529,14 @@ def test_model(
         logger.log_summary({f"test/inference_time/{k}": v for k, v in timing.items()})
 
     # --- AR rollout evaluation (ARWaveNO-family only) ---
-    if getattr(model, "is_autoregressive_block", False):
+    if is_ar:
         from testing.ar_rollout import eval_ar_rollout
 
         print("\nRunning full-grid autoregressive rollout...")
         roll = eval_ar_rollout(
             model=model, args=args, device=device, grid_config=grid_config
         )
+        rollout_samples = roll.pop("samples", None)
         print("\nRollout Results:")
         print("-" * 40)
         for key, value in roll.items():
@@ -539,6 +544,15 @@ def test_model(
         print("-" * 40)
         if logger is not None:
             logger.log_summary({f"test/{k}": v for k, v in roll.items()})
+            if rollout_samples is not None:
+                plot(
+                    rollout_samples,
+                    grid_config,
+                    logger,
+                    epoch=None,
+                    mode="test",
+                    preset=plot_preset,
+                )
         # Skip high-res + step-count for AR models — fixed k makes them ill-defined.
         return metrics
 

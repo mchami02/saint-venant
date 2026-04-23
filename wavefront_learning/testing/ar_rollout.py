@@ -86,6 +86,8 @@ def eval_ar_rollout(
 
     all_mse: list[float] = []
     all_times_per_sample: list[float] = []
+    last_pred: torch.Tensor | None = None
+    last_target: torch.Tensor | None = None
 
     with torch.no_grad():
         for batch_input, _ in tqdm(rollout_loader, desc="Rollout"):
@@ -120,7 +122,29 @@ def eval_ar_rollout(
             all_mse.extend(sq_err.detach().cpu().tolist())
             all_times_per_sample.append(elapsed_ms / B)
 
-    return {
+            last_pred = pred.detach()
+            last_target = full_target.detach()
+
+    result: dict = {
         "rollout_mse": float(np.mean(all_mse)),
         "rollout_time_ms": float(np.mean(all_times_per_sample)),
     }
+
+    # Build plot-ready samples from the last batch — these carry full
+    # (nt, nx) stitched predictions + ground truth so the standard
+    # plot_ground_truth / plot_pred functions render a real trajectory
+    # (not a single block stretched by imshow's extent).
+    if last_pred is not None and last_target is not None:
+        num_plots = 3
+        pred_np = last_pred[:num_plots].cpu().numpy()
+        tgt_np = last_target[:num_plots].cpu().numpy()
+        # Squeeze single-channel (LWR) like collect_samples does.
+        if pred_np.ndim == 4 and pred_np.shape[1] == 1:
+            pred_np = pred_np.squeeze(1)
+        if tgt_np.ndim == 4 and tgt_np.shape[1] == 1:
+            tgt_np = tgt_np.squeeze(1)
+        result["samples"] = {
+            "output_grid": pred_np,
+            "grids": tgt_np,
+        }
+    return result

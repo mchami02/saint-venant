@@ -591,7 +591,10 @@ def plot_mse_error(
         grid_config["dx"],
         grid_config["dt"],
     )
-    extent = _get_extent(nx, nt, dx, dt)
+    # Use actual array shape for the y-axis extent so a k-row block
+    # prediction (AR models) is not stretched over the full nt·dt range.
+    actual_nt = output_grid.shape[-2]
+    extent = _get_extent(nx, actual_nt, dx, dt)
 
     B = output_grid.shape[0]
     figures = []

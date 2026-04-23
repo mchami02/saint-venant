@@ -496,7 +496,10 @@ def plot_ground_truth(
         grid_config["dx"],
         grid_config["dt"],
     )
-    extent = _get_extent(nx, nt, dx, dt)
+    # Use actual array shape for the y-axis extent so a k-row block
+    # prediction (AR models) is not stretched over the full nt·dt range.
+    actual_nt = grids.shape[-2]
+    extent = _get_extent(nx, actual_nt, dx, dt)
 
     B = grids.shape[0]
     figures = []
@@ -549,7 +552,10 @@ def plot_pred(
         grid_config["dx"],
         grid_config["dt"],
     )
-    extent = _get_extent(nx, nt, dx, dt)
+    # Use actual array shape for the y-axis extent so a k-row block
+    # prediction (AR models) is not stretched over the full nt·dt range.
+    actual_nt = output_grid.shape[-2]
+    extent = _get_extent(nx, actual_nt, dx, dt)
 
     B = output_grid.shape[0]
     figures = []
