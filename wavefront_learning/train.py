@@ -402,6 +402,7 @@ def main():
     # ARWaveNO block config — consumed by ARBlockTransform via grid_config.
     if args.model in ("ARWaveNOBias", "ARWaveNOBare", "ARWaveNOLinear"):
         grid_config["ar_block_k"] = args.ar_block_k
+        grid_config["ar_hist_k"] = args.ar_hist_k
         grid_config["ar_t_start_mode"] = args.ar_t_start_mode
 
     # Auto-swap 1D models to their 2D variant when a 2D equation is selected.

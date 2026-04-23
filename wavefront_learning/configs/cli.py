@@ -321,6 +321,15 @@ def parse_args() -> argparse.Namespace:
         help="Number of rows ARWaveNO predicts per forward pass",
     )
     parser.add_argument(
+        "--ar_hist_k",
+        type=int,
+        default=-1,
+        help=(
+            "ARWaveNO input history length (k_in). "
+            "-1 means use --ar_block_k (matched input/output)."
+        ),
+    )
+    parser.add_argument(
         "--ar_t_start_mode",
         type=str,
         default="random",

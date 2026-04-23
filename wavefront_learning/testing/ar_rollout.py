@@ -1,10 +1,10 @@
 """Full-grid rollout evaluation for ARWaveNO-family models.
 
-Builds a dedicated test loader whose ``ARBlockTransform`` is in
-``rollout`` mode (puts the full ground-truth grid under
-``full_target_grid``), then stitches ``k``-row block predictions into a
-complete ``(nt, nx)`` grid, computes MSE against the truth, and reports
-per-sample rollout wall-clock.
+Maintains a running history buffer of the last ``k_in`` rows (starting
+with the IC replicated) and feeds it to the model each block, stitching
+``k``-row predictions into a complete ``(nt, nx)`` grid. Reports
+per-sample rollout MSE + wall-clock plus plot-ready samples from the
+last batch.
 """
 
 import time
@@ -37,20 +37,23 @@ def eval_ar_rollout(
     """Run a full-grid autoregressive rollout and report MSE + timing.
 
     Args:
-        model: Trained ARWaveNO-family model with ``.k`` attribute.
-        args: Training arguments (nx/nt/dx/dt, equation, batch_size, ...).
+        model: Trained ARWaveNO-family model with ``.k`` and ``.k_in``.
+        args: Training arguments.
         device: Computation device.
         grid_config: Grid configuration. Augmented here with
             ``ar_t_start_mode="rollout"`` so the transform attaches the
             full grid under ``full_target_grid``.
 
     Returns:
-        ``{"rollout_mse": ..., "rollout_time_ms": ...}`` (batch-average
-        wall-clock, per-sample MSE averaged over the test set).
+        ``{"rollout_mse", "rollout_time_ms", "samples"}``.
     """
+    k = model.k
+    k_in = getattr(model, "k_in", k)
+
     rollout_config = {
         **grid_config,
-        "ar_block_k": int(getattr(args, "ar_block_k", model.k)),
+        "ar_block_k": int(getattr(args, "ar_block_k", k)),
+        "ar_hist_k": int(getattr(args, "ar_hist_k", k_in)),
         "ar_t_start_mode": "rollout",
     }
 
@@ -81,7 +84,6 @@ def eval_ar_rollout(
     )
 
     model.eval()
-    k = model.k
     nt = int(grid_config["nt"])
 
     all_mse: list[float] = []
@@ -94,11 +96,14 @@ def eval_ar_rollout(
             batch_input = _to_device(batch_input, device)
 
             full_target = batch_input["full_target_grid"]  # (B, C, nt, nx)
-            B = full_target.shape[0]
+            B, C, _, nx = full_target.shape
 
             pred = torch.zeros_like(full_target)
             pred[:, :, 0, :] = full_target[:, :, 0, :]
-            state = pred[:, :, 0, :].clone()  # (B, C, nx)
+
+            # Seed history buffer: IC replicated k_in times along time.
+            ic_row = pred[:, :, 0, :]  # (B, C, nx)
+            history = ic_row.unsqueeze(2).expand(B, C, k_in, nx).clone()
 
             block_input = dict(batch_input)
 
@@ -109,10 +114,24 @@ def eval_ar_rollout(
             while t0 < nt - 1:
                 t_end = min(t0 + k, nt - 1)
                 k_actual = t_end - t0
-                block_input["state_row"] = state
+                block_input["state_hist"] = history
                 out = model(block_input)["output_grid"]  # (B, C, k, nx)
                 pred[:, :, t0 + 1 : t_end + 1, :] = out[:, :, :k_actual, :]
-                state = pred[:, :, t_end, :].clone()
+
+                # Update history: last k_in rows of predictions stitched
+                # up to and including t_end.
+                if t_end + 1 >= k_in:
+                    history = pred[
+                        :, :, t_end + 1 - k_in : t_end + 1, :
+                    ].clone()
+                else:
+                    # Not enough predicted rows yet -- pad remaining with IC.
+                    have = t_end + 1
+                    pad = k_in - have
+                    ic_pad = ic_row.unsqueeze(2).expand(B, C, pad, nx).clone()
+                    tail = pred[:, :, :t_end + 1, :].clone()
+                    history = torch.cat([ic_pad, tail], dim=2)
+
                 t0 = t_end
 
             _sync_device(device)
@@ -130,15 +149,10 @@ def eval_ar_rollout(
         "rollout_time_ms": float(np.mean(all_times_per_sample)),
     }
 
-    # Build plot-ready samples from the last batch — these carry full
-    # (nt, nx) stitched predictions + ground truth so the standard
-    # plot_ground_truth / plot_pred functions render a real trajectory
-    # (not a single block stretched by imshow's extent).
     if last_pred is not None and last_target is not None:
         num_plots = 3
         pred_np = last_pred[:num_plots].cpu().numpy()
         tgt_np = last_target[:num_plots].cpu().numpy()
-        # Squeeze single-channel (LWR) like collect_samples does.
         if pred_np.ndim == 4 and pred_np.shape[1] == 1:
             pred_np = pred_np.squeeze(1)
         if tgt_np.ndim == 4 and tgt_np.shape[1] == 1:
